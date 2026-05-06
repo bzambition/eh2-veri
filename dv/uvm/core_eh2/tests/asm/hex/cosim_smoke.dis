@@ -1,0 +1,11 @@
+
+hex/cosim_smoke.elf：     文件格式 elf32-littleriscv
+
+
+Disassembly of section .text:
+
+80000000 <_start>:
+80000000:	d05802b7          	lui	t0,0xd0580
+80000004:	0ff00313          	li	t1,255
+80000008:	0062a023          	sw	t1,0(t0) # d0580000 <_stack_top+0x5057fff0>
+8000000c:	a001                	j	8000000c <_start+0xc>

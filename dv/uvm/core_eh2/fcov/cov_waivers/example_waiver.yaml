@@ -1,0 +1,14 @@
+# Example coverage waiver file.
+# Copy this file and replace the fields with your waiver details.
+
+waiver:
+  name: "Example: CSR write during divide stall"
+  coverage_point: "uarch_cg.stall_cross"
+  reason: >
+    CSR writes and divide operations cannot overlap because the divider
+    holds the pipeline and CSR accesses require a presync stall that
+    serializes execution. This cross bin is architecturally unreachable.
+  author: "verification-lead"
+  date: "2026-05-05"
+  ticket: ""
+  status: "active"

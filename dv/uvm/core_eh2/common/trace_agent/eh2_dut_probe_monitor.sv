@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: Apache-2.0
+// EH2 DUT Probe Monitor — async writeback events only.
+//
+// Phase 1 (ADR-0004) note: regular pipeline writebacks now ride along the
+// trace channel inside eh2_trace_seq_item.wb_*. This monitor exists only to
+// surface async events that the trace packet cannot describe in time:
+//   - DIV writeback / DIV cancel (long latency, separate writeback port)
+//   - Non-blocking load completion (writeback arrives after retire)
+//
+// The cosim scoreboard treats these as overrides/suppressions for the
+// matching trace item.
+
+class eh2_dut_probe_monitor extends uvm_monitor;
+
+  `uvm_component_utils(eh2_dut_probe_monitor)
+
+  virtual eh2_dut_probe_intf vif;
+  uvm_analysis_port #(eh2_trace_seq_item) ap;
+
+  int wb_count;
+
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+
+  function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    ap = new("ap", this);
+  endfunction
+
+  function void connect_phase(uvm_phase phase);
+    super.connect_phase(phase);
+    if (!uvm_config_db#(virtual eh2_dut_probe_intf)::get(this, "", "vif", vif)) begin
+      `uvm_warning("dut_probe", "Could not get DUT probe virtual interface - async writeback monitoring disabled")
+    end
+  endfunction
+
+  task run_phase(uvm_phase phase);
+    if (vif != null) begin
+      fork
+        monitor_division();
+        monitor_nb_load();
+      join
+    end
+  endtask
+
+  // Monitor DIV writebacks and DIV-cancel events.
+  task monitor_division();
+    eh2_trace_seq_item txn;
+
+    forever begin
+      @(posedge vif.clk iff vif.rst_n);
+
+      if (vif.div_wren && vif.div_rd != 5'b0) begin
+        txn = eh2_trace_seq_item::type_id::create("div_wb_txn");
+        txn.slot      = 0;  // Divides are i0-only
+        txn.wb_valid  = 1;
+        txn.wb_dest   = vif.div_rd;
+        txn.wb_data   = vif.div_wdata;
+        txn.wb_source = EH2_WB_SRC_DIV;
+        ap.write(txn);
+        `uvm_info("dut_probe", $sformatf("DIV WB: x%0d = %08x",
+          vif.div_rd, vif.div_wdata), UVM_HIGH)
+        wb_count++;
+      end
+      else if (vif.div_cancel && vif.div_cancel_overwrite && vif.div_rd != 5'b0) begin
+        // Only forward "overwrite" cancels: these pair with a retired div
+        // trace whose architectural writeback was killed by a younger same-rd
+        // write. Speculative-flush cancels (no matching trace) are dropped.
+        txn = eh2_trace_seq_item::type_id::create("div_cancel_txn");
+        txn.slot        = 0;
+        txn.wb_valid    = 1;
+        txn.wb_dest     = vif.div_rd;
+        txn.wb_data     = vif.div_result;
+        txn.wb_suppress = 1;
+        txn.wb_source   = EH2_WB_SRC_DIV;
+        ap.write(txn);
+        `uvm_info("dut_probe", $sformatf("DIV OVERWRITE-CANCEL: x%0d = %08x",
+          vif.div_rd, vif.div_result), UVM_HIGH)
+        wb_count++;
+      end
+      else if (vif.div_cancel && !vif.div_cancel_overwrite) begin
+        `uvm_info("dut_probe", $sformatf(
+          "DIV SPEC-CANCEL: x%0d (dropped, no paired trace)",
+          vif.div_rd), UVM_HIGH)
+      end
+    end
+  endtask
+
+  // Monitor non-blocking load completions.
+  task monitor_nb_load();
+    eh2_trace_seq_item txn;
+
+    forever begin
+      @(posedge vif.clk iff vif.rst_n);
+
+      if (vif.nb_load_wen && vif.nb_load_waddr != 5'b0) begin
+        txn = eh2_trace_seq_item::type_id::create("nb_load_txn");
+        txn.slot      = 0;
+        txn.wb_valid  = 1;
+        txn.wb_dest   = vif.nb_load_waddr;
+        txn.wb_data   = vif.nb_load_data;
+        txn.wb_source = EH2_WB_SRC_NB_LOAD;
+        ap.write(txn);
+        `uvm_info("dut_probe", $sformatf("NB LOAD: x%0d = %08x",
+          vif.nb_load_waddr, vif.nb_load_data), UVM_HIGH)
+        wb_count++;
+      end
+    end
+  endtask
+
+  function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    `uvm_info("dut_probe", "=== DUT Probe Statistics (async only) ===", UVM_LOW)
+    `uvm_info("dut_probe", $sformatf("Total async writebacks: %0d", wb_count), UVM_LOW)
+  endfunction
+
+endclass

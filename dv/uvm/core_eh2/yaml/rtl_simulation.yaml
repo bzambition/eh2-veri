@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: Apache-2.0
+# EH2 RTL Simulation Configuration
+#
+# Defines compile and simulation commands for each simulator.
+# Uses template variables: <tb_dir>, <build_dir>, <seed>, <binary>,
+# <rtl_test>, <sim_opts>, <cov_opts>, <wave_opts>
+
+# ---------------------------------------------------------------------------
+# VCS
+# ---------------------------------------------------------------------------
+vcs:
+  compile:
+    cmd: >
+      vcs -full64 -sverilog -ntb_opts uvm-1.2
+      -f <tb_dir>/eh2_rtl.f
+      -f <tb_dir>/eh2_shared.f
+      -f <tb_dir>/eh2_tb.f
+      -top core_eh2_tb_top
+      -o <build_dir>/simv
+      +define+UVM_NO_DEPRECATED
+      +incdir+<tb_dir>/common/axi4_agent
+      +incdir+<tb_dir>/common/trace_agent
+      +incdir+<tb_dir>/common/irq_agent
+      +incdir+<tb_dir>/common/jtag_agent
+      +incdir+<tb_dir>/common/cosim_agent
+      -l <build_dir>/compile.log
+    cov_opts: "-cm line+cond+fsm+tgl+assert -cm_dir <build_dir>/cov"
+    wave_opts: "-debug_access+all -kdb"
+    cosim_opts: >-
+      -f <tb_dir>/eh2_dv_cosim_dpi.f
+      -LDFLAGS '<ISS_LDFLAGS>'
+      -CFLAGS '<ISS_CFLAGS> <EXTRA_COSIM_CFLAGS>'
+      -CFLAGS '-I<tb_dir>/../../cosim'
+      <ISS_LIBS>
+      -lstdc++
+
+  sim:
+    cmd: >
+      <build_dir>/simv
+      +UVM_TESTNAME=<rtl_test>
+      +bin=<binary>
+      +seed=<seed>
+      +timeout_ns=<timeout>
+      <sim_opts>
+      -l <out_dir>/sim_<test>_<seed>.log
+      +UVM_VERBOSITY=<uvm_verbosity>
+    cov_opts: "+enable_eh2_fcov=1 -cm line+cond+fsm+tgl+assert -cm_dir <build_dir>/cov"
+    wave_opts: >-
+      -ucli
+      -do <tb_dir>/vcs.tcl
+
+# ---------------------------------------------------------------------------
+# Xcelium
+# ---------------------------------------------------------------------------
+xlm:
+  compile:
+    cmd: >
+      xrun -uvm -sv
+      -f <tb_dir>/eh2_rtl.f
+      -f <tb_dir>/eh2_shared.f
+      -f <tb_dir>/eh2_tb.f
+      -top core_eh2_tb_top
+      +incdir+<tb_dir>/common/axi4_agent
+      +incdir+<tb_dir>/common/trace_agent
+      +incdir+<tb_dir>/common/irq_agent
+      +incdir+<tb_dir>/common/jtag_agent
+      +incdir+<tb_dir>/common/cosim_agent
+      -l <build_dir>/compile.log
+    cov_opts: "-covoverwrite -covfile <tb_dir>/cov.ccf"
+    wave_opts: "-access +rwc -linedebug"
+    cosim_opts: >-
+      -f <tb_dir>/eh2_dv_cosim_dpi.f
+      -I<tb_dir>/../../cosim
+      <ISS_LIBS>
+      <ISS_CFLAGS>
+      <EXTRA_COSIM_CFLAGS>
+      <ISS_LDFLAGS>
+      -lstdc++
+
+  sim:
+    cmd: >
+      xrun
+      +UVM_TESTNAME=<rtl_test>
+      +bin=<binary>
+      +seed=<seed>
+      +timeout_ns=<timeout>
+      <sim_opts>
+      -l <out_dir>/sim_<test>_<seed>.log
+      +UVM_VERBOSITY=<uvm_verbosity>
+    cov_opts: "+enable_eh2_fcov=1 -covoverwrite -covfile <tb_dir>/cov.ccf"
+    wave_opts: >-
+      -input @"database -open <out_dir>/waves -shm -default"
+      -input @"probe -create core_eh2_tb_top -all -memories -depth all"
+      -input @"run"
+
+# ---------------------------------------------------------------------------
+# Questa
+# ---------------------------------------------------------------------------
+questa:
+  compile:
+    cmd: >
+      vlib <build_dir>/work && vlog -work <build_dir>/work -sv
+      -f <tb_dir>/eh2_rtl.f
+      -f <tb_dir>/eh2_shared.f
+      -f <tb_dir>/eh2_tb.f
+      -top core_eh2_tb_top
+      +incdir+<tb_dir>/common/axi4_agent
+      +incdir+<tb_dir>/common/trace_agent
+      +incdir+<tb_dir>/common/irq_agent
+      +incdir+<tb_dir>/common/jtag_agent
+      +incdir+<tb_dir>/common/cosim_agent
+      -l <build_dir>/compile.log
+    cov_opts: ""
+    cosim_opts: >-
+      -f <tb_dir>/eh2_dv_cosim_dpi.f
+
+  sim:
+    cmd: >
+      vsim -c <build_dir>/work.core_eh2_tb_top
+      -do "run -all"
+      +UVM_TESTNAME=<rtl_test>
+      +bin=<binary>
+      +seed=<seed>
+      +timeout_ns=<timeout>
+      <sim_opts>
+      -l <out_dir>/sim_<test>_<seed>.log
+      +UVM_VERBOSITY=<uvm_verbosity>
+    cov_opts: "+enable_eh2_fcov=1"

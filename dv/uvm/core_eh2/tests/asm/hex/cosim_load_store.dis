@@ -1,0 +1,72 @@
+
+hex/cosim_load_store.elf：     文件格式 elf32-littleriscv
+
+
+Disassembly of section .text:
+
+80000000 <_start>:
+80000000:	800102b7          	lui	t0,0x80010
+80000004:	deadc337          	lui	t1,0xdeadc
+80000008:	eef30313          	addi	t1,t1,-273 # deadbeef <_stack_top+0x5eadbd0f>
+8000000c:	0062a023          	sw	t1,0(t0) # 80010000 <_stack_top+0xfe20>
+80000010:	6385                	lui	t2,0x1
+80000012:	23438393          	addi	t2,t2,564 # 1234 <_start-0x7fffedcc>
+80000016:	00729223          	sh	t2,4(t0)
+8000001a:	0ab00e13          	li	t3,171
+8000001e:	01c28323          	sb	t3,6(t0)
+80000022:	0002ae83          	lw	t4,0(t0)
+80000026:	deadcf37          	lui	t5,0xdeadc
+8000002a:	eeff0f13          	addi	t5,t5,-273 # deadbeef <_stack_top+0x5eadbd0f>
+8000002e:	0bee9063          	bne	t4,t5,800000ce <fail>
+80000032:	00429e83          	lh	t4,4(t0)
+80000036:	6f05                	lui	t5,0x1
+80000038:	234f0f13          	addi	t5,t5,564 # 1234 <_start-0x7fffedcc>
+8000003c:	09ee9963          	bne	t4,t5,800000ce <fail>
+80000040:	0042de83          	lhu	t4,4(t0)
+80000044:	6f05                	lui	t5,0x1
+80000046:	234f0f13          	addi	t5,t5,564 # 1234 <_start-0x7fffedcc>
+8000004a:	09ee9263          	bne	t4,t5,800000ce <fail>
+8000004e:	00628e83          	lb	t4,6(t0)
+80000052:	fab00f13          	li	t5,-85
+80000056:	07ee9c63          	bne	t4,t5,800000ce <fail>
+8000005a:	0062ce83          	lbu	t4,6(t0)
+8000005e:	0ab00f13          	li	t5,171
+80000062:	07ee9663          	bne	t4,t5,800000ce <fail>
+80000066:	0002ce83          	lbu	t4,0(t0)
+8000006a:	0ef00f13          	li	t5,239
+8000006e:	07ee9063          	bne	t4,t5,800000ce <fail>
+80000072:	0012ce83          	lbu	t4,1(t0)
+80000076:	0be00f13          	li	t5,190
+8000007a:	05ee9a63          	bne	t4,t5,800000ce <fail>
+8000007e:	0022ce83          	lbu	t4,2(t0)
+80000082:	0ad00f13          	li	t5,173
+80000086:	05ee9463          	bne	t4,t5,800000ce <fail>
+8000008a:	0032ce83          	lbu	t4,3(t0)
+8000008e:	0de00f13          	li	t5,222
+80000092:	03ee9e63          	bne	t4,t5,800000ce <fail>
+80000096:	7361                	lui	t1,0xffff8
+80000098:	00629423          	sh	t1,8(t0)
+8000009c:	00829e83          	lh	t4,8(t0)
+800000a0:	7f61                	lui	t5,0xffff8
+800000a2:	03ee9663          	bne	t4,t5,800000ce <fail>
+800000a6:	12345337          	lui	t1,0x12345
+800000aa:	67830313          	addi	t1,t1,1656 # 12345678 <_start-0x6dcba988>
+800000ae:	43c1                	li	t2,16
+800000b0:	00728e33          	add	t3,t0,t2
+800000b4:	006e2023          	sw	t1,0(t3)
+800000b8:	000e2e83          	lw	t4,0(t3)
+800000bc:	006e9963          	bne	t4,t1,800000ce <fail>
+
+800000c0 <pass>:
+800000c0:	d05802b7          	lui	t0,0xd0580
+800000c4:	0ff00313          	li	t1,255
+800000c8:	0062a023          	sw	t1,0(t0) # d0580000 <_stack_top+0x5057fe20>
+800000cc:	a031                	j	800000d8 <done>
+
+800000ce <fail>:
+800000ce:	d05802b7          	lui	t0,0xd0580
+800000d2:	4305                	li	t1,1
+800000d4:	0062a023          	sw	t1,0(t0) # d0580000 <_stack_top+0x5057fe20>
+
+800000d8 <done>:
+800000d8:	a001                	j	800000d8 <done>

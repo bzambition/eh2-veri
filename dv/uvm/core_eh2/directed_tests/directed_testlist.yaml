@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# EH2 directed tests, modeled after Ibex's directed_tests/directed_testlist.yaml.
+
+- config: eh2_directed
+  rtl_test: core_eh2_base_test
+  timeout_s: 300
+  gcc_opts: "-O2 -g -static -nostdlib -nostartfiles"
+  ld_script: tests/asm/cosim_link.ld
+  includes: tests/asm
+
+- test: directed_smoke
+  desc: "Mailbox smoke test running through the directed-test pipeline"
+  config: eh2_directed
+  test_srcs: tests/asm/cosim_smoke.S
+  iterations: 1
+
+- test: directed_alu
+  desc: "Deterministic ALU directed test"
+  config: eh2_directed
+  test_srcs: tests/asm/cosim_alu.S
+  iterations: 1
+
+- test: directed_load_store
+  desc: "Deterministic load/store directed test"
+  config: eh2_directed
+  test_srcs: tests/asm/cosim_load_store.S
+  iterations: 1

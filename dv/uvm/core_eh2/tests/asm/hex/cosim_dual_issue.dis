@@ -1,0 +1,70 @@
+
+hex/cosim_dual_issue.elf：     文件格式 elf32-littleriscv
+
+
+Disassembly of section .text:
+
+80000000 <_start>:
+80000000:	40a9                	li	ra,10
+80000002:	4151                	li	sp,20
+80000004:	06400193          	li	gp,100
+80000008:	03200213          	li	tp,50
+8000000c:	004182b3          	add	t0,gp,tp
+80000010:	40418333          	sub	t1,gp,tp
+80000014:	ff0103b7          	lui	t2,0xff010
+80000018:	f0038393          	addi	t2,t2,-256 # ff00ff00 <_stack_top+0x7f00fe30>
+8000001c:	00ff0437          	lui	s0,0xff0
+80000020:	0ff40413          	addi	s0,s0,255 # ff00ff <_start-0x7f00ff01>
+80000024:	0083f4b3          	and	s1,t2,s0
+80000028:	0083e533          	or	a0,t2,s0
+8000002c:	800105b7          	lui	a1,0x80010
+80000030:	cafec637          	lui	a2,0xcafec
+80000034:	abe60613          	addi	a2,a2,-1346 # cafebabe <_stack_top+0x4afeb9ee>
+80000038:	c190                	sw	a2,0(a1)
+8000003a:	02a00693          	li	a3,42
+8000003e:	4198                	lw	a4,0(a1)
+80000040:	06300793          	li	a5,99
+80000044:	00000363          	beqz	zero,8000004a <_start+0x4a>
+80000048:	0001                	nop
+8000004a:	04d00813          	li	a6,77
+8000004e:	09600893          	li	a7,150
+80000052:	07129263          	bne	t0,a7,800000b6 <fail>
+80000056:	03200893          	li	a7,50
+8000005a:	05131e63          	bne	t1,a7,800000b6 <fail>
+8000005e:	eca1                	bnez	s1,800000b6 <fail>
+80000060:	fff00893          	li	a7,-1
+80000064:	05151963          	bne	a0,a7,800000b6 <fail>
+80000068:	02a00893          	li	a7,42
+8000006c:	05169563          	bne	a3,a7,800000b6 <fail>
+80000070:	cafec8b7          	lui	a7,0xcafec
+80000074:	abe88893          	addi	a7,a7,-1346 # cafebabe <_stack_top+0x4afeb9ee>
+80000078:	03171f63          	bne	a4,a7,800000b6 <fail>
+8000007c:	06300893          	li	a7,99
+80000080:	03179b63          	bne	a5,a7,800000b6 <fail>
+80000084:	04d00893          	li	a7,77
+80000088:	03181763          	bne	a6,a7,800000b6 <fail>
+8000008c:	4901                	li	s2,0
+8000008e:	06400993          	li	s3,100
+80000092:	80010a37          	lui	s4,0x80010
+80000096:	0a41                	addi	s4,s4,16
+
+80000098 <loop>:
+80000098:	0905                	addi	s2,s2,1
+8000009a:	0a11                	addi	s4,s4,4
+8000009c:	ff391ee3          	bne	s2,s3,80000098 <loop>
+800000a0:	06400893          	li	a7,100
+800000a4:	01191963          	bne	s2,a7,800000b6 <fail>
+
+800000a8 <pass>:
+800000a8:	d05802b7          	lui	t0,0xd0580
+800000ac:	0ff00313          	li	t1,255
+800000b0:	0062a023          	sw	t1,0(t0) # d0580000 <_stack_top+0x5057ff30>
+800000b4:	a031                	j	800000c0 <done>
+
+800000b6 <fail>:
+800000b6:	d05802b7          	lui	t0,0xd0580
+800000ba:	4305                	li	t1,1
+800000bc:	0062a023          	sw	t1,0(t0) # d0580000 <_stack_top+0x5057ff30>
+
+800000c0 <done>:
+800000c0:	a001                	j	800000c0 <done>
