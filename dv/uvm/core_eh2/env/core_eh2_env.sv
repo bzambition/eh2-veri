@@ -70,9 +70,13 @@ class core_eh2_env extends uvm_env;
     // Virtual sequencer
     vseqr = core_eh2_vseqr::type_id::create("vseqr", this);
 
-    // AXI4 agents (passive)
+    // AXI4 agents — active when error injection is enabled, passive otherwise
     lsu_agent = axi4_agent#(`RV_LSU_BUS_TAG)::type_id::create("lsu_agent", this);
-    uvm_config_db#(uvm_active_passive_enum)::set(this, "lsu_agent", "is_active", UVM_PASSIVE);
+    if (cfg.enable_axi4_error_inject) begin
+      uvm_config_db#(uvm_active_passive_enum)::set(this, "lsu_agent", "is_active", UVM_ACTIVE);
+    end else begin
+      uvm_config_db#(uvm_active_passive_enum)::set(this, "lsu_agent", "is_active", UVM_PASSIVE);
+    end
 
     ifu_agent = axi4_agent#(`RV_IFU_BUS_TAG)::type_id::create("ifu_agent", this);
     uvm_config_db#(uvm_active_passive_enum)::set(this, "ifu_agent", "is_active", UVM_PASSIVE);
@@ -113,6 +117,13 @@ class core_eh2_env extends uvm_env;
     // Instruction monitoring interface
     if (!uvm_config_db#(virtual eh2_instr_monitor_if)::get(this, "", "instr_monitor_vif", instr_monitor_vif))
       `uvm_info("env", "Instruction monitoring interface not set (optional)", UVM_LOW)
+
+    // Configure AXI4 error injection on LSU driver (only when active)
+    if (cfg.enable_axi4_error_inject && lsu_agent.driver != null) begin
+      lsu_agent.driver.enable_error_inject = 1;
+      lsu_agent.driver.error_pct           = cfg.axi4_error_pct;
+      `uvm_info("env", $sformatf("AXI4 error injection enabled on LSU (pct=%0d)", cfg.axi4_error_pct), UVM_LOW)
+    end
   endfunction
 
   function void connect_phase(uvm_phase phase);

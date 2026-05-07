@@ -15,6 +15,11 @@ module axi4_slave_mem #(
   input  logic clk,
   input  logic rst_n,
 
+  // Error injection control (from UVM driver)
+  input  logic        error_inject_mode,  // 1 = use forced resp values
+  input  logic [1:0]  force_bresp,        // Forced write response (when error_inject_mode=1)
+  input  logic [1:0]  force_rresp,        // Forced read response  (when error_inject_mode=1)
+
   // Write Address Channel
   input  logic [ID_WIDTH-1:0]     awid,
   input  logic [ADDR_WIDTH-1:0]   awaddr,
@@ -117,7 +122,7 @@ module axi4_slave_mem #(
               if (RESPONSE_DELAY == 0) begin
                 bvalid <= 1'b1;
                 bid    <= wr_id;
-                bresp  <= 2'b00;  // OKAY
+                bresp  <= error_inject_mode ? force_bresp : 2'b00;
                 wr_state <= WR_RESP;
               end else begin
                 wr_delay_cnt <= RESPONSE_DELAY;
@@ -137,7 +142,7 @@ module axi4_slave_mem #(
           end else begin
             bvalid <= 1'b1;
             bid    <= wr_id;
-            bresp  <= 2'b00;  // OKAY
+            bresp  <= error_inject_mode ? force_bresp : 2'b00;
             if (bready) begin
               bvalid  <= 1'b0;
               wr_state <= WR_IDLE;
@@ -197,7 +202,7 @@ module axi4_slave_mem #(
               rdata  <= read_mem(araddr, arsize);
               rlast  <= (arlen == 0);
               rid    <= arid;
-              rresp  <= 2'b00;  // OKAY
+              rresp  <= error_inject_mode ? force_rresp : 2'b00;
               rd_state <= RD_DATA;
             end else begin
               rd_delay_cnt <= RESPONSE_DELAY;
@@ -214,7 +219,7 @@ module axi4_slave_mem #(
             rdata    <= read_mem(rd_addr, rd_size);
             rlast    <= (rd_len == 0);
             rid      <= rd_id;
-            rresp    <= 2'b00;  // OKAY
+            rresp    <= error_inject_mode ? force_rresp : 2'b00;
             rd_state <= RD_DATA;
           end
         end

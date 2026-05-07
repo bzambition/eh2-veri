@@ -415,6 +415,9 @@ module core_eh2_tb_top;
   ) lsu_mem (
     .clk      (core_clk),
     .rst_n    (rst_l),
+    .error_inject_mode (lsu_axi_intf.error_inject_mode),
+    .force_bresp       (lsu_axi_intf.force_bresp),
+    .force_rresp       (lsu_axi_intf.force_rresp),
     .awid     (lsu_axi_awid),
     .awaddr   (lsu_axi_awaddr),
     .awlen    (lsu_axi_awlen),
@@ -455,6 +458,9 @@ module core_eh2_tb_top;
   ) ifu_mem (
     .clk      (core_clk),
     .rst_n    (rst_l),
+    .error_inject_mode (ifu_axi_intf.error_inject_mode),
+    .force_bresp       (ifu_axi_intf.force_bresp),
+    .force_rresp       (ifu_axi_intf.force_rresp),
     .awid     (ifu_axi_awid),
     .awaddr   (ifu_axi_awaddr),
     .awlen    (ifu_axi_awlen),
@@ -495,6 +501,9 @@ module core_eh2_tb_top;
   ) sb_mem (
     .clk      (core_clk),
     .rst_n    (rst_l),
+    .error_inject_mode (sb_axi_intf.error_inject_mode),
+    .force_bresp       (sb_axi_intf.force_bresp),
+    .force_rresp       (sb_axi_intf.force_rresp),
     .awid     (sb_axi_awid),
     .awaddr   (sb_axi_awaddr),
     .awlen    (sb_axi_awlen),

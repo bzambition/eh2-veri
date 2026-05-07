@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // AXI4 Response Driver - Responds to AXI4 master requests
 //
-// Acts as an AXI4 slave, responding to read/write requests from the DUT.
-// The actual memory behavior is handled by axi4_slave_mem RTL model.
-// This driver provides:
-//   - Passive mode (default): RTL memory model handles responses
-//   - Error injection: configurable SLVERR/DECERR responses
-//   - Response delay modeling
+// Acts as an AXI4 slave error injector, controlling the axi4_slave_mem's
+// response via the error_inject_mode / force_bresp / force_rresp sideband
+// signals on the axi4_intf.
+//
+// The driver does NOT replace the RTL slave_mem for address/data handling.
+// Instead, it piggybacks on slave_mem's existing state machine, only
+// overriding the resp field when an error should be injected.
+//
+//   - Passive mode (default, enable_error_inject=0):
+//       error_inject_mode stays 0; slave_mem drives OKAY on its own.
+//   - Active mode (enable_error_inject=1):
+//       The driver watches AR/AW handshakes and randomly sets
+//       error_inject_mode + force_bresp/force_rresp to SLVERR/DECERR
+//       with configurable probability (error_pct, default 5%).
+//       After the response handshake completes, error_inject_mode is
+//       cleared so the next transaction defaults to OKAY.
 //
 // Based on Ibex's ibex_mem_intf_response_driver pattern.
 
@@ -34,6 +44,12 @@ class axi4_driver #(int ID_WIDTH = 4) extends uvm_driver #(axi4_seq_item);
     RESP_DECERR = 2'b11
   } axi4_resp_e;
 
+  // Statistics
+  int unsigned num_read_errors  = 0;
+  int unsigned num_write_errors = 0;
+  int unsigned num_read_total   = 0;
+  int unsigned num_write_total  = 0;
+
   function new(string name, uvm_component parent);
     super.new(name, parent);
   endfunction
@@ -46,46 +62,94 @@ class axi4_driver #(int ID_WIDTH = 4) extends uvm_driver #(axi4_seq_item);
   endfunction
 
   task run_phase(uvm_phase phase);
-    // In passive mode, the RTL memory model (axi4_slave_mem) handles responses.
-    // This driver is active only when error injection or delay modeling is enabled.
-    if (!enable_error_inject && !enable_delay_inject) begin
-      // Passive mode - just wait
+    // Ensure sideband signals are inactive at start
+    vif.error_inject_mode <= 1'b0;
+    vif.force_bresp       <= 2'b00;
+    vif.force_rresp       <= 2'b00;
+
+    if (!enable_error_inject) begin
+      // Passive mode - error injection disabled; slave_mem handles everything.
+      `uvm_info(agent_name, "Running in PASSIVE mode (no error injection)", UVM_LOW)
       forever begin
         @(posedge vif.clk);
       end
     end else begin
-      // Active mode - monitor and potentially inject errors
-      forever begin
-        @(posedge vif.clk);
-        // Error injection and delay modeling are handled per-transaction
-        // via the sequence-item-driven interface when activated
+      // Active mode - monitor AXI handshakes, inject errors probabilistically.
+      `uvm_info(agent_name, $sformatf(
+        "Running in ACTIVE mode: error_pct=%0d%%", error_pct), UVM_LOW)
+      fork
+        inject_read_errors();
+        inject_write_errors();
+      join
+    end
+  endtask
+
+  //----------------------------------------------------------------------------
+  // Read channel error injection
+  //   Watch for AR handshake, decide error/okay, set sideband, wait for R
+  //   completion (rlast+rvalid+rready), then clear sideband.
+  //----------------------------------------------------------------------------
+  task inject_read_errors();
+    forever begin
+      // Wait for AR handshake
+      @(posedge vif.clk iff (vif.arvalid && vif.arready));
+
+      num_read_total++;
+
+      if (should_inject_error()) begin
+        bit [1:0] err_resp = get_error_resp();
+        `uvm_info(agent_name, $sformatf(
+          "INJECT read error resp=%s addr=0x%08x id=%0d",
+          (err_resp == RESP_SLVERR) ? "SLVERR" : "DECERR",
+          vif.araddr, vif.arid), UVM_MEDIUM)
+
+        vif.error_inject_mode <= 1'b1;
+        vif.force_rresp       <= err_resp;
+        num_read_errors++;
+
+        // Wait until last R beat completes
+        @(posedge vif.clk iff (vif.rvalid && vif.rready && vif.rlast));
+
+        // Clear error injection for next transaction
+        vif.error_inject_mode <= 1'b0;
+        vif.force_rresp       <= 2'b00;
       end
+      // else: leave sideband at 0, slave_mem drives OKAY on its own
     end
   endtask
 
-  // Drive write response (B channel)
-  task drive_write_response(bit [1:0] resp, bit [3:0] id);
-    if (rsp_delay > 0) begin
-      repeat (rsp_delay) @(posedge vif.clk);
-    end
-    vif.bvalid <= 1'b1;
-    vif.bresp  <= resp;
-    vif.bid    <= id;
-    @(posedge vif.clk iff vif.bready);
-    vif.bvalid <= 1'b0;
-  endtask
+  //----------------------------------------------------------------------------
+  // Write channel error injection
+  //   Watch for AW handshake, decide error/okay, set sideband, wait for B
+  //   handshake, then clear sideband.
+  //----------------------------------------------------------------------------
+  task inject_write_errors();
+    forever begin
+      // Wait for AW handshake
+      @(posedge vif.clk iff (vif.awvalid && vif.awready));
 
-  // Drive read response (R channel)
-  task drive_read_response(bit [63:0] data, bit [1:0] resp, bit last);
-    if (rsp_delay > 0) begin
-      repeat (rsp_delay) @(posedge vif.clk);
+      num_write_total++;
+
+      if (should_inject_error()) begin
+        bit [1:0] err_resp = get_error_resp();
+        `uvm_info(agent_name, $sformatf(
+          "INJECT write error resp=%s addr=0x%08x id=%0d",
+          (err_resp == RESP_SLVERR) ? "SLVERR" : "DECERR",
+          vif.awaddr, vif.awid), UVM_MEDIUM)
+
+        vif.error_inject_mode <= 1'b1;
+        vif.force_bresp       <= err_resp;
+        num_write_errors++;
+
+        // Wait until B handshake completes
+        @(posedge vif.clk iff (vif.bvalid && vif.bready));
+
+        // Clear error injection for next transaction
+        vif.error_inject_mode <= 1'b0;
+        vif.force_bresp       <= 2'b00;
+      end
+      // else: leave sideband at 0, slave_mem drives OKAY on its own
     end
-    vif.rvalid <= 1'b1;
-    vif.rdata  <= data;
-    vif.rresp  <= resp;
-    vif.rlast  <= last;
-    @(posedge vif.clk iff vif.rready);
-    vif.rvalid <= 1'b0;
   endtask
 
   // Check if error should be injected (random)
@@ -94,18 +158,28 @@ class axi4_driver #(int ID_WIDTH = 4) extends uvm_driver #(axi4_seq_item);
     return ($urandom_range(0, 99) < error_pct);
   endfunction
 
-  // Get random delay for response
-  function int get_random_delay();
-    if (!enable_delay_inject) return rsp_delay;
-    return $urandom_range(min_delay, max_delay);
-  endfunction
-
   // Get error response type (random SLVERR or DECERR)
   function bit [1:0] get_error_resp();
     if ($urandom_range(0, 1) == 0)
       return RESP_SLVERR;
     else
       return RESP_DECERR;
+  endfunction
+
+  // Get random delay for response
+  function int get_random_delay();
+    if (!enable_delay_inject) return rsp_delay;
+    return $urandom_range(min_delay, max_delay);
+  endfunction
+
+  function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    if (enable_error_inject) begin
+      `uvm_info(agent_name, $sformatf(
+        "Error injection stats: reads=%0d/%0d writes=%0d/%0d",
+        num_read_errors, num_read_total,
+        num_write_errors, num_write_total), UVM_LOW)
+    end
   endfunction
 
 endclass

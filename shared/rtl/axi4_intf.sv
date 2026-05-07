@@ -63,6 +63,18 @@ interface axi4_intf #(
   logic                    rvalid;
   logic                    rready;
 
+  // Error injection control (driven by UVM axi4_driver, consumed by axi4_slave_mem)
+  logic                    error_inject_mode;
+  logic [1:0]              force_bresp;
+  logic [1:0]              force_rresp;
+
+  // Default: error injection inactive
+  initial begin
+    error_inject_mode = 1'b0;
+    force_bresp       = 2'b00;
+    force_rresp       = 2'b00;
+  end
+
   // Clocking block for response driver (slave side)
   // Drives responses to master requests
   clocking resp_driver_cb @(posedge clk);

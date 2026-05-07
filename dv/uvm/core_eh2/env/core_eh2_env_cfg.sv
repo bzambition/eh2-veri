@@ -10,6 +10,8 @@
 //   +enable_fetch_toggle=1     Enable fetch-enable toggling
 //   +enable_cosim=1            Enable co-simulation checking
 //   +enable_mem_error=1        Enable memory error injection
+//   +enable_axi4_error_inject=1  Enable AXI4 error response injection
+//   +axi4_error_pct=5          AXI4 error injection percentage (0-100)
 //   +spurious_response_pct=5   Spurious response percentage (0-100)
 //   +double_fault_threshold=3  Double-fault detection threshold
 //   +max_interval=500          Max interval between stimulus events
@@ -41,6 +43,12 @@ class core_eh2_env_cfg extends uvm_object;
   // =========================================================================
   bit enable_cosim              = 1;  // Enable co-simulation checking
   bit disable_cosim             = 0;  // Disable co-simulation (override)
+
+  // =========================================================================
+  // AXI4 error injection control
+  // =========================================================================
+  bit enable_axi4_error_inject = 0;  // Enable AXI4 SLVERR/DECERR injection
+  int axi4_error_pct           = 5;  // Error injection percentage (0-100)
 
   // =========================================================================
   // Memory model control
@@ -97,6 +105,8 @@ class core_eh2_env_cfg extends uvm_object;
     void'($value$plusargs("enable_debug_stress=%0d", enable_debug_stress));
     void'($value$plusargs("enable_debug_single=%0d", enable_debug_single));
     void'($value$plusargs("enable_fetch_toggle=%0d", enable_fetch_toggle));
+    void'($value$plusargs("enable_axi4_error_inject=%0d", enable_axi4_error_inject));
+    void'($value$plusargs("axi4_error_pct=%d", axi4_error_pct));
     void'($value$plusargs("enable_cosim=%0d", enable_cosim));
     void'($value$plusargs("disable_cosim=%0d", disable_cosim));
     void'($value$plusargs("enable_mem_error=%0d", enable_mem_error));
@@ -136,6 +146,8 @@ class core_eh2_env_cfg extends uvm_object;
     s = {s, $sformatf("  Cosim: enable=%0b\n", enable_cosim)};
     s = {s, $sformatf("  Memory: error=%0b spurious=%0b (pct=%0d)\n",
          enable_mem_error, enable_spurious_response, spurious_response_pct)};
+    s = {s, $sformatf("  AXI4 error inject=%0b (pct=%0d)\n",
+         enable_axi4_error_inject, axi4_error_pct)};
     s = {s, $sformatf("  Timeout: %0d ns / %0d cycles\n", timeout_ns, max_cycles)};
     s = {s, $sformatf("  Binary: %s\n", binary)};
     return s;
