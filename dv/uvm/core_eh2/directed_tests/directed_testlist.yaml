@@ -25,3 +25,34 @@
   config: eh2_directed
   test_srcs: tests/asm/cosim_load_store.S
   iterations: 1
+
+- test: directed_irq_basic
+  desc: "Basic software interrupt trigger and trap handler"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_irq_basic.S
+  iterations: 1
+
+- test: directed_pmp_smoke
+  desc: "PMP region config and access fault trap"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_pmp_smoke.S
+  iterations: 1
+
+- test: directed_csr_warl
+  desc: "EH2 custom CSR WARL read-back smoke"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_csr_warl.S
+  cosim: disabled
+  iterations: 1
+
+- test: directed_double_issue_hazard
+  desc: "Dual-issue RAW/WAR/WAW hazard ordering"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_double_issue_hazard.S
+  iterations: 1
+
+- test: directed_nb_load_chain
+  desc: "Three consecutive NB-loads + dependent branch (RISK-5)"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_nb_load_chain.S
+  iterations: 1
