@@ -72,27 +72,33 @@
 
 ---
 
-## 当前进展（更新于 2026-05-07）
+## 当前进展（更新于 2026-05-07，Phase 3 sweep 完成）
 
 - ✅ Phase 1 cosim 闭环完成（smoke + arithmetic 100% PASS）
 - ✅ Phase 2 结构整理完成（env 归位 / 命名统一 / TB 拆分 / scoreboard 模块化）
-- ✅ Phase 3 部分完成（make run 流程 + testlist 修正 + BE 语义放宽）
-- ✅ Phase 4 大部分完成（CONTEXT.md / ADR 0001-0005 / build 清理 / issue triage）
-- ⚠️ Phase 3 遗留 3 个独立 bug：load_store data 不同步、random_instr 中断 cosim、mul_div GEN_NO_ASM
+- ✅ Phase 3 完成（cosim-enabled testlist 9/9 PASS：arith/rand_jump/load_store/
+      unaligned_ls/mul_div/dual_issue/exception/invalid_csr/fetch_en_chk）
+  - 修了 8 个 EH2 directed stream 的结构性 bug（gen_instr → post_randomize 桥接）
+  - 修了 testlist 错名（riscv_mul_instr_stream / riscv_branch_instr 等）
+  - 修了 imm_str 缺失、SLLI shamt、atomic BNE 等多处 stream 编码 bug
+- ✅ Phase 4 文档对齐（CONTEXT.md / ADR 0001-0005 / PHASE3_SWEEP_PROGRESS.md）
+- ⚠️ Phase 3 cosim-disabled 留 issue：random_instr (+enable_interrupt) /
+      bitmanip (zba/zbb illegal-instr 速率) / amo (SC.W 写回与 Spike 分歧)
 - ⬜ Phase 5 未开始（多 hart cosim / formal / CI gate）
 
-## Issue 状态统计
+## Issue 状态统计（2026-05-07 sweep 后）
 
 | 状态 | 数量 | 说明 |
 |------|------|------|
-| done | 12 | Phase 1-3 已完成的 issue |
-| ready-for-agent | 3 | signoff full + load_store data bug + interrupt cosim |
+| done | 13 | Phase 1-3 已完成的 issue，含本次 8 个 stream 修复 |
+| ready-for-agent | 3 | random_instr 中断 / bitmanip 异常路径 / amo SC.W |
 | wontfix | 1 | NUM_THREADS=2 限制（Phase 5 scope） |
 
 ## 进入下一会话的 checklist
 
 1. 阅读 `CONTEXT.md` 了解领域语言和当前状态
-2. 看 Phase 3 遗留 bug：`PHASE3_PROGRESS.md` 的"已知保留事项"
-3. 优先修：load_store_test data RF 不同步（cosim-correctness #03）
-4. 其次修：random_instr_test 中断 cosim（cosim-correctness #05）
-5. 最后过 signoff full（platform-industrialization #06）
+2. 看 Phase 3 sweep 结果：`PHASE3_SWEEP_PROGRESS.md`（cosim-enabled 9/9 PASS 已达成）
+3. 选择进路：
+   - 跑通 signoff full profile（验证 cosim stage 真的 PASS）
+   - 修 cosim:disabled 留 issue（interrupt/bitmanip/amo）
+   - 进入 Phase 5：CI gate / 多 hart cosim / formal / AXI4 active

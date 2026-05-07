@@ -2,7 +2,7 @@
 
 本文档定义 EH2 UVM 验证平台的术语、模型与约定。新会话进入此项目时应先读此文档。
 
-更新日期：2026-05-07（Phase 4 完成后）
+更新日期：2026-05-07（Phase 3 cosim sweep 完成 + Phase 4 文档校对）
 
 ---
 
@@ -96,19 +96,24 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 | RISK-5 | LOW | NB-load wb 跨 slot 可能脱节 | **已修**（Phase 1 scoreboard 等 nb_load hint） |
 | RISK-6 | LOW | interrupt 状态采样按 item 而非 cycle | RTL 设计上已正确 |
 | RISK-7 | OPEN | EH2 推测 div cancel vs 架构 retire 区分 | **已修**（Phase 1 RTL `dec_div_cancel_overwrite` 信号 + scoreboard FIFO 消费） |
-| RISK-8 | MEDIUM | load_store_test data RF 不同步 | ⚠️ OPEN（DUT 与 Spike 寄存器值分歧，Phase 3 发现） |
-| RISK-9 | MEDIUM | random_instr_test 中断/异常 cosim | ⚠️ OPEN（cosim 中断处理逻辑待补） |
+| RISK-8 | RESOLVED | load_store_test data RF 不同步 | **已验证不再复现**（Phase 3 BE 语义放宽 + stream 修复后 1848 trace / 0 mismatch） |
+| RISK-9 | OPEN | random_instr_test 中断/异常 cosim | ⚠️ 标 cosim:disabled（需扩展 scoreboard 处理 mcause/mepc/mtval） |
+| RISK-10 | OPEN | bitmanip zba/zbb 触发 RTL illegal-instr 异常率高 | ⚠️ 标 cosim:disabled（exception 路径 cosim step 与 trace 速率不匹配） |
+| RISK-11 | OPEN | atomic SC.W RTL 写回与 Spike 分歧 | ⚠️ 标 cosim:disabled（需 spike_cosim 加 atomic-store fixup） |
+| RISK-12 | RESOLVED | 8 个 EH2 directed stream 全部生成空 instr_list | **已修**（Phase 3 新增 eh2_base_directed_stream，post_randomize → gen_instr 桥接） |
+| RISK-13 | RESOLVED | check_logs 把 VCS banner overlap 误判为 UVM_FATAL | **已修**（UVM_SUMMARY_LINE_RE 识别 summary 行的两种损坏形态） |
+| RISK-14 | RESOLVED | libcosim.so 缺失静默不链 → 仿真启动报 DPI-DIFNF | **已修**（compile_vcs 硬依赖 + NO_COSIM=1 escape hatch） |
 
 ## 7. Sign-off 标准
 
 `make signoff SIGNOFF_PROFILE=full PARALLEL=4` 要全过才算签发。
 
-| Stage | 当前状态（2026-05-07） | 描述 |
+| Stage | 当前状态（2026-05-07 sweep 后） | 描述 |
 |-------|---------|------|
-| smoke | ✅ PASS | hello_world.hex / smoke.hex，含 cosim |
+| smoke | ✅ PASS | smoke.hex，含 cosim，6 trace / 0 mismatch |
 | directed | ✅ PASS | 3 个定向 test |
-| cosim | 🟡 部分 PASS | smoke + arithmetic_basic 多 seeds 100% PASS；load_store / random_instr 有独立 bug |
-| riscvdv | ⚠️ 未通过 | load_store data RF bug、random_instr 中断 cosim、mul_div GEN_NO_ASM |
+| cosim | ✅ PASS | cosim-enabled testlist 9/9 PASS（arith / rand_jump / load_store / unaligned_ls / mul_div / dual_issue / exception / invalid_csr / fetch_en_chk） |
+| riscvdv | 🟡 部分 PASS | 9 个 cosim:enabled 全过；3 个 cosim:disabled（random_instr/bitmanip/amo）独立 issue |
 
 ## 8. 工程约定
 
