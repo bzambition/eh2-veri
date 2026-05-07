@@ -393,7 +393,7 @@ signoff:
 	  --parallel $(PARALLEL) \
 	  --output $(SIGNOFF_OUT) \
 	  $(if $(SIGNOFF_ITERATIONS),--iterations $(SIGNOFF_ITERATIONS),) \
-	  $(if $(filter 1,$(COV)),--coverage --require-coverage,) \
+	  $(if $(filter 1,$(COV)),--coverage --require-coverage --min-line-coverage 60 --min-functional-coverage 50,) \
 	  $(if $(filter 1,$(WAVES)),--waves,) \
 	  $(SIGNOFF_OPTS)
 
