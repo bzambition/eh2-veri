@@ -32,3 +32,9 @@
   config: eh2_cosim
   test_srcs: tests/asm/cosim_dual_issue.S
   iterations: 1
+
+- test: cosim_bitmanip
+  desc: "Zba/Zbb instruction lockstep (sh1add/andn/clz/max etc)"
+  config: eh2_cosim
+  test_srcs: tests/asm/cosim_bitmanip.S
+  iterations: 1
