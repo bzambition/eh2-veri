@@ -59,6 +59,11 @@ public:
   void clear_errors() override;
   unsigned int get_insn_cnt() override;
 
+  // Trap CSR queries (RISK-9)
+  uint32_t get_mcause() override;
+  uint32_t get_mepc() override;
+  uint32_t get_mtvec() override;
+
 private:
   // Spike processor and ISA
   std::unique_ptr<isa_parser_t> isa_parser;

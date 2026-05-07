@@ -1264,6 +1264,22 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
 }
 
 // ---------------------------------------------------------------
+// Trap CSR queries (RISK-9: mcause/mepc/mtvec comparison)
+// ---------------------------------------------------------------
+
+uint32_t SpikeCosim::get_mcause() {
+  return processor->get_state()->mcause->read() & 0xffffffff;
+}
+
+uint32_t SpikeCosim::get_mepc() {
+  return processor->get_state()->mepc->read() & 0xffffffff;
+}
+
+uint32_t SpikeCosim::get_mtvec() {
+  return processor->get_state()->mtvec->read() & 0xffffffff;
+}
+
+// ---------------------------------------------------------------
 // Factory function - called by DPI bridge
 // ---------------------------------------------------------------
 

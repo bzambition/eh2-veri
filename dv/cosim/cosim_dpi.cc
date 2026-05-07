@@ -227,4 +227,23 @@ extern "C" {
     }
   }
 
+  // Trap CSR queries (RISK-9: mcause/mepc/mtvec comparison)
+  uint32_t riscv_cosim_get_mcause(void* handle) {
+    Cosim* cosim = static_cast<Cosim*>(handle);
+    if (!cosim) return 0;
+    return cosim->get_mcause();
+  }
+
+  uint32_t riscv_cosim_get_mepc(void* handle) {
+    Cosim* cosim = static_cast<Cosim*>(handle);
+    if (!cosim) return 0;
+    return cosim->get_mepc();
+  }
+
+  uint32_t riscv_cosim_get_mtvec(void* handle) {
+    Cosim* cosim = static_cast<Cosim*>(handle);
+    if (!cosim) return 0;
+    return cosim->get_mtvec();
+  }
+
 }  // extern "C"

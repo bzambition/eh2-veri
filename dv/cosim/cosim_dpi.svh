@@ -123,3 +123,16 @@ import "DPI-C" function void riscv_cosim_clear_errors(
 import "DPI-C" function int riscv_cosim_get_insn_cnt(
   input chandle handle
 );
+
+// Trap CSR queries (RISK-9: mcause/mepc/mtvec comparison)
+import "DPI-C" function int unsigned riscv_cosim_get_mcause(
+  input chandle handle
+);
+
+import "DPI-C" function int unsigned riscv_cosim_get_mepc(
+  input chandle handle
+);
+
+import "DPI-C" function int unsigned riscv_cosim_get_mtvec(
+  input chandle handle
+);

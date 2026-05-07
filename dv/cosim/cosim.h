@@ -92,6 +92,11 @@ public:
 
   // Get instruction count (number of successfully matched instructions).
   virtual unsigned int get_insn_cnt() = 0;
+
+  // Trap CSR queries (RISK-9: mcause/mepc/mtvec comparison)
+  virtual uint32_t get_mcause() = 0;
+  virtual uint32_t get_mepc() = 0;
+  virtual uint32_t get_mtvec() = 0;
 };
 
 #endif // EH2_COSIM_H

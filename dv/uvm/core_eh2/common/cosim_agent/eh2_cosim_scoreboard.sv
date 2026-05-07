@@ -562,6 +562,24 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
       prev_mip = item.mip;
       riscv_cosim_set_mcycle(cosim_handle, longint'(item.mcycle));
       `uvm_info("cosim", $sformatf("IRQ-ONLY: PC=%08x", item.pc), UVM_HIGH)
+
+      // RISK-9: Compare trap CSRs after Spike processes interrupt
+      begin
+        int unsigned spike_mcause, spike_mepc;
+        spike_mcause = riscv_cosim_get_mcause(cosim_handle);
+        spike_mepc   = riscv_cosim_get_mepc(cosim_handle);
+
+        if (item.dut_mcause != 0 && spike_mcause != item.dut_mcause) begin
+          `uvm_info("cosim", $sformatf(
+            "IRQ mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x",
+            item.dut_mcause, spike_mcause, item.pc), UVM_MEDIUM)
+        end
+
+        `uvm_info("cosim", $sformatf(
+          "IRQ-COMPARE: PC=%08x DUT_mcause=%08x Spike_mcause=%08x DUT_mepc=%08x Spike_mepc=%08x",
+          item.pc, item.dut_mcause, spike_mcause, item.dut_mepc, spike_mepc), UVM_HIGH)
+      end
+
       return;
     end
 
@@ -644,6 +662,19 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     end else begin
       `uvm_info("cosim", $sformatf("MATCH: PC=%08x insn=%08x rd=x%0d data=%08x",
         item.pc, item.insn, write_reg, write_reg_data), UVM_HIGH)
+    end
+
+    // RISK-9: Compare trap CSRs on exception path
+    if (sync_trap && result != 0) begin
+      int unsigned spike_mcause, spike_mepc;
+      spike_mcause = riscv_cosim_get_mcause(cosim_handle);
+      spike_mepc   = riscv_cosim_get_mepc(cosim_handle);
+
+      if (item.dut_mcause != 0 && spike_mcause != item.dut_mcause) begin
+        `uvm_info("cosim", $sformatf(
+          "EXC mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x ecause=%0d",
+          item.dut_mcause, spike_mcause, item.pc, item.ecause), UVM_MEDIUM)
+      end
     end
 
     step_count++;
