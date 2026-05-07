@@ -131,7 +131,7 @@ SHARED_F    := $(TB_DIR)/eh2_shared.f
 TB_F        := $(TB_DIR)/eh2_tb.f
 
 .PHONY: help compile compile_vcs compile_xlm run gen smoke nightly weekly \
-        regress signoff signoff_quick signoff_gate clean
+        regress signoff signoff_quick signoff_gate clean ci_unit ci_lint
 
 # -----------------------------------------------------------------------
 # Help
@@ -416,6 +416,31 @@ cov:
 	  imc -load $(BUILD_DIR)/cov -exec $(TB_DIR)/cov_merge.tcl; \
 	fi
 	@echo "=== Coverage report: $(BUILD_DIR)/cov_report ==="
+
+# -----------------------------------------------------------------------
+# CI (continuous integration)
+#
+# `ci_unit` runs the same Python-only checks as the GitHub Actions
+# `unit-tests` workflow — fast, no VCS / spike-cosim required. Use this
+# locally before opening a PR.
+# -----------------------------------------------------------------------
+ci_unit:
+	@echo "=== CI: Python regression-framework tests ==="
+	cd $(TB_DIR)/scripts && python3 -m unittest tests.test_regression_framework
+	@$(MAKE) --no-print-directory ci_lint
+	@echo "=== CI unit tests complete ==="
+
+ci_lint:
+	@echo "=== CI: testlist YAML sanity ==="
+	@python3 -c "import yaml, pathlib; \
+tl = pathlib.Path('$(TB_DIR)/riscv_dv_extension/testlist.yaml'); \
+tests = yaml.safe_load(tl.read_text()); \
+assert isinstance(tests, list) and tests, 'testlist must be non-empty list'; \
+names = [t['test'] for t in tests]; \
+dups = [n for n in set(names) if names.count(n) > 1]; \
+assert not dups, f'duplicate test names: {dups}'; \
+[t.update({'_': None}) for t in tests if all(k in t for k in ('test','description','rtl_test'))]; \
+print(f'testlist.yaml OK: {len(tests)} tests')"
 
 # -----------------------------------------------------------------------
 # Clean

@@ -1,0 +1,57 @@
+name: sim-regression
+# RTL simulation regression. Requires VCS + spike-cosim, so this runs only on
+# the internal self-hosted runner labelled "eh2-sim". GitHub-hosted runners
+# don't have these tools — they would always fail.
+#
+# Trigger manually via "Run workflow" or on a label. The label gate keeps PR
+# noise low; CI maintainers can attach `run-sim` to a PR they want exercised.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Sign-off profile: quick | cosim | nightly | full"
+        required: true
+        default: "quick"
+  pull_request:
+    types: [labeled]
+
+jobs:
+  sim:
+    name: ${{ github.event.inputs.profile || 'quick' }} sign-off
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-sim'))
+    runs-on: [self-hosted, eh2-sim]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile cosim shared library
+        run: |
+          source env.sh
+          make cosim
+
+      - name: Compile RTL testbench (VCS)
+        run: |
+          source env.sh
+          make compile SIMULATOR=vcs
+
+      - name: Run sign-off gate
+        run: |
+          source env.sh
+          PROFILE="${{ github.event.inputs.profile || 'quick' }}"
+          make signoff SIGNOFF_PROFILE="$PROFILE" SIGNOFF_OUT=build/ci_signoff PARALLEL=4
+
+      - name: Upload sign-off report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signoff-${{ github.event.inputs.profile || 'quick' }}-${{ github.run_id }}
+          path: |
+            build/ci_signoff/signoff_status.json
+            build/ci_signoff/signoff_report.md
+            build/ci_signoff/runs/**/regr.log
+            build/ci_signoff/runs/**/report.json
+          retention-days: 30

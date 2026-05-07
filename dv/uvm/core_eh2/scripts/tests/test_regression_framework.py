@@ -546,6 +546,12 @@ class RegressionFrameworkTest(unittest.TestCase):
         self.assertNotIn("end else if (step_count > 0) begin", scoreboard)
 
     def test_writeback_source_tags_prevent_cross_source_matches(self):
+        # Phase 1+2 architecture: trace packet now carries the RVFI-equivalent
+        # writeback view directly, so the scoreboard no longer maintains
+        # `pending_wb_q` or a `wb_source_matches` correlator. The async wb
+        # hints (DIV / NB-load) flowing from probe_monitor still tag their
+        # source so the scoreboard can dispatch them correctly. This test
+        # verifies the source-tagging contract end-to-end.
         trace_pkg = (SCRIPT_DIR.parent / "common" / "trace_agent" /
                      "eh2_trace_agent_pkg.sv").read_text(encoding="utf-8")
         trace_item = (SCRIPT_DIR.parent / "common" / "trace_agent" /
@@ -556,22 +562,28 @@ class RegressionFrameworkTest(unittest.TestCase):
         scoreboard = (SCRIPT_DIR.parent / "common" / "cosim_agent" /
                       "eh2_cosim_scoreboard.sv").read_text(encoding="utf-8")
 
+        # Source enum still defined in trace_agent_pkg for both producer
+        # (probe_monitor) and consumer (scoreboard).
         self.assertIn("EH2_WB_SRC_REGULAR", trace_pkg)
         self.assertIn("EH2_WB_SRC_DIV", trace_pkg)
         self.assertIn("EH2_WB_SRC_NB_LOAD", trace_pkg)
-        self.assertIn("int        wb_source", trace_item)
+
+        # is_div() classifier on trace items still required for routing.
         self.assertIn("function bit is_div()", trace_item)
-        self.assertIn("txn.wb_source    = EH2_WB_SRC_REGULAR", probe_monitor)
+
+        # probe_monitor tags every async hint with its source.
         self.assertIn("txn.wb_source = EH2_WB_SRC_DIV", probe_monitor)
         self.assertIn("txn.wb_source = EH2_WB_SRC_NB_LOAD", probe_monitor)
-        self.assertIn("txn.wb_suppress = 1;", probe_monitor)
-        self.assertIn("function bit wb_source_matches", scoreboard)
-        self.assertIn("wb.source == EH2_WB_SRC_DIV", scoreboard)
-        self.assertIn("wb.source == EH2_WB_SRC_REGULAR ||", scoreboard)
-        self.assertIn("candidate_count", scoreboard)
-        self.assertIn("if (wb_source_matches(item, pending_wb_q[slot][i]))",
-                      scoreboard)
-        self.assertNotIn("effective_wb_search_depth", scoreboard)
+
+        # scoreboard dispatches async hints by source — DIV vs NB-load route
+        # to different gating in needs_async_wb / has_matching_async_wb.
+        self.assertIn("async_wb_q[i].source == EH2_WB_SRC_DIV", scoreboard)
+        self.assertIn("async_wb_q[i].source != EH2_WB_SRC_NB_LOAD", scoreboard)
+
+        # Phase 1 ADR-0004 deletions — confirm the legacy correlator is gone.
+        self.assertNotIn("wb_search_depth", scoreboard)
+        self.assertNotIn("pending_wb_q", scoreboard)
+        self.assertNotIn("wb_source_matches", scoreboard)
 
     def test_spike_cosim_allows_suppressed_div_writebacks(self):
         spike_cc = (SCRIPT_DIR.parents[3] / "dv" / "cosim" /
@@ -2068,10 +2080,13 @@ class RegressionFrameworkTest(unittest.TestCase):
         spike_cosim = (SCRIPT_DIR.parents[3] / "dv" / "cosim" /
                        "spike_cosim.cc").read_text(encoding="utf-8")
 
-        self.assertIn("EH2 observes AXI reads after LSU widening", spike_cosim)
+        # EH2 LSU widens both loads AND stores at the AXI boundary (sub-word
+        # accesses become full aligned words with extra strb bits). spike_cosim
+        # accepts BE supersets on either side — see ADR-0005.
+        self.assertIn("EH2 widens both loads AND stores", spike_cosim)
         self.assertIn("!store && ((expected_be & ~top_pending_access_info.be) != 0)",
                       spike_cosim)
-        self.assertIn("store && expected_be != top_pending_access_info.be",
+        self.assertIn("store && ((expected_be & ~top_pending_access_info.be) != 0)",
                       spike_cosim)
 
     def test_spike_cosim_allows_eh2_forwarded_load_without_pending_dside(self):

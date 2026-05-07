@@ -368,6 +368,10 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   endfunction
 
   function bit must_wait_for_memory_access(eh2_trace_seq_item item);
+    // EH2 forwarded/internal loads can retire without an external LSU AXI transaction
+    // (DCCM hits, store-to-load forwarding, ICCM/PIC accesses). For loads we gate on
+    // the async nb-load wb hint instead — see needs_async_wb. Stores/AMOs always
+    // issue an AXI write, so they do gate on must_wait_for_memory_access.
     if (is_load_instruction(item)) return 1'b0;
     return is_store_or_amo_instruction(item);
   endfunction
