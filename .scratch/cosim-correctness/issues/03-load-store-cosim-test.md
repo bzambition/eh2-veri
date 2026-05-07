@@ -1,6 +1,6 @@
 # Issue 03: Load/store cosim test
 
-Status: ready-for-agent (data RF bug open)
+Status: done (cosim_load_store PASS — Phase 3 BE 语义修复后稳定)
 Milestone: 1 - Minimal cosim loop
 Type: AFK
 
@@ -30,3 +30,9 @@ This verifies:
 ## Blocked by
 
 - Issue 01 (cosim smoke test must pass first)
+
+## 完成证据
+
+- cosim_testlist.yaml 中 `cosim_load_store` PASS（build/sf_full2、build/sf_baseline2 均通过）
+- CONTEXT.md §6 RISK-8: RESOLVED — Phase 3 BE 语义放宽后 1848 trace / 0 mismatch
+- mismatch_count=0 稳定可复现
