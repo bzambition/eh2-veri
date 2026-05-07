@@ -56,3 +56,11 @@
   config: eh2_directed
   test_srcs: tests/asm/directed_nb_load_chain.S
   iterations: 1
+
+- test: directed_axi4_error_inject
+  desc: "AXI4 SLVERR/DECERR injection triggers load access fault"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_axi4_error_inject.S
+  cosim: disabled
+  sim_opts: '+enable_axi4_error_inject=1 +axi4_error_pct=100'
+  iterations: 1

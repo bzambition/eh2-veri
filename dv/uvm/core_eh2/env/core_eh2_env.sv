@@ -119,15 +119,19 @@ class core_eh2_env extends uvm_env;
       `uvm_info("env", "Instruction monitoring interface not set (optional)", UVM_LOW)
 
     // Configure AXI4 error injection on LSU driver (only when active)
+    // NOTE: driver is not yet built here (build_phase is top-down, agent's
+    // build_phase runs after env's). Configuration is deferred to connect_phase.
+  endfunction
+
+  function void connect_phase(uvm_phase phase);
+    super.connect_phase(phase);
+
+    // Configure AXI4 error injection on LSU driver (driver is now built)
     if (cfg.enable_axi4_error_inject && lsu_agent.driver != null) begin
       lsu_agent.driver.enable_error_inject = 1;
       lsu_agent.driver.error_pct           = cfg.axi4_error_pct;
       `uvm_info("env", $sformatf("AXI4 error injection enabled on LSU (pct=%0d)", cfg.axi4_error_pct), UVM_LOW)
     end
-  endfunction
-
-  function void connect_phase(uvm_phase phase);
-    super.connect_phase(phase);
 
     // Connect trace monitor to co-simulation agent's scoreboard
     if (cfg.enable_cosim && cosim_agt != null) begin
