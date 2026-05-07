@@ -9,10 +9,47 @@
 //   - eh2_atomic_stream: LR/SC atomic sequences
 
 // ---------------------------------------------------------------------------
+// EH2 Base Directed Stream
+//
+// riscv_directed_instr_stream::post_randomize() expects instr_list to already
+// be populated (it dereferences instr_list[0] / instr_list[$]). EH2 streams
+// fill instr_list inside gen_instr(...), but riscv-dv never calls that —
+// generate_directed_instr_stream() only triggers randomize() and relies on
+// post_randomize() to materialise the instructions. Without this base class,
+// every EH2 stream produces an empty instr_list and crashes with
+// "Null object access" at riscv_directed_instr_lib.sv:33.
+//
+// Bridge: override post_randomize() to invoke gen_instr() first, then call
+// the parent post_randomize() which sets atomic/has_label/comment markers.
+// ---------------------------------------------------------------------------
+virtual class eh2_base_directed_stream extends riscv_directed_instr_stream;
+
+  function new(string name = "");
+    super.new(name);
+  endfunction
+
+  // Subclasses populate instr_list here. Defaults match the riscv-dv signature
+  // — `no_branch=1, no_load_store=1` keeps streams architecturally inert
+  // unless they explicitly opt in.
+  pure virtual function void gen_instr(bit no_branch = 1, bit no_load_store = 1,
+                                       bit is_debug_program = 0);
+
+  function void post_randomize();
+    gen_instr();
+    if (instr_list.size() == 0) begin
+      `uvm_fatal(get_full_name(),
+                 "EH2 directed stream produced an empty instr_list")
+    end
+    super.post_randomize();
+  endfunction
+
+endclass
+
+// ---------------------------------------------------------------------------
 // CSR Access Stream
 // Generates random CSR read/write/set/clear sequences for EH2 custom CSRs
 // ---------------------------------------------------------------------------
-class eh2_csr_access_stream extends riscv_directed_instr_stream;
+class eh2_csr_access_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_csr_access_stream)
 
@@ -74,7 +111,7 @@ endclass
 // Bitmanip Instruction Stream
 // Generates Zba/Zbb/Zbc/Zbs instructions
 // ---------------------------------------------------------------------------
-class eh2_bitmanip_stream extends riscv_directed_instr_stream;
+class eh2_bitmanip_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_bitmanip_stream)
 
@@ -84,24 +121,19 @@ class eh2_bitmanip_stream extends riscv_directed_instr_stream;
   };
 
   // Zbb (basic bit manipulation)
+  // NOTE: SEXT_B, SEXT_H, ZEXT_H, ROL, ROR, RORI, ORC_B, REV8 require GCC
+  // assembler 12+ to encode. The toolchain at /home/Riscv_Tools (gcc 11.1)
+  // accepts only the subset below — keep this list trimmed until the
+  // toolchain is upgraded or `as -misa-spec=...` is wired up.
   localparam riscv_instr_name_t ZBB_INSTRS[] = '{
     ANDN, ORN, XNOR, CLZ, CTZ, CPOP,
-    MAX, MAXU, MIN, MINU,
-    SEXT_B, SEXT_H, ZEXT_H,
-    ROL, ROR, RORI,
-    ORC_B, REV8
+    MAX, MAXU, MIN, MINU
   };
 
-  // Zbc (carry-less multiply)
-  localparam riscv_instr_name_t ZBC_INSTRS[] = '{
-    CLMUL, CLMULH, CLMULR
-  };
-
-  // Zbs (single-bit operations)
-  localparam riscv_instr_name_t ZBS_INSTRS[] = '{
-    BCLR, BCLRI, BEXT, BEXTI,
-    BINV, BINVI, BSET, BSETI
-  };
+  // Zbc and Zbs are not yet supported by the host gcc 11.1 assembler. RTL
+  // implements them; re-enable here once the toolchain ships zbc/zbs.
+  localparam riscv_instr_name_t ZBC_INSTRS[] = '{};
+  localparam riscv_instr_name_t ZBS_INSTRS[] = '{};
 
   function new(string name = "");
     super.new(name);
@@ -130,6 +162,12 @@ class eh2_bitmanip_stream extends riscv_directed_instr_stream;
       if (instr.has_rs2)
         instr.rs2 = riscv_reg_t'($urandom_range(1, 31));
       instr.rd = riscv_reg_t'($urandom_range(1, 31));
+      // Shift-immediate instructions (SLLI/SRLI) need a shamt — riscv_instr
+      // does not auto-populate it from ALU defaults.
+      if (all_bitmanip[idx] inside {SLLI, SRLI}) begin
+        instr.imm = $urandom_range(0, 31);
+        instr.imm_str = $sformatf("%0d", instr.imm);
+      end
       instr_list.push_back(instr);
     end
   endfunction
@@ -140,7 +178,7 @@ endclass
 // PIC Interrupt CSR Stream
 // Manipulates PIC-related CSRs to exercise interrupt controller
 // ---------------------------------------------------------------------------
-class eh2_pic_int_stream extends riscv_directed_instr_stream;
+class eh2_pic_int_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_pic_int_stream)
 
@@ -182,6 +220,7 @@ class eh2_pic_int_stream extends riscv_directed_instr_stream;
     instr.pseudo_instr_name = LI;
     instr.rd = riscv_reg_t'(5);  // t0
     instr.imm = val;
+    instr.imm_str = $sformatf("0x%0h", val);
     return instr;
   endfunction
 
@@ -202,7 +241,7 @@ endclass
 // Debug CSR Access Stream
 // Accesses debug-mode CSRs (dcsr, dpc) - requires debug mode
 // ---------------------------------------------------------------------------
-class eh2_debug_csr_stream extends riscv_directed_instr_stream;
+class eh2_debug_csr_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_debug_csr_stream)
 
@@ -245,7 +284,7 @@ endclass
 // LR/SC Atomic Stream
 // Generates load-reserve / store-conditional sequences
 // ---------------------------------------------------------------------------
-class eh2_atomic_stream extends riscv_directed_instr_stream;
+class eh2_atomic_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_atomic_stream)
 
@@ -274,6 +313,7 @@ class eh2_atomic_stream extends riscv_directed_instr_stream;
       instr.rs1 = riscv_reg_t'(base_reg + 1);
       instr.rd = riscv_reg_t'(base_reg + 2);
       instr.imm = $urandom_range(1, 16);
+      instr.imm_str = $sformatf("%0d", instr.imm);
       instr_list.push_back(instr);
 
       // SC.W
@@ -284,16 +324,10 @@ class eh2_atomic_stream extends riscv_directed_instr_stream;
       instr.rs2 = riscv_reg_t'(base_reg + 2);
       instr.rd = riscv_reg_t'(base_reg + 3);
       instr_list.push_back(instr);
-
-      // Branch if SC failed (rd != 0)
-      instr = riscv_instr::get_instr(BNE);
-      instr.has_rs1 = 1;
-      instr.rs1 = riscv_reg_t'(base_reg + 3);
-      instr.has_rs2 = 1;
-      instr.rs2 = ZERO;
-      instr.imm = -3 * 4;  // Branch back to LR
-      instr.branch_assigned = 1;
-      instr_list.push_back(instr);
+      // (Originally followed by a BNE retry loop — removed because riscv-dv
+      // emits BNE immediates as unresolved labels which the linker rejects.
+      // EH2 LR/SC semantics are still exercised: SC.W result in rd indicates
+      // success/fail, downstream tests can branch on it via standard mix.)
     end
   endfunction
 
@@ -303,7 +337,7 @@ endclass
 // Breakpoint Stream
 // Generates EBREAK instructions to test debug mode entry
 // ---------------------------------------------------------------------------
-class eh2_breakpoint_stream extends riscv_directed_instr_stream;
+class eh2_breakpoint_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_breakpoint_stream)
 
@@ -334,7 +368,7 @@ endclass
 // Exception Stream
 // Generates instructions that cause various exceptions
 // ---------------------------------------------------------------------------
-class eh2_exception_stream extends riscv_directed_instr_stream;
+class eh2_exception_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_exception_stream)
 
@@ -357,6 +391,7 @@ class eh2_exception_stream extends riscv_directed_instr_stream;
       instr.rs1 = riscv_reg_t'($urandom_range(1, 31));
       instr.rd = riscv_reg_t'($urandom_range(1, 31));
       instr.imm = 1;  // Misaligned offset
+      instr.imm_str = $sformatf("%0d", instr.imm);
       instr_list.push_back(instr);
     end
   endfunction
@@ -367,7 +402,7 @@ endclass
 // CSR Hazard Stream
 // Generates back-to-back CSR accesses to test pipeline hazards
 // ---------------------------------------------------------------------------
-class eh2_csr_hazard_stream extends riscv_directed_instr_stream;
+class eh2_csr_hazard_stream extends eh2_base_directed_stream;
 
   `uvm_object_utils(eh2_csr_hazard_stream)
 

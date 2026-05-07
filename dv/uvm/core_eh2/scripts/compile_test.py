@@ -300,9 +300,11 @@ def compile_assembly(asm_path: str, bin_path: str, linker_script: str,
     include_opts = [f"-I{include_dir}" for include_dir in compile_include_dirs]
 
     # Compile assembly to object
+    # rv32imac base + zba/zbb bitmanip subsets supported by host gcc 11.1.
+    # zbc/zbs need gcc 12+; re-add when the toolchain is upgraded.
     compile_cmd = [
         gcc,
-        "-march=rv32imac",
+        "-march=rv32imac_zba_zbb",
         "-mabi=ilp32",
         "-static",
         "-mcmodel=medany",
