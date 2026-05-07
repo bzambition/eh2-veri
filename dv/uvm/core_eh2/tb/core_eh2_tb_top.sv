@@ -51,226 +51,11 @@ module core_eh2_tb_top;
   // DUT Signals
   //--------------------------------------------------------------------------
 
-  // Reset vector and NMI
-  logic [31:0]  reset_vector;
-  logic [31:0]  nmi_vector;
-  logic         nmi_int;
-
-  // JTAG
-  logic         jtag_tck;
-  logic         jtag_tms;
-  logic         jtag_tdi;
-  logic         jtag_trst_n;
-  logic         jtag_tdo;
-  logic [31:1]  jtag_id;
-
-  // Trace
-  logic [`RV_NUM_THREADS-1:0][63:0] trace_rv_i_insn_ip;
-  logic [`RV_NUM_THREADS-1:0][63:0] trace_rv_i_address_ip;
-  logic [`RV_NUM_THREADS-1:0][1:0]  trace_rv_i_valid_ip;
-  logic [`RV_NUM_THREADS-1:0][1:0]  trace_rv_i_exception_ip;
-  logic [`RV_NUM_THREADS-1:0][4:0]  trace_rv_i_ecause_ip;
-  logic [`RV_NUM_THREADS-1:0][1:0]  trace_rv_i_interrupt_ip;
-  logic [`RV_NUM_THREADS-1:0][31:0] trace_rv_i_tval_ip;
-  // Verification-only RVFI-equivalent writeback view (lane 0 = i0, lane 1 = i1).
-  logic [`RV_NUM_THREADS-1:0][1:0]  trace_rv_i_rd_valid_ip;
-  logic [`RV_NUM_THREADS-1:0][9:0]  trace_rv_i_rd_addr_ip;
-  logic [`RV_NUM_THREADS-1:0][63:0] trace_rv_i_rd_wdata_ip;
-
-  // Debug/Control
-  logic [`RV_NUM_THREADS-1:0] o_debug_mode_status;
-  logic [`RV_NUM_THREADS-1:0] o_cpu_halt_ack;
-  logic [`RV_NUM_THREADS-1:0] o_cpu_halt_status;
-  logic [`RV_NUM_THREADS-1:0] o_cpu_run_ack;
-  logic [`RV_NUM_THREADS-1:0] mpc_debug_halt_req;
-  logic [`RV_NUM_THREADS-1:0] mpc_debug_run_req;
-  logic [`RV_NUM_THREADS-1:0] mpc_reset_run_req;
-  logic [`RV_NUM_THREADS-1:0] mpc_debug_halt_ack;
-  logic [`RV_NUM_THREADS-1:0] mpc_debug_run_ack;
-  logic [`RV_NUM_THREADS-1:0] debug_brkpt_status;
-  logic [`RV_NUM_THREADS-1:0] dec_tlu_mhartstart;
-  logic [`RV_NUM_THREADS-1:0] i_cpu_run_req;
-
-  // Performance counters
-  logic [`RV_NUM_THREADS-1:0][1:0] dec_tlu_perfcnt0;
-  logic [`RV_NUM_THREADS-1:0][1:0] dec_tlu_perfcnt1;
-  logic [`RV_NUM_THREADS-1:0][1:0] dec_tlu_perfcnt2;
-  logic [`RV_NUM_THREADS-1:0][1:0] dec_tlu_perfcnt3;
-
-  // Interrupts
-  logic [`RV_NUM_THREADS-1:0] timer_int;
-  logic [`RV_NUM_THREADS-1:0] soft_int;
-  logic [`RV_PIC_TOTAL_INT:1] extintsrc_req;
-
-  // Clock enables
-  logic        lsu_bus_clk_en;
-  logic        ifu_bus_clk_en;
-  logic        dbg_bus_clk_en;
-  logic        dma_bus_clk_en;
-
   //--------------------------------------------------------------------------
-  // AXI4 Signals - LSU Port
+  // DUT Signal Declarations (DUT, JTAG, trace, debug, AXI4 LSU/IFU/SB/DMA)
   //--------------------------------------------------------------------------
-  wire                            lsu_axi_awvalid;
-  wire                            lsu_axi_awready;
-  wire [`RV_LSU_BUS_TAG-1:0]     lsu_axi_awid;
-  wire [31:0]                     lsu_axi_awaddr;
-  wire [3:0]                      lsu_axi_awregion;
-  wire [7:0]                      lsu_axi_awlen;
-  wire [2:0]                      lsu_axi_awsize;
-  wire [1:0]                      lsu_axi_awburst;
-  wire                            lsu_axi_awlock;
-  wire [3:0]                      lsu_axi_awcache;
-  wire [2:0]                      lsu_axi_awprot;
-  wire [3:0]                      lsu_axi_awqos;
-  wire                            lsu_axi_wvalid;
-  wire                            lsu_axi_wready;
-  wire [63:0]                     lsu_axi_wdata;
-  wire [7:0]                      lsu_axi_wstrb;
-  wire                            lsu_axi_wlast;
-  wire                            lsu_axi_bvalid;
-  wire                            lsu_axi_bready;
-  wire [1:0]                      lsu_axi_bresp;
-  wire [`RV_LSU_BUS_TAG-1:0]     lsu_axi_bid;
-  wire                            lsu_axi_arvalid;
-  wire                            lsu_axi_arready;
-  wire [`RV_LSU_BUS_TAG-1:0]     lsu_axi_arid;
-  wire [31:0]                     lsu_axi_araddr;
-  wire [3:0]                      lsu_axi_arregion;
-  wire [7:0]                      lsu_axi_arlen;
-  wire [2:0]                      lsu_axi_arsize;
-  wire [1:0]                      lsu_axi_arburst;
-  wire                            lsu_axi_arlock;
-  wire [3:0]                      lsu_axi_arcache;
-  wire [2:0]                      lsu_axi_arprot;
-  wire [3:0]                      lsu_axi_arqos;
-  wire                            lsu_axi_rvalid;
-  wire                            lsu_axi_rready;
-  wire [`RV_LSU_BUS_TAG-1:0]     lsu_axi_rid;
-  wire [63:0]                     lsu_axi_rdata;
-  wire [1:0]                      lsu_axi_rresp;
-  wire                            lsu_axi_rlast;
+  `include "core_eh2_dut_signals.svh"
 
-  //--------------------------------------------------------------------------
-  // AXI4 Signals - IFU Port
-  //--------------------------------------------------------------------------
-  wire                            ifu_axi_awvalid;
-  wire                            ifu_axi_awready;
-  wire [`RV_IFU_BUS_TAG-1:0]     ifu_axi_awid;
-  wire [31:0]                     ifu_axi_awaddr;
-  wire [3:0]                      ifu_axi_awregion;
-  wire [7:0]                      ifu_axi_awlen;
-  wire [2:0]                      ifu_axi_awsize;
-  wire [1:0]                      ifu_axi_awburst;
-  wire                            ifu_axi_awlock;
-  wire [3:0]                      ifu_axi_awcache;
-  wire [2:0]                      ifu_axi_awprot;
-  wire [3:0]                      ifu_axi_awqos;
-  wire                            ifu_axi_wvalid;
-  wire                            ifu_axi_wready;
-  wire [63:0]                     ifu_axi_wdata;
-  wire [7:0]                      ifu_axi_wstrb;
-  wire                            ifu_axi_wlast;
-  wire                            ifu_axi_bvalid;
-  wire                            ifu_axi_bready;
-  wire [1:0]                      ifu_axi_bresp;
-  wire [`RV_IFU_BUS_TAG-1:0]     ifu_axi_bid;
-  wire                            ifu_axi_arvalid;
-  wire                            ifu_axi_arready;
-  wire [`RV_IFU_BUS_TAG-1:0]     ifu_axi_arid;
-  wire [31:0]                     ifu_axi_araddr;
-  wire [3:0]                      ifu_axi_arregion;
-  wire [7:0]                      ifu_axi_arlen;
-  wire [2:0]                      ifu_axi_arsize;
-  wire [1:0]                      ifu_axi_arburst;
-  wire                            ifu_axi_arlock;
-  wire [3:0]                      ifu_axi_arcache;
-  wire [2:0]                      ifu_axi_arprot;
-  wire [3:0]                      ifu_axi_arqos;
-  wire                            ifu_axi_rvalid;
-  wire                            ifu_axi_rready;
-  wire [`RV_IFU_BUS_TAG-1:0]     ifu_axi_rid;
-  wire [63:0]                     ifu_axi_rdata;
-  wire [1:0]                      ifu_axi_rresp;
-  wire                            ifu_axi_rlast;
-
-  //--------------------------------------------------------------------------
-  // AXI4 Signals - SB (Debug) Port
-  //--------------------------------------------------------------------------
-  wire                            sb_axi_awvalid;
-  wire                            sb_axi_awready;
-  wire [`RV_SB_BUS_TAG-1:0]      sb_axi_awid;
-  wire [31:0]                     sb_axi_awaddr;
-  wire [3:0]                      sb_axi_awregion;
-  wire [7:0]                      sb_axi_awlen;
-  wire [2:0]                      sb_axi_awsize;
-  wire [1:0]                      sb_axi_awburst;
-  wire                            sb_axi_awlock;
-  wire [3:0]                      sb_axi_awcache;
-  wire [2:0]                      sb_axi_awprot;
-  wire [3:0]                      sb_axi_awqos;
-  wire                            sb_axi_wvalid;
-  wire                            sb_axi_wready;
-  wire [63:0]                     sb_axi_wdata;
-  wire [7:0]                      sb_axi_wstrb;
-  wire                            sb_axi_wlast;
-  wire                            sb_axi_bvalid;
-  wire                            sb_axi_bready;
-  wire [1:0]                      sb_axi_bresp;
-  wire [`RV_SB_BUS_TAG-1:0]      sb_axi_bid;
-  wire                            sb_axi_arvalid;
-  wire                            sb_axi_arready;
-  wire [`RV_SB_BUS_TAG-1:0]      sb_axi_arid;
-  wire [31:0]                     sb_axi_araddr;
-  wire [3:0]                      sb_axi_arregion;
-  wire [7:0]                      sb_axi_arlen;
-  wire [2:0]                      sb_axi_arsize;
-  wire [1:0]                      sb_axi_arburst;
-  wire                            sb_axi_arlock;
-  wire [3:0]                      sb_axi_arcache;
-  wire [2:0]                      sb_axi_arprot;
-  wire [3:0]                      sb_axi_arqos;
-  wire                            sb_axi_rvalid;
-  wire                            sb_axi_rready;
-  wire [`RV_SB_BUS_TAG-1:0]      sb_axi_rid;
-  wire [63:0]                     sb_axi_rdata;
-  wire [1:0]                      sb_axi_rresp;
-  wire                            sb_axi_rlast;
-
-  //--------------------------------------------------------------------------
-  // AXI4 Signals - DMA Port (tied off)
-  //--------------------------------------------------------------------------
-  wire                            dma_axi_awvalid;
-  wire                            dma_axi_awready;
-  wire [`RV_DMA_BUS_TAG-1:0]     dma_axi_awid;
-  wire [31:0]                     dma_axi_awaddr;
-  wire [2:0]                      dma_axi_awsize;
-  wire [2:0]                      dma_axi_awprot;
-  wire [7:0]                      dma_axi_awlen;
-  wire [1:0]                      dma_axi_awburst;
-  wire                            dma_axi_wvalid;
-  wire                            dma_axi_wready;
-  wire [63:0]                     dma_axi_wdata;
-  wire [7:0]                      dma_axi_wstrb;
-  wire                            dma_axi_wlast;
-  wire                            dma_axi_bvalid;
-  wire                            dma_axi_bready;
-  wire [1:0]                      dma_axi_bresp;
-  wire [`RV_DMA_BUS_TAG-1:0]     dma_axi_bid;
-  wire                            dma_axi_arvalid;
-  wire                            dma_axi_arready;
-  wire [`RV_DMA_BUS_TAG-1:0]     dma_axi_arid;
-  wire [31:0]                     dma_axi_araddr;
-  wire [2:0]                      dma_axi_arsize;
-  wire [2:0]                      dma_axi_arprot;
-  wire [7:0]                      dma_axi_arlen;
-  wire [1:0]                      dma_axi_arburst;
-  wire                            dma_axi_rvalid;
-  wire                            dma_axi_rready;
-  wire [`RV_DMA_BUS_TAG-1:0]     dma_axi_rid;
-  wire [63:0]                     dma_axi_rdata;
-  wire [1:0]                      dma_axi_rresp;
-  wire                            dma_axi_rlast;
 
   //--------------------------------------------------------------------------
   // Mailbox Detection
@@ -353,8 +138,8 @@ module core_eh2_tb_top;
     reset_vector       = 32'h80000000;
     nmi_vector         = 32'h00000000;
     jtag_id            = 31'h1;
-    // mpc_debug_halt_req/run_req/reset_run_req driven by halt_run_intf (assign below)
-    // i_cpu_halt_req/run_req driven by halt_run_intf (assign below)
+    // mpc_debug_halt_req/run_req/reset_run_req driven by eh2_halt_run_intf (assign below)
+    // i_cpu_halt_req/run_req driven by eh2_halt_run_intf (assign below)
     lsu_bus_clk_en     = 1;
     ifu_bus_clk_en     = 1;
     dbg_bus_clk_en     = 1;
@@ -952,21 +737,13 @@ module core_eh2_tb_top;
   //--------------------------------------------------------------------------
   // DUT Probe Interface Instance (for register writeback monitoring)
   //--------------------------------------------------------------------------
-  eh2_dut_probe_intf dut_probe_intf (.clk(core_clk), .rst_n(rst_l));
+  eh2_dut_probe_if dut_probe_intf (.clk(core_clk), .rst_n(rst_l));
 
-  // Connect DUT probe signals to internal DUT hierarchy
-  // These use hierarchical references to the DUT's decode unit
-  assign dut_probe_intf.wb_valid = {`DEC.decode.wbd.i1v &
-                                     ~`DEC.decode.dec_tlu_i1_kill_writeb_wb &
-                                     ~`DEC.decode.cam_i1_load_kill_wen[`DEC.decode.wbd.i1tid],
-                                    `DEC.decode.wbd.i0v &
-                                     ~`DEC.decode.dec_tlu_i0_kill_writeb_wb &
-                                     ~`DEC.decode.wbd.i0div &
-                                     ~`DEC.decode.cam_i0_load_kill_wen[`DEC.decode.wbd.i0tid]};
-  assign dut_probe_intf.wb_dest  = {`DEC.decode.wbd.i1rd, `DEC.decode.wbd.i0rd};
-  assign dut_probe_intf.wb_data  = {`DEC.decode.i1_result_wb[31:0],
-                                    `DEC.decode.i0_result_wb[31:0]};
-  assign dut_probe_intf.wb_tid   = {`DEC.decode.wbd.i1tid, `DEC.decode.wbd.i0tid};
+  // Connect DUT probe signals to internal DUT hierarchy.
+  // Phase 1 note: regular wb_valid/wb_dest/wb_data/wb_suppress fields are no
+  // longer probed here — they ride along the RTL trace packet now (ADR-0004).
+  // Only async writeback (DIV / NB-load) and CSR/exception mirror state are
+  // exposed via this interface.
 
   assign dut_probe_intf.div_cancel = `DEC.dec_div_cancel;
   assign dut_probe_intf.div_cancel_overwrite = `DEC.dec_div_cancel_overwrite;
@@ -978,10 +755,6 @@ module core_eh2_tb_top;
   assign dut_probe_intf.nb_load_wen   = `DEC.dec_nonblock_load_wen[0];
   assign dut_probe_intf.nb_load_waddr = `DEC.dec_nonblock_load_waddr[0];
   assign dut_probe_intf.nb_load_data  = `DEC.lsu_nonblock_load_data;
-
-  // Writeback suppress signals (load killed by interrupt/debug)
-  assign dut_probe_intf.wb_suppress = {`DEC.decode.dec_tlu_i1_kill_writeb_wb,
-                                        `DEC.decode.dec_tlu_i0_kill_writeb_wb};
 
   // Interrupt/NMI/debug state for cosim notification
   // Construct MIP from external interrupt sources:
@@ -1065,7 +838,7 @@ module core_eh2_tb_top;
   //--------------------------------------------------------------------------
   // Halt/Run Interface Instance (for halt/run stimulus)
   //--------------------------------------------------------------------------
-  halt_run_intf halt_run_vif (.clk(core_clk), .rst_n(rst_l));
+  eh2_halt_run_intf halt_run_vif (.clk(core_clk), .rst_n(rst_l));
 
   // Connect halt/run interface to DUT signals
   assign mpc_debug_halt_req = halt_run_vif.mpc_debug_halt_req;
@@ -1258,13 +1031,13 @@ module core_eh2_tb_top;
 
     // Store trace and DUT probe interfaces
     uvm_config_db#(virtual eh2_trace_intf)::set(null, "*trace_monitor*", "vif", trace_intf);
-    uvm_config_db#(virtual eh2_dut_probe_intf)::set(null, "*dut_probe_monitor*", "vif", dut_probe_intf);
+    uvm_config_db#(virtual eh2_dut_probe_if)::set(null, "*dut_probe_monitor*", "vif", dut_probe_intf);
 
     // Also provide DUT probe interface to trace monitor (for interrupt/debug state sampling)
-    uvm_config_db#(virtual eh2_dut_probe_intf)::set(null, "*trace_monitor*", "probe_vif", dut_probe_intf);
+    uvm_config_db#(virtual eh2_dut_probe_if)::set(null, "*trace_monitor*", "probe_vif", dut_probe_intf);
 
     // Provide DUT probe interface to cosim agent's scoreboard (for reset monitoring)
-    uvm_config_db#(virtual eh2_dut_probe_intf)::set(null, "*cosim_agt*", "probe_vif", dut_probe_intf);
+    uvm_config_db#(virtual eh2_dut_probe_if)::set(null, "*cosim_agt*", "probe_vif", dut_probe_intf);
 
     // Store IRQ interface
     uvm_config_db#(virtual eh2_irq_intf)::set(null, "*", "irq_vif", irq_intf);
@@ -1273,7 +1046,7 @@ module core_eh2_tb_top;
     uvm_config_db#(virtual eh2_jtag_intf)::set(null, "*", "jtag_vif", jtag_intf);
 
     // Store Halt/Run interface
-    uvm_config_db#(virtual halt_run_intf)::set(null, "*", "halt_run_vif", halt_run_vif);
+    uvm_config_db#(virtual eh2_halt_run_intf)::set(null, "*", "halt_run_vif", halt_run_vif);
 
     // Store fetch enable interface
     uvm_config_db#(virtual fetch_enable_intf)::set(null, "*", "fetch_vif", fetch_en_intf);

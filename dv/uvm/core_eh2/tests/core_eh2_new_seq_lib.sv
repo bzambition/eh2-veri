@@ -19,7 +19,7 @@ class core_eh2_base_new_seq #(type REQ = uvm_sequence_item) extends uvm_sequence
   `uvm_object_param_utils(core_eh2_base_new_seq#(REQ))
 
   // Virtual interface for DUT probing
-  virtual eh2_dut_probe_intf dut_vif;
+  virtual eh2_dut_probe_if dut_vif;
 
   bit          stop_seq;
   bit          seq_finished;
@@ -49,7 +49,7 @@ class core_eh2_base_new_seq #(type REQ = uvm_sequence_item) extends uvm_sequence
 
   function new(string name = "");
     super.new(name);
-    if (!uvm_config_db#(virtual eh2_dut_probe_intf)::get(null, "", "probe_vif", dut_vif)) begin
+    if (!uvm_config_db#(virtual eh2_dut_probe_if)::get(null, "", "probe_vif", dut_vif)) begin
       `uvm_warning(get_name(), "Cannot get probe_vif for new_seq_lib")
     end
   endfunction

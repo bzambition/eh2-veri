@@ -14,7 +14,7 @@ class eh2_dut_probe_monitor extends uvm_monitor;
 
   `uvm_component_utils(eh2_dut_probe_monitor)
 
-  virtual eh2_dut_probe_intf vif;
+  virtual eh2_dut_probe_if vif;
   uvm_analysis_port #(eh2_trace_seq_item) ap;
 
   int wb_count;
@@ -30,7 +30,7 @@ class eh2_dut_probe_monitor extends uvm_monitor;
 
   function void connect_phase(uvm_phase phase);
     super.connect_phase(phase);
-    if (!uvm_config_db#(virtual eh2_dut_probe_intf)::get(this, "", "vif", vif)) begin
+    if (!uvm_config_db#(virtual eh2_dut_probe_if)::get(this, "", "vif", vif)) begin
       `uvm_warning("dut_probe", "Could not get DUT probe virtual interface - async writeback monitoring disabled")
     end
   endfunction

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Halt/Run Sequence Item for EH2 Verification
 
-class halt_run_seq_item extends uvm_sequence_item;
+class eh2_halt_run_seq_item extends uvm_sequence_item;
 
   // Action type
   typedef enum bit [1:0] {
@@ -18,12 +18,12 @@ class halt_run_seq_item extends uvm_sequence_item;
     delay inside {[0:100]};
   }
 
-  `uvm_object_utils_begin(halt_run_seq_item)
+  `uvm_object_utils_begin(eh2_halt_run_seq_item)
     `uvm_field_enum(action_e, action, UVM_ALL_ON)
     `uvm_field_int(delay, UVM_ALL_ON)
   `uvm_object_utils_end
 
-  function new(string name = "halt_run_seq_item");
+  function new(string name = "eh2_halt_run_seq_item");
     super.new(name);
   endfunction
 

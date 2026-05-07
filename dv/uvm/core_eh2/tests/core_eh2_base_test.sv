@@ -34,7 +34,7 @@ class core_eh2_base_test extends uvm_test;
 
   // Testbench service interfaces
   virtual core_eh2_tb_intf tb_vif;
-  virtual halt_run_intf    halt_run_vif;
+  virtual eh2_halt_run_intf    halt_run_vif;
 
   // Test identity
   string test_name = "core_eh2_base_test";
@@ -83,7 +83,7 @@ class core_eh2_base_test extends uvm_test;
       `uvm_fatal(test_name, "Cannot get tb_vif")
     end
 
-    if (!uvm_config_db#(virtual halt_run_intf)::get(null, "", "halt_run_vif", halt_run_vif)) begin
+    if (!uvm_config_db#(virtual eh2_halt_run_intf)::get(null, "", "halt_run_vif", halt_run_vif)) begin
       `uvm_info(test_name, "halt_run_vif not set; halt/load helper tasks disabled", UVM_LOW)
     end
 

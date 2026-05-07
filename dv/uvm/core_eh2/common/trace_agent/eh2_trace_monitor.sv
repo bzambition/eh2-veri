@@ -17,7 +17,7 @@ class eh2_trace_monitor extends uvm_monitor;
 
   // Virtual interfaces
   virtual eh2_trace_intf #(.NUM_THREADS(1)) vif;
-  virtual eh2_dut_probe_intf probe_vif;
+  virtual eh2_dut_probe_if probe_vif;
 
   // Analysis port
   uvm_analysis_port #(eh2_trace_seq_item) ap;
@@ -42,7 +42,7 @@ class eh2_trace_monitor extends uvm_monitor;
       `uvm_fatal("trace_monitor", "Could not get trace virtual interface")
     end
     // DUT probe interface is optional - cosim notifications won't work without it
-    if (!uvm_config_db#(virtual eh2_dut_probe_intf)::get(this, "", "probe_vif", probe_vif)) begin
+    if (!uvm_config_db#(virtual eh2_dut_probe_if)::get(this, "", "probe_vif", probe_vif)) begin
       `uvm_warning("trace_monitor", "Could not get DUT probe interface - interrupt/debug state will be zero")
     end
   endfunction

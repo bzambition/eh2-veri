@@ -15,7 +15,7 @@ package core_eh2_test_pkg;
   import eh2_irq_agent_pkg::*;
   import eh2_jtag_agent_pkg::*;
   import eh2_cosim_agent_pkg::*;
-  import halt_run_agent_pkg::*;
+  import eh2_halt_run_agent_pkg::*;
 
   // Instruction tracking type (used by directed tests)
   typedef struct {

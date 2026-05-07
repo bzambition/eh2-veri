@@ -14,7 +14,7 @@ package core_eh2_env_pkg;
   import eh2_irq_agent_pkg::*;
   import eh2_jtag_agent_pkg::*;
   import eh2_cosim_agent_pkg::*;
-  import halt_run_agent_pkg::*;
+  import eh2_halt_run_agent_pkg::*;
 
   `include "core_eh2_vseqr.sv"
   `include "core_eh2_env_cfg.sv"

@@ -4,7 +4,7 @@
 // Drives MPC halt/run signals and CPU halt/run signals.
 // Monitors acknowledgment signals.
 
-interface halt_run_intf (
+interface eh2_halt_run_intf (
   input logic clk,
   input logic rst_n
 );

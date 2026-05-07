@@ -37,7 +37,7 @@ class core_eh2_env extends uvm_env;
   eh2_jtag_agent jtag_agent;
 
   // Halt/Run agent (active - drives halt/run)
-  halt_run_agent halt_run_agt;
+  eh2_halt_run_agent halt_run_agt;
 
   // Trace monitor
   eh2_trace_monitor trace_monitor;
@@ -89,7 +89,7 @@ class core_eh2_env extends uvm_env;
     uvm_config_db#(uvm_active_passive_enum)::set(this, "jtag_agent", "is_active", UVM_ACTIVE);
 
     // Halt/Run agent (active)
-    halt_run_agt = halt_run_agent::type_id::create("halt_run_agt", this);
+    halt_run_agt = eh2_halt_run_agent::type_id::create("halt_run_agt", this);
     uvm_config_db#(uvm_active_passive_enum)::set(this, "halt_run_agt", "is_active", UVM_ACTIVE);
 
     // Trace monitor

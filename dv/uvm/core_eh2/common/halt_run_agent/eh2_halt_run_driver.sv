@@ -3,11 +3,11 @@
 //
 // Drives halt/run signals to the DUT via the halt_run interface.
 
-class halt_run_driver extends uvm_driver #(halt_run_seq_item);
+class eh2_halt_run_driver extends uvm_driver #(eh2_halt_run_seq_item);
 
-  `uvm_component_utils(halt_run_driver)
+  `uvm_component_utils(eh2_halt_run_driver)
 
-  virtual halt_run_intf vif;
+  virtual eh2_halt_run_intf vif;
 
   function new(string name, uvm_component parent);
     super.new(name, parent);
@@ -15,13 +15,13 @@ class halt_run_driver extends uvm_driver #(halt_run_seq_item);
 
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
-    if (!uvm_config_db#(virtual halt_run_intf)::get(this, "", "halt_run_vif", vif)) begin
+    if (!uvm_config_db#(virtual eh2_halt_run_intf)::get(this, "", "halt_run_vif", vif)) begin
       `uvm_fatal("halt_run_drv", "Failed to get halt_run interface")
     end
   endfunction
 
   task run_phase(uvm_phase phase);
-    halt_run_seq_item item;
+    eh2_halt_run_seq_item item;
 
     // Default: no halt request, run request active
     vif.driver_cb.mpc_debug_halt_req <= 1'b0;
@@ -38,7 +38,7 @@ class halt_run_driver extends uvm_driver #(halt_run_seq_item);
       end
 
       case (item.action)
-        halt_run_seq_item::HALT_CORE: begin
+        eh2_halt_run_seq_item::HALT_CORE: begin
           `uvm_info("halt_run_drv", "Asserting MPC debug halt", UVM_MEDIUM)
           vif.driver_cb.mpc_debug_halt_req <= 1'b1;
           vif.driver_cb.mpc_debug_run_req  <= 1'b0;
@@ -49,7 +49,7 @@ class halt_run_driver extends uvm_driver #(halt_run_seq_item);
           end
         end
 
-        halt_run_seq_item::RUN_CORE: begin
+        eh2_halt_run_seq_item::RUN_CORE: begin
           `uvm_info("halt_run_drv", "Asserting MPC debug run", UVM_MEDIUM)
           vif.driver_cb.mpc_debug_halt_req <= 1'b0;
           vif.driver_cb.mpc_debug_run_req  <= 1'b1;
@@ -60,14 +60,14 @@ class halt_run_driver extends uvm_driver #(halt_run_seq_item);
           end
         end
 
-        halt_run_seq_item::RESET_RUN: begin
+        eh2_halt_run_seq_item::RESET_RUN: begin
           `uvm_info("halt_run_drv", "Asserting MPC reset run", UVM_MEDIUM)
           vif.driver_cb.mpc_reset_run_req <= 1'b0;
           repeat (5) @(posedge vif.clk);
           vif.driver_cb.mpc_reset_run_req <= 1'b1;
         end
 
-        halt_run_seq_item::CPU_HALT: begin
+        eh2_halt_run_seq_item::CPU_HALT: begin
           `uvm_info("halt_run_drv", "Asserting CPU halt request", UVM_MEDIUM)
           vif.driver_cb.i_cpu_halt_req <= 1'b1;
           vif.driver_cb.i_cpu_run_req  <= 1'b0;

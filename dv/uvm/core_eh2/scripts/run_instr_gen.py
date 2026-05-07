@@ -53,11 +53,14 @@ def write_overlay_testlist(work_dir: str, test_name: str,
     entry = load_test_entry(DEFAULT_TESTLIST, test_name)
     entry["iterations"] = 1
 
-    if extra_gen_opts:
-        base_opts = str(entry.get("gen_opts", "")).strip()
-        entry["gen_opts"] = " ".join(
-            opt for opt in [base_opts, extra_gen_opts.strip()] if opt
-        )
+    # Folded scalars (>) load with a trailing newline; strip it so the dumped
+    # YAML does not spill into a quoted multi-line scalar that riscv-dv's
+    # parser interprets as the value-plus-continuation.
+    base_opts = str(entry.get("gen_opts", "") or "").strip()
+    extra_gen_opts = (extra_gen_opts or "").strip()
+    entry["gen_opts"] = " ".join(
+        opt for opt in [base_opts, extra_gen_opts] if opt
+    )
 
     overlay_path = os.path.join(work_dir, "riscv_dv_testlist.yaml")
     with open(overlay_path, "w") as f:
@@ -150,18 +153,14 @@ def run_from_metadata(dir_metadata: str, test_dot_seed: str) -> bool:
     work_dir = Path(md.dir_tests) / test_dot_seed
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    gen_opts = md.gen_opts or ""
-    try:
-        entry = load_test_entry(DEFAULT_TESTLIST, test_name)
-        entry_opts = str(entry.get("gen_opts", "") or "").strip()
-        if entry_opts and not gen_opts:
-            gen_opts = entry_opts
-    except KeyError:
-        pass
+    # Pass only the metadata-supplied extra gen_opts. write_overlay_testlist
+    # itself reads the testlist's own gen_opts; duplicating them here would
+    # produce a YAML scalar with the value concatenated twice.
+    extra_gen_opts = md.gen_opts or ""
 
     return run_instr_gen(
         str(Path(md.eh2_root) / "vendor" / "google_riscv-dv"),
-        str(work_dir), test_name, gen_opts, seed, 1)
+        str(work_dir), test_name, extra_gen_opts, seed, 1)
 
 
 def main():

@@ -3,14 +3,14 @@
 //
 // Monitors halt/run status signals from the DUT.
 
-class halt_run_monitor extends uvm_monitor;
+class eh2_halt_run_monitor extends uvm_monitor;
 
-  `uvm_component_utils(halt_run_monitor)
+  `uvm_component_utils(eh2_halt_run_monitor)
 
-  virtual halt_run_intf vif;
+  virtual eh2_halt_run_intf vif;
 
   // Analysis port for halt/run events
-  uvm_analysis_port #(halt_run_seq_item) item_port;
+  uvm_analysis_port #(eh2_halt_run_seq_item) item_port;
 
   function new(string name, uvm_component parent);
     super.new(name, parent);
@@ -19,7 +19,7 @@ class halt_run_monitor extends uvm_monitor;
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
     item_port = new("item_port", this);
-    if (!uvm_config_db#(virtual halt_run_intf)::get(this, "", "halt_run_vif", vif)) begin
+    if (!uvm_config_db#(virtual eh2_halt_run_intf)::get(this, "", "halt_run_vif", vif)) begin
       `uvm_fatal("halt_run_mon", "Failed to get halt_run interface")
     end
   endfunction
