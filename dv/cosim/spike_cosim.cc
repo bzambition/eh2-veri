@@ -817,6 +817,13 @@ void SpikeCosim::misaligned_pmp_fixup(uint32_t addr, bool store) {
 }
 
 void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
+#define ENSURE_CSR_EXISTS(num) \
+  if (processor->get_state()->csrmap.find(num) == \
+      processor->get_state()->csrmap.end()) { \
+    processor->get_state()->csrmap[num] = \
+        std::make_shared<basic_csr_t>(processor.get(), num, 0); \
+  }
+
   switch (csr_num) {
     case CSR_MSTATUS: {
       // EH2 mstatus: only M-mode, no S/U mode bits
@@ -934,19 +941,77 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
       break;
     }
 
+    // --- mfdc (0x7F9): Feature Disable Control ---
+    // Bit-reverse/rearrange: RTL stores internal representation differently
+    // from the architectural value. Convert arch→internal, then internal→arch.
+    case 0x7F9: {
+      uint32_t mfdc_int = 0;
+      mfdc_int |= ((csr_val >> 0) & 0x1) << 0;
+      mfdc_int |= ((csr_val >> 2) & 0x3) << 1;
+      mfdc_int |= (~(csr_val >> 6) & 0x1) << 3;
+      mfdc_int |= ((csr_val >> 8) & 0xF) << 4;
+      mfdc_int |= ((csr_val >> 12) & 0x1) << 8;
+      mfdc_int |= (~(csr_val >> 16) & 0x7) << 9;
+      uint32_t fixed = 0;
+      fixed |= ((mfdc_int >> 0) & 0x1) << 0;
+      fixed |= ((mfdc_int >> 1) & 0x3) << 2;
+      fixed |= (~(mfdc_int >> 3) & 0x1) << 6;
+      fixed |= ((mfdc_int >> 4) & 0xF) << 8;
+      fixed |= ((mfdc_int >> 8) & 0x1) << 12;
+      fixed |= (~(mfdc_int >> 9) & 0x7) << 16;
+      ENSURE_CSR_EXISTS(csr_num);
+      processor->get_state()->csrmap[csr_num]->write(fixed);
+      break;
+    }
+
+    // --- mcgc (0x7F8): Clock Gating Control ---
+    // bit[9] is inverted: RTL stores ~bit[9] internally
+    case 0x7F8: {
+      uint32_t fixed = csr_val & 0x3FF;
+      fixed ^= 0x200;
+      ENSURE_CSR_EXISTS(csr_num);
+      processor->get_state()->csrmap[csr_num]->write(fixed);
+      break;
+    }
+
+    // --- micect (0x7F0) / miccmect (0x7F1) / mdccmect (0x7F2) ---
+    // Error Counter/Threshold: threshold in [31:27] saturates at 26
+    case 0x7F0:
+    case 0x7F1:
+    case 0x7F2: {
+      uint32_t threshold = (csr_val >> 27) & 0x1F;
+      if (threshold > 26) threshold = 26;
+      uint32_t fixed = (threshold << 27) | (csr_val & 0x07FFFFFF);
+      ENSURE_CSR_EXISTS(csr_num);
+      processor->get_state()->csrmap[csr_num]->write(fixed);
+      break;
+    }
+
+    // --- meihap (0xFC8): PIC External Interrupt Handler Pointer ---
+    // Read-only: ignore writes
+    case 0xFC8: {
+      break;  // read-only, ignore write
+    }
+
+    // --- mcpc (0x7C2): Core Pause Control ---
+    // Write-only / reads return 0
+    case 0x7C2: {
+      ENSURE_CSR_EXISTS(csr_num);
+      processor->get_state()->csrmap[csr_num]->write(0);
+      break;
+    }
+
     // --- Remaining EH2 custom CSRs: basic_csr_t (full read/write) ---
     // These don't have tight WARL constraints that cause cosim mismatch:
-    // mfdc(0x7F9), mcgc(0x7F8), mcpc(0x7C2), dmst(0x7C4),
-    // mfdht(0x7CE), mfdhs(0x7CF), mhartstart(0x7FC), mnmipdel(0x7FE),
-    // mitcnt0(0x7D2), mitcnt1(0x7D5), mitb0(0x7D3), mitb1(0x7D6),
-    // mitctl0(0x7D4), mitctl1(0x7D7), mdeau(0xBC0), mdseac(0xFC0),
-    // micect(0x7F0), miccmect(0x7F1), mdccmect(0x7F2),
-    // meihap(0xFC8), meicpct(0xBCA)
+    // dmst(0x7C4), mfdht(0x7CE), mfdhs(0x7CF), mhartstart(0x7FC),
+    // mnmipdel(0x7FE), mitcnt0(0x7D2), mitcnt1(0x7D5), mitb0(0x7D3),
+    // mitb1(0x7D6), mitctl0(0x7D4), mitctl1(0x7D7), mdeau(0xBC0),
+    // mdseac(0xFC0), meicpct(0xBCA)
     default: {
       static const std::set<int> eh2_custom_csrs = {
-        0x7F9, 0x7F8, 0x7C2, 0x7C4, 0x7CE, 0x7CF, 0x7FC, 0x7FE,
+        0x7C4, 0x7CE, 0x7CF, 0x7FC, 0x7FE,
         0x7D2, 0x7D5, 0x7D3, 0x7D6, 0x7D4, 0x7D7,
-        0xBC0, 0xFC0, 0x7F0, 0x7F1, 0x7F2, 0xFC8, 0xBCA,
+        0xBC0, 0xFC0, 0xBCA,
       };
 
       if (eh2_custom_csrs.count(csr_num)) {
