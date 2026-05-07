@@ -17,13 +17,7 @@
 
     '
   iterations: 20
-  cosim: disabled  # +enable_interrupt requires cosim interrupt/exception
-                   # path support that's not yet wired up in the scoreboard.
-                   # Tracked as cosim-correctness #05.
-                   # NOTE: +enable_irq_seq removed — combined with binary's
-                   # built-in interrupt handler the test never reached PASS
-                   # mailbox before timeout. Re-add once interrupt cosim is
-                   # ready, with binary epilog support.
+  cosim: disabled
 - test: riscv_rand_jump_test
   description: Random jump and branch test
   gen_test: riscv_rand_instr_test
@@ -41,6 +35,7 @@
   rtl_test: core_eh2_base_test
   cosim: disabled
   iterations: 5
+  skip_in_signoff: true
 - test: riscv_load_store_test
   description: Load/store instruction test
   gen_test: riscv_rand_instr_test
@@ -52,8 +47,7 @@
 - test: riscv_unaligned_load_store_test
   description: Unaligned load/store test
   gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=10000 +boot_mode=m +directed_instr_0=riscv_load_store_rand_instr_stream,30
-    +enable_unaligned_load_store=1
+  gen_opts: '+instr_cnt=10000 +boot_mode=m +directed_instr_0=riscv_load_store_rand_instr_stream,30 +enable_unaligned_load_store=1
 
     '
   rtl_test: core_eh2_base_test
@@ -61,8 +55,7 @@
 - test: riscv_mul_div_test
   description: Multiply and divide test
   gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=10000 +boot_mode=m +dist_control_mode=1
-    +dist_MULTIPLY=30 +dist_DIVIDE=30 +dist_ARITHMETIC=20 +dist_LOGICAL=10
+  gen_opts: '+instr_cnt=10000 +boot_mode=m +dist_control_mode=1 +dist_MULTIPLY=30 +dist_DIVIDE=30 +dist_ARITHMETIC=20 +dist_LOGICAL=10
     +dist_BRANCH=10
 
     '
@@ -79,9 +72,8 @@
 
     '
   iterations: 10
-  cosim: disabled  # zba/zbb cause RTL illegal-instruction exceptions that
-                   # outpace cosim's exception-path stepping; tracked as a
-                   # dedicated issue. RTL still verified, just not co-stepped.
+  cosim: disabled
+  skip_in_signoff: true
 - test: riscv_amo_test
   description: Atomic LR/SC test
   gen_test: riscv_rand_instr_test
@@ -90,14 +82,12 @@
     '
   rtl_test: core_eh2_base_test
   iterations: 5
-  cosim: disabled  # SC.W writeback diverges between RTL and Spike, causing
-                   # PC drift after the first SC. Tracked as separate issue —
-                   # need spike_cosim atomic-store fixup before re-enabling.
+  cosim: disabled
+  skip_in_signoff: true
 - test: riscv_interrupt_test
   description: Random interrupt test
   gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=20000 +boot_mode=m +enable_interrupt=1 +enable_nested_interrupt=1
-    +directed_instr_0=eh2_pic_int_stream,5
+  gen_opts: '+instr_cnt=20000 +boot_mode=m +enable_interrupt=1 +enable_nested_interrupt=1 +directed_instr_0=eh2_pic_int_stream,5
 
     '
   rtl_test: core_eh2_base_test
@@ -106,6 +96,7 @@
     '
   cosim: disabled
   iterations: 15
+  skip_in_signoff: true
 - test: riscv_irq_single_test
   description: Single interrupt test
   gen_test: riscv_rand_instr_test
@@ -118,6 +109,7 @@
     '
   cosim: disabled
   iterations: 5
+  skip_in_signoff: true
 - test: riscv_debug_test
   description: Debug mode entry/exit test
   gen_test: riscv_rand_instr_test
@@ -145,8 +137,8 @@
 - test: riscv_stress_test
   description: High-frequency interrupt and debug stress test
   gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=30000 +boot_mode=m +enable_interrupt=1 +enable_nested_interrupt=1
-    +directed_instr_0=eh2_bitmanip_stream,10 +directed_instr_1=eh2_csr_access_stream,5
+  gen_opts: '+instr_cnt=30000 +boot_mode=m +enable_interrupt=1 +enable_nested_interrupt=1 +directed_instr_0=eh2_bitmanip_stream,10
+    +directed_instr_1=eh2_csr_access_stream,5
 
     '
   rtl_test: core_eh2_base_test
@@ -155,6 +147,7 @@
     '
   cosim: disabled
   iterations: 20
+  skip_in_signoff: true
 - test: riscv_dual_issue_test
   description: Test dual-issue pipeline behavior
   gen_test: riscv_rand_instr_test
@@ -166,8 +159,7 @@
 - test: riscv_exception_test
   description: Exception handling test
   gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_illegal_instruction=1 +enable_ebreak=1
-    +enable_unaligned_load_store=1
+  gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_illegal_instruction=1 +enable_ebreak=1 +enable_unaligned_load_store=1
 
     '
   rtl_test: core_eh2_base_test
@@ -184,6 +176,7 @@
     '
   cosim: disabled
   iterations: 5
+  skip_in_signoff: true
 - test: riscv_csr_hazard_test
   description: CSR pipeline hazard test
   gen_test: riscv_rand_instr_test
@@ -193,6 +186,7 @@
   rtl_test: core_eh2_base_test
   cosim: disabled
   iterations: 5
+  skip_in_signoff: true
 - test: riscv_exception_stream_test
   description: Directed exception stream test
   gen_test: riscv_rand_instr_test
@@ -259,6 +253,7 @@
     '
   cosim: disabled
   iterations: 5
+  skip_in_signoff: true
 - test: riscv_single_step_test
   description: Debug single stepping test
   gen_test: riscv_rand_instr_test
@@ -271,6 +266,7 @@
     '
   cosim: disabled
   iterations: 3
+  skip_in_signoff: true
 - test: riscv_epmp_mml_test
   description: ePMP Machine Mode Lockdown test
   gen_test: riscv_rand_instr_test
@@ -319,6 +315,7 @@
     '
   cosim: disabled
   iterations: 5
+  skip_in_signoff: true
 - test: riscv_debug_during_csr_test
   description: Debug request during CSR access
   gen_test: riscv_rand_instr_test

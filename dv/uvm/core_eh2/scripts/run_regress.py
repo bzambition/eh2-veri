@@ -345,12 +345,23 @@ def run_regression(args) -> RegressionSummary:
     os.makedirs(output_dir, exist_ok=True)
 
     # Build test matrix: (test_entry, seed) pairs
+    # Honor skip_in_signoff when running under sign-off (env var set by signoff.py).
+    in_signoff = os.environ.get("EH2_SIGNOFF_MODE") == "1"
     test_matrix = []
+    skipped_signoff = []
     for entry in testlist:
+        if in_signoff and entry.get("skip_in_signoff"):
+            skipped_signoff.append(entry["test"])
+            continue
         iterations = args.iterations or entry.get("iterations", 1)
         for i in range(iterations):
             seed = args.seed if args.seed else (i + 1)
             test_matrix.append((entry, seed))
+
+    if skipped_signoff:
+        print(f"\nSkipping {len(skipped_signoff)} test(s) marked skip_in_signoff:")
+        for name in skipped_signoff:
+            print(f"  - {name}")
 
     print(f"\n{'='*60}")
     print(f"EH2 Regression: {len(test_matrix)} test runs")

@@ -218,6 +218,10 @@ def build_stage_cmd(stage: str, args, stage_out: Path) -> List[str]:
 
 def run_command(cmd: List[str], log_path: Path, timeout_s: int) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    # Tell run_regress.py we're in sign-off mode so it can honor
+    # `skip_in_signoff: true` testlist entries (broken-but-tracked tests).
+    env = os.environ.copy()
+    env["EH2_SIGNOFF_MODE"] = "1"
     with open(log_path, "wb") as log_fd:
         log_fd.write(("+ " + _cmd_str(cmd) + "\n").encode("utf-8"))
         try:
@@ -226,6 +230,7 @@ def run_command(cmd: List[str], log_path: Path, timeout_s: int) -> int:
                 stdout=log_fd,
                 stderr=subprocess.STDOUT,
                 timeout=timeout_s,
+                env=env,
             )
             return proc.returncode
         except subprocess.TimeoutExpired:

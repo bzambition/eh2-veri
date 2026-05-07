@@ -346,7 +346,13 @@ class RegressionFrameworkTest(unittest.TestCase):
                 run_rtl.run_from_metadata(str(md_dir),
                                           "riscv_random_instr_test.3")
 
-            self.assertIn("+enable_irq_seq=1", captured["md"].sim_opts)
+            # random_instr_test sim_opts should set up cosim disable + the
+            # raised cycle/timeout limits the binary needs to walk through
+            # interrupt handling. +enable_irq_seq was removed because it kept
+            # the binary in a permanent IRQ loop preventing PASS detection
+            # (see commit ea81409 / cosim-correctness #05).
+            self.assertIn("+max_cycles=2000000", captured["md"].sim_opts)
+            self.assertIn("+timeout_ns=200000000", captured["md"].sim_opts)
             self.assertIn("+disable_cosim=1", captured["md"].sim_opts)
 
     def test_run_instr_gen_resolves_riscv_dv_path_before_chdir(self):
