@@ -1,6 +1,6 @@
 # Issue 03: Load/store cosim test
 
-Status: needs-triage
+Status: ready-for-agent (data RF bug open)
 Milestone: 1 - Minimal cosim loop
 Type: AFK
 

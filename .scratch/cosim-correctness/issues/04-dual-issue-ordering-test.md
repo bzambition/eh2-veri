@@ -1,6 +1,6 @@
 # Issue 04: Dual-issue ordering cosim test
 
-Status: needs-triage
+Status: done (Phase 1 双发射 div/load 闭环)
 Milestone: 1 - Minimal cosim loop
 Type: AFK
 

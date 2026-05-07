@@ -1,6 +1,6 @@
 # Issue 07: Cosim suppression for EH2 custom CSR tests
 
-Status: needs-triage
+Status: done (28 CSR 已预注册)
 Milestone: 2 - Testlist and suppression infrastructure
 Type: AFK
 

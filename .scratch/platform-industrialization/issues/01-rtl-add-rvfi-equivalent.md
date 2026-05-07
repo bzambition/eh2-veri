@@ -1,6 +1,6 @@
 # Issue 01: RTL trace 包增加 rd_addr/rd_wdata（RVFI 等价）
 
-Status: ready-for-agent
+Status: done (Phase 1 完成)
 Phase: 1
 Type: AFK
 Owner: 待分配

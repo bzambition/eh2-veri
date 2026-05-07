@@ -1,6 +1,6 @@
 # Issue 02: Single ALU cosim test
 
-Status: needs-triage
+Status: done (Phase 1 arithmetic PASS)
 Milestone: 1 - Minimal cosim loop
 Type: AFK
 

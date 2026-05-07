@@ -1,6 +1,6 @@
 # Issue 03: scoreboard 简化（删 pending_wb_q 与 wb_search_depth）
 
-Status: ready-for-agent
+Status: done (Phase 1 完成)
 Phase: 1
 Type: AFK
 Blocked by: Issue 02

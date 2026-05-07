@@ -1,6 +1,6 @@
 # Issue 08: Design EH2 custom CSR fixup_csr long-term strategy
 
-Status: needs-triage
+Status: done (set_csr 静态注册)
 Milestone: 3 - Risk hardening
 Type: HITL
 

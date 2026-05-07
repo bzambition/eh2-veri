@@ -1,6 +1,6 @@
 # Issue 09: Verify 64-bit AXI4 memory access notify correctness
 
-Status: needs-triage
+Status: done (Phase 3 BE 语义修复)
 Milestone: 3 - Risk hardening
 Type: AFK
 

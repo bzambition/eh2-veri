@@ -1,6 +1,6 @@
 # Issue 04: probe_monitor 仅保留异步通道
 
-Status: ready-for-agent
+Status: done (Phase 1 完成)
 Phase: 1
 Type: AFK
 Blocked by: Issue 03

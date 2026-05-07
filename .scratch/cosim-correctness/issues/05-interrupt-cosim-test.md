@@ -1,6 +1,6 @@
 # Issue 05: Interrupt cosim test
 
-Status: needs-triage
+Status: ready-for-agent (random_instr 中断 cosim 未修)
 Milestone: 3 - Risk hardening
 Type: AFK
 

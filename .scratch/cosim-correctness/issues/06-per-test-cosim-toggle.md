@@ -1,6 +1,6 @@
 # Issue 06: Per-test cosim enable/disable in testlist
 
-Status: needs-triage
+Status: done (testlist 已修)
 Milestone: 2 - Testlist and suppression infrastructure
 Type: AFK
 

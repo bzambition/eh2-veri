@@ -1,6 +1,6 @@
 # Issue 05: testlist 恢复 cosim 默认开启
 
-Status: ready-for-agent
+Status: done (Phase 1+3 完成)
 Phase: 1
 Type: AFK
 Blocked by: Issue 04

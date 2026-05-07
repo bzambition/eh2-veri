@@ -72,17 +72,27 @@
 
 ---
 
-## 当前进展
+## 当前进展（更新于 2026-05-07）
 
-- ✅ 对标分析完成（本会话 2026-05-06）
-- ✅ CONTEXT.md / ADR-0001..0004 已落盘
-- ✅ Phase 1–5 issue 拆分完成
-- ⏸ Phase 1 代码实施 **等待下一会话**
+- ✅ Phase 1 cosim 闭环完成（smoke + arithmetic 100% PASS）
+- ✅ Phase 2 结构整理完成（env 归位 / 命名统一 / TB 拆分 / scoreboard 模块化）
+- ✅ Phase 3 部分完成（make run 流程 + testlist 修正 + BE 语义放宽）
+- ✅ Phase 4 大部分完成（CONTEXT.md / ADR 0001-0005 / build 清理 / issue triage）
+- ⚠️ Phase 3 遗留 3 个独立 bug：load_store data 不同步、random_instr 中断 cosim、mul_div GEN_NO_ASM
+- ⬜ Phase 5 未开始（多 hart cosim / formal / CI gate）
+
+## Issue 状态统计
+
+| 状态 | 数量 | 说明 |
+|------|------|------|
+| done | 12 | Phase 1-3 已完成的 issue |
+| ready-for-agent | 3 | signoff full + load_store data bug + interrupt cosim |
+| wontfix | 1 | NUM_THREADS=2 限制（Phase 5 scope） |
 
 ## 进入下一会话的 checklist
 
-1. 阅读 `CONTEXT.md` 了解领域语言
-2. 阅读 `docs/adr/0004-rtl-rvfi-equivalent-trace.md` 了解 Phase 1 设计决策
-3. 阅读 `PHASE1_PLAN.md` 了解可执行步骤
-4. 按 issue 01 → 06 顺序执行
-5. 每完成一个 issue 更新其 Status 字段
+1. 阅读 `CONTEXT.md` 了解领域语言和当前状态
+2. 看 Phase 3 遗留 bug：`PHASE3_PROGRESS.md` 的"已知保留事项"
+3. 优先修：load_store_test data RF 不同步（cosim-correctness #03）
+4. 其次修：random_instr_test 中断 cosim（cosim-correctness #05）
+5. 最后过 signoff full（platform-industrialization #06）

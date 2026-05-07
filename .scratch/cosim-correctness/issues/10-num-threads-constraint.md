@@ -1,6 +1,6 @@
 # Issue 10: Document NUM_THREADS=1 constraint; file NUM_THREADS=2 blocking issue
 
-Status: needs-triage
+Status: wontfix (Phase 5 scope, 已知限制)
 Milestone: 2 - Testlist and suppression infrastructure
 Type: AFK
 

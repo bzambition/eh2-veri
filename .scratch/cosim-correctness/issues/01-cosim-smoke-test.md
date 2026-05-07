@@ -1,6 +1,6 @@
 # Issue 01: Cosim smoke test: init + hello_world
 
-Status: needs-triage
+Status: done (Phase 1 闭环)
 Milestone: 1 - Minimal cosim loop
 Type: AFK
 
