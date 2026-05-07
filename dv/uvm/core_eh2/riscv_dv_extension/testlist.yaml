@@ -17,7 +17,6 @@
 
     '
   iterations: 20
-  cosim: disabled
 - test: riscv_rand_jump_test
   description: Random jump and branch test
   gen_test: riscv_rand_instr_test
@@ -94,9 +93,9 @@
   sim_opts: '+enable_irq_seq=1 +max_interval=500
 
     '
-  cosim: disabled
-  iterations: 15
+  cosim: disabled  # PC mismatch: Spike 未同步嵌套中断注入（PIC stream），DUT 进入 handler 而 ISS 停留主流
   skip_in_signoff: true
+  iterations: 15
 - test: riscv_irq_single_test
   description: Single interrupt test
   gen_test: riscv_rand_instr_test
@@ -107,9 +106,9 @@
   sim_opts: '+enable_irq_single_seq=1
 
     '
-  cosim: disabled
-  iterations: 5
+  cosim: disabled  # SIM_TIMEOUT: enable_irq_single_seq 的 forever 循环阻止 vseq.body() 返回，join 无法退出导致 run_phase 永远挂起
   skip_in_signoff: true
+  iterations: 5
 - test: riscv_debug_test
   description: Debug mode entry/exit test
   gen_test: riscv_rand_instr_test
@@ -194,7 +193,6 @@
 
     '
   rtl_test: core_eh2_base_test
-  cosim: disabled
   iterations: 3
 - test: riscv_pmp_basic_test
   description: Basic PMP region test
