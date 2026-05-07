@@ -31,7 +31,7 @@
 | **PIC** | EH2 自有的可编程中断控制器，127 路外部中断源。Spike 不模型，相关 CSR 用 set_csr 静态注册 |
 | **DCCM / ICCM / ICache** | EH2 紧耦合存储。DCCM = 数据紧耦合存储；ICCM = 指令紧耦合存储 |
 | **mailbox** | 0xD058_0000 地址。0xFF=PASS, 0x01=FAIL，其它字符=控制台输出 |
-| **NUM_THREADS** | EH2 硬件线程数（1 或 2）。**当前 cosim 仅支持 NUM_THREADS=1** |
+| **NUM_THREADS** | EH2 硬件线程数（1 或 2）。**cosim 支持 NUM_THREADS=1 和 NUM_THREADS=2**（ADR-0008） |
 | **EH2 自定义 CSR** | 18+ 个 EH2 特有 CSR（mscause, mrac, mfdc, meivt, meipt 等），Spike 不原生模型，需要 `set_csr` 预注册或 fixup |
 | **mailbox FAIL / pass** | TB top 监听 0xD058_0000 写入决定测试通过 |
 | **sign-off gate** | `dv/uvm/core_eh2/scripts/signoff.py`，4 个 stage：smoke / directed / cosim / riscvdv，全过才算签发 |
@@ -92,7 +92,7 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 | RISK-2 | MEDIUM | AXI4 64-bit 数据 → cosim 截到 32-bit | 已 mitigate（split lower/upper word） |
 | RISK-2b | MEDIUM | EH2 sub-byte store 用 wider WSTRB（read-modify-write） | **已修**（Phase 3 spike_cosim BE 语义放宽） |
 | RISK-3 | MEDIUM | wb 与 trace 对齐脆弱，靠 wb_search_depth band-aid | **已修**（Phase 1 RTL trace 加 RVFI 等价信号） |
-| RISK-4 | BLOCKING | NUM_THREADS=2 不能 cosim | 已知限制，Phase 5 解锁（wontfix for now） |
+| RISK-4 | RESOLVED | NUM_THREADS=2 不能 cosim | **已修**（ADR-0008：SpikeCosim 多 hart + scoreboard per-thread 路由） |
 | RISK-5 | LOW | NB-load wb 跨 slot 可能脱节 | **已修**（Phase 1 scoreboard 等 nb_load hint） |
 | RISK-6 | LOW | interrupt 状态采样按 item 而非 cycle | RTL 设计上已正确 |
 | RISK-7 | OPEN | EH2 推测 div cancel vs 架构 retire 区分 | **已修**（Phase 1 RTL `dec_div_cancel_overwrite` 信号 + scoreboard FIFO 消费） |

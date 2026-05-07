@@ -53,36 +53,41 @@ public:
   // pc: program counter of the instruction
   // sync_trap: true if instruction caused synchronous trap
   // suppress_reg_write: true if register write was suppressed
+  // thread_id: hardware thread (hart) index (0 or 1)
   //
   // Returns true if step succeeded (no mismatch).
   virtual bool step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
-                    bool sync_trap, bool suppress_reg_write) = 0;
+                    bool sync_trap, bool suppress_reg_write,
+                    int thread_id = 0) = 0;
 
   // Set MIP (interrupt pending) with pre/post values.
   // pre_mip: value used to determine if interrupt is pending
   // post_mip: value observed by next instruction
-  virtual void set_mip(uint32_t pre_mip, uint32_t post_mip) = 0;
+  virtual void set_mip(uint32_t pre_mip, uint32_t post_mip,
+                       int thread_id = 0) = 0;
 
   // Set NMI state.
-  virtual void set_nmi(bool nmi) = 0;
+  virtual void set_nmi(bool nmi, int thread_id = 0) = 0;
 
   // Set NMI internal state.
-  virtual void set_nmi_int(bool nmi_int) = 0;
+  virtual void set_nmi_int(bool nmi_int, int thread_id = 0) = 0;
 
   // Set debug request.
-  virtual void set_debug_req(bool debug_req) = 0;
+  virtual void set_debug_req(bool debug_req, int thread_id = 0) = 0;
 
   // Set mcycle CSR value (full 64-bit).
-  virtual void set_mcycle(uint64_t mcycle) = 0;
+  virtual void set_mcycle(uint64_t mcycle, int thread_id = 0) = 0;
 
   // Set a CSR value directly (for DUT-to-Spike synchronization).
-  virtual void set_csr(const int csr_num, const uint32_t new_val) = 0;
+  virtual void set_csr(const int csr_num, const uint32_t new_val,
+                       int thread_id = 0) = 0;
 
   // Notify about a dside memory access from the DUT.
-  virtual void notify_dside_access(const DSideAccessInfo &access_info) = 0;
+  virtual void notify_dside_access(const DSideAccessInfo &access_info,
+                                   int thread_id = 0) = 0;
 
   // Set iside error for next step.
-  virtual void set_iside_error(uint32_t addr) = 0;
+  virtual void set_iside_error(uint32_t addr, int thread_id = 0) = 0;
 
   // Get error descriptions.
   virtual const std::vector<std::string> &get_errors() = 0;
@@ -91,12 +96,12 @@ public:
   virtual void clear_errors() = 0;
 
   // Get instruction count (number of successfully matched instructions).
-  virtual unsigned int get_insn_cnt() = 0;
+  virtual unsigned int get_insn_cnt(int thread_id = 0) = 0;
 
   // Trap CSR queries (RISK-9: mcause/mepc/mtvec comparison)
-  virtual uint32_t get_mcause() = 0;
-  virtual uint32_t get_mepc() = 0;
-  virtual uint32_t get_mtvec() = 0;
+  virtual uint32_t get_mcause(int thread_id = 0) = 0;
+  virtual uint32_t get_mepc(int thread_id = 0) = 0;
+  virtual uint32_t get_mtvec(int thread_id = 0) = 0;
 };
 
 #endif // EH2_COSIM_H

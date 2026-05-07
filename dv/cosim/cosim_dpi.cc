@@ -4,6 +4,7 @@
 // Thin C shim functions that bridge SystemVerilog DPI-C calls
 // to the C++ Cosim abstract class.
 // Based on Ibex's cosim_dpi.cc pattern.
+// All per-hart functions accept an optional thread_id parameter (default 0).
 
 #include "cosim.h"
 #include <svdpi.h>
@@ -61,7 +62,8 @@ extern "C" {
   // Step one instruction
   // Returns 1 on match, 0 on mismatch
   int riscv_cosim_step(void* handle, int write_reg, int write_reg_data,
-                       int pc, int sync_trap, int suppress_reg_write) {
+                       int pc, int sync_trap, int suppress_reg_write,
+                       int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (!cosim) {
       return 0;
@@ -71,61 +73,66 @@ extern "C" {
                                static_cast<uint32_t>(write_reg_data),
                                static_cast<uint32_t>(pc),
                                sync_trap != 0,
-                               suppress_reg_write != 0)
+                               suppress_reg_write != 0,
+                               thread_id)
                  ? 1
                  : 0;
       return result;
     } catch (const std::exception &e) {
-      fprintf(stderr, "COSIM WARNING: step exception at PC=0x%08x: %s\n",
-              (unsigned)pc, e.what());
+      fprintf(stderr, "COSIM WARNING: step exception at PC=0x%08x T%d: %s\n",
+              (unsigned)pc, thread_id, e.what());
       fflush(stderr);
       return 0;
     } catch (...) {
-      fprintf(stderr, "COSIM WARNING: unknown step exception at PC=0x%08x\n",
-              (unsigned)pc);
+      fprintf(stderr, "COSIM WARNING: unknown step exception at PC=0x%08x T%d\n",
+              (unsigned)pc, thread_id);
       fflush(stderr);
       return 0;
     }
   }
 
   // Set MIP (pre and post values)
-  void riscv_cosim_set_mip(void* handle, int pre_mip, int post_mip) {
+  void riscv_cosim_set_mip(void* handle, int pre_mip, int post_mip,
+                           int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (cosim) {
       cosim->set_mip(static_cast<uint32_t>(pre_mip),
-                     static_cast<uint32_t>(post_mip));
+                     static_cast<uint32_t>(post_mip), thread_id);
     }
   }
 
   // Set NMI
-  void riscv_cosim_set_nmi(void* handle, int nmi) {
+  void riscv_cosim_set_nmi(void* handle, int nmi, int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
-    if (cosim) cosim->set_nmi(nmi != 0);
+    if (cosim) cosim->set_nmi(nmi != 0, thread_id);
   }
 
   // Set NMI internal
-  void riscv_cosim_set_nmi_int(void* handle, int nmi_int) {
+  void riscv_cosim_set_nmi_int(void* handle, int nmi_int, int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
-    if (cosim) cosim->set_nmi_int(nmi_int != 0);
+    if (cosim) cosim->set_nmi_int(nmi_int != 0, thread_id);
   }
 
   // Set debug request
-  void riscv_cosim_set_debug_req(void* handle, int debug_req) {
+  void riscv_cosim_set_debug_req(void* handle, int debug_req,
+                                 int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
-    if (cosim) cosim->set_debug_req(debug_req != 0);
+    if (cosim) cosim->set_debug_req(debug_req != 0, thread_id);
   }
 
   // Set mcycle
-  void riscv_cosim_set_mcycle(void* handle, long long mcycle) {
+  void riscv_cosim_set_mcycle(void* handle, long long mcycle,
+                              int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
-    if (cosim) cosim->set_mcycle(static_cast<uint64_t>(mcycle));
+    if (cosim) cosim->set_mcycle(static_cast<uint64_t>(mcycle), thread_id);
   }
 
   // Set CSR
-  void riscv_cosim_set_csr(void* handle, int csr_num, int new_val) {
+  void riscv_cosim_set_csr(void* handle, int csr_num, int new_val,
+                           int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (cosim) {
-      cosim->set_csr(csr_num, static_cast<uint32_t>(new_val));
+      cosim->set_csr(csr_num, static_cast<uint32_t>(new_val), thread_id);
     }
   }
 
@@ -136,7 +143,8 @@ extern "C" {
                                        int misaligned_second,
                                        int misaligned_first_saw_error,
                                        int m_mode_access,
-                                       int widened_load) {
+                                       int widened_load,
+                                       int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (cosim) {
       DSideAccessInfo info;
@@ -150,14 +158,14 @@ extern "C" {
       info.misaligned_first_saw_error = (misaligned_first_saw_error != 0);
       info.m_mode_access = (m_mode_access != 0);
       info.widened_load = (widened_load != 0);
-      cosim->notify_dside_access(info);
+      cosim->notify_dside_access(info, thread_id);
     }
   }
 
   // Set iside error
-  void riscv_cosim_set_iside_error(void* handle, int addr) {
+  void riscv_cosim_set_iside_error(void* handle, int addr, int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
-    if (cosim) cosim->set_iside_error(static_cast<uint32_t>(addr));
+    if (cosim) cosim->set_iside_error(static_cast<uint32_t>(addr), thread_id);
   }
 
   // Write a single byte to co-simulation memory (for binary loading)
@@ -217,33 +225,33 @@ extern "C" {
   }
 
   // Get instruction count
-  int riscv_cosim_get_insn_cnt(void* handle) {
+  int riscv_cosim_get_insn_cnt(void* handle, int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (!cosim) return 0;
     try {
-      return static_cast<int>(cosim->get_insn_cnt());
+      return static_cast<int>(cosim->get_insn_cnt(thread_id));
     } catch (...) {
       return 0;
     }
   }
 
   // Trap CSR queries (RISK-9: mcause/mepc/mtvec comparison)
-  uint32_t riscv_cosim_get_mcause(void* handle) {
+  uint32_t riscv_cosim_get_mcause(void* handle, int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (!cosim) return 0;
-    return cosim->get_mcause();
+    return cosim->get_mcause(thread_id);
   }
 
-  uint32_t riscv_cosim_get_mepc(void* handle) {
+  uint32_t riscv_cosim_get_mepc(void* handle, int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (!cosim) return 0;
-    return cosim->get_mepc();
+    return cosim->get_mepc(thread_id);
   }
 
-  uint32_t riscv_cosim_get_mtvec(void* handle) {
+  uint32_t riscv_cosim_get_mtvec(void* handle, int thread_id) {
     Cosim* cosim = static_cast<Cosim*>(handle);
     if (!cosim) return 0;
-    return cosim->get_mtvec();
+    return cosim->get_mtvec(thread_id);
   }
 
 }  // extern "C"

@@ -2,11 +2,16 @@
 // EH2 Co-simulation Scoreboard
 //
 // Compares DUT execution against a Spike reference model.
+// Supports NUM_THREADS=1 (single hart) and NUM_THREADS=2 (dual hart).
 //
 // Phase 1 simplification (ADR-0004): The RTL trace packet now carries the
 // RVFI-equivalent {wb_valid, rd_addr, rd_wdata} tuple, so each trace_seq_item
 // arriving from the trace monitor is self-contained. The scoreboard no longer
 // needs to correlate trace items with a separate writeback FIFO.
+//
+// Multi-thread support (ADR-0008): When NUM_THREADS=2, per-thread state
+// (pending_trace_q, async_wb_q, prev_mip, insn_cnt, mismatch_count) is
+// maintained independently and routed by trace_seq_item.thread_id.
 //
 // Async writeback corner cases (NB-load, DIV-cancel) still arrive via the
 // dut probe monitor, but only as suppress hints—they override wb_valid for
@@ -45,14 +50,17 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   bit    enable_cosim = 1;
   bit    fatal_on_mismatch = 0;  // 1 = UVM_FATAL on mismatch, 0 = UVM_ERROR
 
-  // Statistics
+  // Statistics (aggregated across threads)
   int    step_count;
-  int    mismatch_count;
   int    trace_item_count;
   int    probe_item_count;
   int    suppressed_probe_item_count;
   int    axi_item_count;
   int    pending_trace_high_watermark;
+
+  // Per-thread statistics
+  int    mismatch_count[2];
+  int    insn_cnt[2];
 
   // Tracking state
   bit    initialized = 0;
@@ -65,12 +73,14 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   int    store_trace_stepped  = 0;
 
   // Trace items wait here until matching memory accesses (for stores/AMOs) arrive.
+  // Per-thread queues for dual-hart support.
   typedef struct {
     eh2_trace_seq_item item;
   } pending_trace_t;
-  pending_trace_t pending_trace_q[$];
+  pending_trace_t pending_trace_q[2][$];
 
   // LSU AXI memory accesses from the bus monitor.
+  // Memory bus is shared across threads — no per-thread split needed.
   typedef struct {
     axi4_seq_item txn;
     bit           is_store;
@@ -79,18 +89,17 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   pending_mem_access_t pending_mem_access_q[$];
 
   // Async writeback hints from the dut probe (NB-load wb / DIV cancel).
-  // Only used to override the trace packet's wb_valid when an async event
-  // suppressed or replaced the architectural writeback for a recent trace.
+  // Per-thread queues.
   typedef struct {
     bit [4:0]  rd;
     bit [31:0] rd_data;
     bit        suppress;
     int        source;
   } async_wb_hint_t;
-  async_wb_hint_t async_wb_q[$];
+  async_wb_hint_t async_wb_q[2][$];
 
-  // Previous MIP value for pre/post tracking
-  bit [31:0] prev_mip;
+  // Previous MIP value for pre/post tracking (per-thread)
+  bit [31:0] prev_mip[2];
 
   // Reset handling
   virtual interface eh2_dut_probe_if probe_vif;
@@ -176,11 +185,13 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     while (dut_probe_fifo.try_get(trash_item)) begin end
     while (lsu_axi_fifo.try_get(trash_axi)) begin end
 
-    pending_trace_q.delete();
+    for (int t = 0; t < 2; t++) begin
+      pending_trace_q[t].delete();
+      async_wb_q[t].delete();
+      prev_mip[t] = 0;
+    end
     pending_mem_access_q.delete();
-    async_wb_q.delete();
 
-    prev_mip = 0;
     store_axi_delivered = 0;
     store_trace_stepped = 0;
   endfunction
@@ -195,34 +206,18 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
 
       if (cosim_handle != null && initialized) begin
         pending_trace_t pending;
+        int tid = int'(trace_item.thread_id);
         pending.item = trace_item;
-        pending_trace_q.push_back(pending);
-        if (pending_trace_q.size() > pending_trace_high_watermark) begin
-          pending_trace_high_watermark = pending_trace_q.size();
+        pending_trace_q[tid].push_back(pending);
+        if (pending_trace_q[tid].size() > pending_trace_high_watermark) begin
+          pending_trace_high_watermark = pending_trace_q[tid].size();
         end
-        process_pending_trace();
+        process_pending_trace(tid);
       end
     end
   endtask
 
   // Async writeback hints (NB-load wb / DIV completion / DIV cancel).
-  //
-  // EH2 div unit produces three kinds of events:
-  //   - DIV WB: architectural div completed, wrote rd.
-  //   - DIV CANCEL via div_flush: speculatively-issued div killed before
-  //     retire (instruction never appears in trace pkt). These DO NOT pair
-  //     with any trace item.
-  //   - DIV CANCEL via nonblock_div_cancel-overwrite: div retired in trace
-  //     but a younger same-rd write replaced it. These DO pair with a trace
-  //     item (suppress its writeback).
-  //
-  // Distinguishing the two cancel kinds requires either RTL annotation or
-  // an rd-based heuristic: a cancel's `rd` always matches the div_rd of the
-  // canceled div. By matching DIV hints to trace items strictly by rd in
-  // FIFO order, retired-div traces always pick up the correct hint (their
-  // div was the earliest issued div with that rd still in flight). Pure
-  // speculative cancels with rd values that no retired div uses simply
-  // accumulate harmlessly until later overwritten or discarded at end.
   task run_cosim_probe_async();
     eh2_trace_seq_item probe_item;
     async_wb_hint_t hint;
@@ -238,15 +233,19 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
       hint.rd_data  = probe_item.wb_data;
       hint.suppress = probe_item.wb_suppress;
       hint.source   = probe_item.wb_source;
-      async_wb_q.push_back(hint);
 
-      `uvm_info("cosim", $sformatf(
-        "ASYNC_WB: src=%s rd=x%0d data=%08x suppress=%0b qsize=%0d",
-        wb_source_name(probe_item.wb_source), probe_item.wb_dest,
-        probe_item.wb_data, probe_item.wb_suppress, async_wb_q.size()), UVM_HIGH)
+      begin
+        int tid = int'(probe_item.thread_id);
+        async_wb_q[tid].push_back(hint);
 
-      if (cosim_handle != null && initialized) begin
-        process_pending_trace();
+        `uvm_info("cosim", $sformatf(
+          "ASYNC_WB: T%0d src=%s rd=x%0d data=%08x suppress=%0b qsize=%0d",
+          tid, wb_source_name(probe_item.wb_source), probe_item.wb_dest,
+          probe_item.wb_data, probe_item.wb_suppress, async_wb_q[tid].size()), UVM_HIGH)
+
+        if (cosim_handle != null && initialized) begin
+          process_pending_trace(tid);
+        end
       end
     end
   endtask
@@ -261,7 +260,9 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
 
       if (cosim_handle != null && initialized) begin
         enqueue_memory_accesses(axi_txn);
-        process_pending_trace();
+        // Try to unblock both threads
+        process_pending_trace(0);
+        process_pending_trace(1);
       end
     end
   endtask
@@ -273,49 +274,39 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     if (item.exception || item.interrupt) return 1'b0;
     if (!item.writes_rd()) return 1'b0;
     if (item.is_div()) return 1'b1;
-    // Loads in EH2 always go through the nb-load writeback path (the regular
-    // wb port masks `cam_load_kill_wen`), so the trace pkt always has wb=0
-    // for loads. Wait for the nb-load completion hint before stepping.
     if (is_load_instruction(item)) return 1'b1;
     return 1'b0;
   endfunction
 
-  // Drain pending_trace_q in order. Gates:
+  // Drain pending_trace_q[tid] in order. Gates:
   //   - stores/AMOs wait for matching LSU AXI access (with coalescing bypass)
   //   - DIV / NB-load trace items wait for the matching async writeback hint
-  function void process_pending_trace();
-    while (pending_trace_q.size() > 0) begin
-      pending_trace_t pending = pending_trace_q[0];
+  function void process_pending_trace(int tid);
+    while (pending_trace_q[tid].size() > 0) begin
+      pending_trace_t pending = pending_trace_q[tid][0];
 
       if (must_wait_for_memory_access(pending.item) &&
           !has_matching_memory_access(pending.item)) begin
-        // EH2 store-buffer coalescing: if we have already stepped MORE
-        // store trace items than the AXI monitor has delivered store
-        // transactions, at least one store's AXI was merged.  The current
-        // blocked store is the "extra" one — let it proceed without AXI.
-        // Spike's own bus.store() in mmio_store writes the correct ISA data;
-        // the C++ check_mem_access() returns kCheckMemOk for empty pending.
         if (store_trace_stepped > store_axi_delivered) begin
           `uvm_info("cosim", $sformatf(
-            "Store at PC=%08x insn=%08x — coalesced (stepped=%0d > axi=%0d), proceeding without AXI",
-            pending.item.pc, pending.item.insn, store_trace_stepped, store_axi_delivered), UVM_LOW)
-          // Fall through to pop + compare below
+            "T%0d Store at PC=%08x insn=%08x — coalesced (stepped=%0d > axi=%0d), proceeding without AXI",
+            tid, pending.item.pc, pending.item.insn, store_trace_stepped, store_axi_delivered), UVM_LOW)
         end else begin
           `uvm_info("cosim", $sformatf(
-            "Waiting for LSU AXI access before stepping store/AMO PC=%08x insn=%08x (stepped=%0d, axi=%0d)",
-            pending.item.pc, pending.item.insn, store_trace_stepped, store_axi_delivered), UVM_HIGH)
+            "T%0d Waiting for LSU AXI access before stepping store/AMO PC=%08x insn=%08x (stepped=%0d, axi=%0d)",
+            tid, pending.item.pc, pending.item.insn, store_trace_stepped, store_axi_delivered), UVM_HIGH)
           break;
         end
       end
 
-      if (needs_async_wb(pending.item) && !has_matching_async_wb(pending.item)) begin
+      if (needs_async_wb(pending.item) && !has_matching_async_wb(tid, pending.item)) begin
         `uvm_info("cosim", $sformatf(
-          "Waiting for async wb (DIV) before stepping PC=%08x insn=%08x rd=x%0d",
-          pending.item.pc, pending.item.insn, pending.item.get_write_rd()), UVM_HIGH)
+          "T%0d Waiting for async wb (DIV) before stepping PC=%08x insn=%08x rd=x%0d",
+          tid, pending.item.pc, pending.item.insn, pending.item.get_write_rd()), UVM_HIGH)
         break;
       end
 
-      pending_trace_q.pop_front();
+      pending_trace_q[tid].pop_front();
       if (is_memory_instruction(pending.item) &&
           has_matching_memory_access(pending.item)) begin
         pop_matching_memory_access(pending.item);
@@ -324,27 +315,26 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
       if (is_store_or_amo_instruction(pending.item)) begin
         store_trace_stepped++;
       end
-      compare_instruction(pending.item);
+      compare_instruction(tid, pending.item);
     end
   endfunction
 
-  function bit has_matching_async_wb(eh2_trace_seq_item item);
+  function bit has_matching_async_wb(int tid, eh2_trace_seq_item item);
     bit [4:0] expected_rd;
     if (!item.writes_rd()) return 1'b0;
     expected_rd = item.get_write_rd();
 
     if (item.is_div()) begin
-      // Any DIV-source hint at the head unblocks (FIFO match for retired divs).
-      foreach (async_wb_q[i]) begin
-        if (async_wb_q[i].source == EH2_WB_SRC_DIV) return 1'b1;
+      foreach (async_wb_q[tid][i]) begin
+        if (async_wb_q[tid][i].source == EH2_WB_SRC_DIV) return 1'b1;
       end
       return 1'b0;
     end
 
     if (is_load_instruction(item)) begin
-      foreach (async_wb_q[i]) begin
-        if (async_wb_q[i].source != EH2_WB_SRC_NB_LOAD) continue;
-        if (async_wb_q[i].rd == expected_rd) return 1'b1;
+      foreach (async_wb_q[tid][i]) begin
+        if (async_wb_q[tid][i].source != EH2_WB_SRC_NB_LOAD) continue;
+        if (async_wb_q[tid][i].rd == expected_rd) return 1'b1;
       end
     end
     return 1'b0;
@@ -368,10 +358,6 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   endfunction
 
   function bit must_wait_for_memory_access(eh2_trace_seq_item item);
-    // EH2 forwarded/internal loads can retire without an external LSU AXI transaction
-    // (DCCM hits, store-to-load forwarding, ICCM/PIC accesses). For loads we gate on
-    // the async nb-load wb hint instead — see needs_async_wb. Stores/AMOs always
-    // issue an AXI write, so they do gate on must_wait_for_memory_access.
     if (is_load_instruction(item)) return 1'b0;
     return is_store_or_amo_instruction(item);
   endfunction
@@ -387,42 +373,33 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
 
   // Try to consume an async writeback hint that matches this instruction's
   // architectural rd. Returns 1 and fills `hint` if found.
-  //
-  // Matching policy:
-  //   - DIV: take the FIRST queued DIV-source hint regardless of rd. The
-  //     dut probe monitor only enqueues DIV hints for events that pair
-  //     1:1 with retired div traces (real wb events + overwrite cancels;
-  //     speculative-flush cancels are dropped at the source). Therefore
-  //     the head of the DIV-source FIFO necessarily belongs to this trace.
-  //   - NB-load: match by rd (NB-load completions can interleave).
-  function bit try_consume_async_wb(eh2_trace_seq_item item,
+  function bit try_consume_async_wb(int tid, eh2_trace_seq_item item,
                                     output async_wb_hint_t hint);
     bit [4:0] expected_rd;
     if (!item.writes_rd()) return 1'b0;
     expected_rd = item.get_write_rd();
 
     if (item.is_div()) begin
-      foreach (async_wb_q[i]) begin
-        if (async_wb_q[i].source != EH2_WB_SRC_DIV) continue;
-        // Sanity: rd should match the retired div's rd.
-        if (async_wb_q[i].rd != expected_rd) begin
+      foreach (async_wb_q[tid][i]) begin
+        if (async_wb_q[tid][i].source != EH2_WB_SRC_DIV) continue;
+        if (async_wb_q[tid][i].rd != expected_rd) begin
           `uvm_warning("cosim", $sformatf(
-            "DIV hint rd mismatch: trace expects x%0d, hint head has x%0d",
-            expected_rd, async_wb_q[i].rd))
+            "T%0d DIV hint rd mismatch: trace expects x%0d, hint head has x%0d",
+            tid, expected_rd, async_wb_q[tid][i].rd))
         end
-        hint = async_wb_q[i];
-        async_wb_q.delete(i);
+        hint = async_wb_q[tid][i];
+        async_wb_q[tid].delete(i);
         return 1'b1;
       end
       return 1'b0;
     end
 
     if (is_load_instruction(item)) begin
-      foreach (async_wb_q[i]) begin
-        if (async_wb_q[i].source != EH2_WB_SRC_NB_LOAD) continue;
-        if (async_wb_q[i].rd != expected_rd) continue;
-        hint = async_wb_q[i];
-        async_wb_q.delete(i);
+      foreach (async_wb_q[tid][i]) begin
+        if (async_wb_q[tid][i].source != EH2_WB_SRC_NB_LOAD) continue;
+        if (async_wb_q[tid][i].rd != expected_rd) continue;
+        hint = async_wb_q[tid][i];
+        async_wb_q[tid].delete(i);
         return 1'b1;
       end
     end
@@ -470,24 +447,26 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
 
   function void pop_matching_memory_access(eh2_trace_seq_item item);
     bit need_store;
+    int tid;
     need_store = is_store_or_amo_instruction(item);
+    tid = int'(item.thread_id);
 
     foreach (pending_mem_access_q[i]) begin
       if (pending_mem_access_q[i].is_store == need_store) begin
-        notify_memory_access(pending_mem_access_q[i].txn);
+        notify_memory_access(tid, pending_mem_access_q[i].txn);
         pending_mem_access_q.delete(i);
         return;
       end
     end
 
     `uvm_error("cosim", $sformatf(
-      "Internal error: no queued LSU access for memory instruction PC=%08x insn=%08x",
-      item.pc, item.insn))
+      "T%0d Internal error: no queued LSU access for memory instruction PC=%08x insn=%08x",
+      tid, item.pc, item.insn))
   endfunction
 
   // Notify Spike about a memory access from the AXI4 bus.
   // AXI4 bus is 64-bit; split 64-bit beats into two 32-bit notifications.
-  function void notify_memory_access(axi4_seq_item txn);
+  function void notify_memory_access(int tid, axi4_seq_item txn);
     if (txn.tx_type == axi4_seq_item::AXI4_WRITE) begin
       bit write_error = (txn.resp[0] != axi4_seq_item::AXI4_RESP_OKAY);
 
@@ -501,18 +480,18 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
           riscv_cosim_notify_dside_access(cosim_handle,
             1, int'(beat_data[31:0]), int'(beat_addr),
             int'({4'b0, beat_strb[3:0]}),
-            int'(write_error), 0, 0, 0, 1, 0);
-          `uvm_info("cosim", $sformatf("MEM WR: addr=%08x data=%08x be=%04b",
-            beat_addr, beat_data[31:0], beat_strb[3:0]), UVM_HIGH)
+            int'(write_error), 0, 0, 0, 1, 0, tid);
+          `uvm_info("cosim", $sformatf("T%0d MEM WR: addr=%08x data=%08x be=%04b",
+            tid, beat_addr, beat_data[31:0], beat_strb[3:0]), UVM_HIGH)
         end
 
         if (beat_bytes > 4 && beat_strb[7:4] != 4'b0) begin
           riscv_cosim_notify_dside_access(cosim_handle,
             1, int'(beat_data[63:32]), int'(beat_addr + 4),
             int'({4'b0, beat_strb[7:4]}),
-            int'(write_error), 0, 0, 0, 1, 0);
-          `uvm_info("cosim", $sformatf("MEM WR: addr=%08x data=%08x be=%04b",
-            beat_addr + 4, beat_data[63:32], beat_strb[7:4]), UVM_HIGH)
+            int'(write_error), 0, 0, 0, 1, 0, tid);
+          `uvm_info("cosim", $sformatf("T%0d MEM WR: addr=%08x data=%08x be=%04b",
+            tid, beat_addr + 4, beat_data[63:32], beat_strb[7:4]), UVM_HIGH)
         end
       end
     end else begin
@@ -527,24 +506,24 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
         riscv_cosim_notify_dside_access(cosim_handle,
           0, int'(beat_data[31:0]), int'(beat_addr),
           int'(read_be), int'(read_error),
-          0, 0, 0, 1, int'(widened_load));
-        `uvm_info("cosim", $sformatf("MEM RD: addr=%08x data=%08x",
-          beat_addr, beat_data[31:0]), UVM_HIGH)
+          0, 0, 0, 1, int'(widened_load), tid);
+        `uvm_info("cosim", $sformatf("T%0d MEM RD: addr=%08x data=%08x",
+          tid, beat_addr, beat_data[31:0]), UVM_HIGH)
 
         if (beat_bytes > 4) begin
           riscv_cosim_notify_dside_access(cosim_handle,
             0, int'(beat_data[63:32]), int'(beat_addr + 4),
             int'(4'hf), int'(read_error),
-            0, 0, 0, 1, int'(widened_load));
-          `uvm_info("cosim", $sformatf("MEM RD: addr=%08x data=%08x",
-            beat_addr + 4, beat_data[63:32]), UVM_HIGH)
+            0, 0, 0, 1, int'(widened_load), tid);
+          `uvm_info("cosim", $sformatf("T%0d MEM RD: addr=%08x data=%08x",
+            tid, beat_addr + 4, beat_data[63:32]), UVM_HIGH)
         end
       end
     end
   endfunction
 
   // Compare one instruction against Spike.
-  function void compare_instruction(eh2_trace_seq_item item);
+  function void compare_instruction(int tid, eh2_trace_seq_item item);
     bit [4:0]  write_reg;
     bit [31:0] write_reg_data;
     bit        sync_trap;
@@ -555,29 +534,29 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     // EH2: When interrupt=1 and exception=0, the trace item is only an
     // interrupt notification (no instruction executed at this PC).
     if (item.interrupt && !item.exception) begin
-      riscv_cosim_set_debug_req(cosim_handle, int'(item.debug_req));
-      riscv_cosim_set_nmi(cosim_handle, int'(item.nmi));
-      riscv_cosim_set_nmi_int(cosim_handle, int'(item.nmi_int));
-      riscv_cosim_set_mip(cosim_handle, int'(prev_mip), int'(item.mip));
-      prev_mip = item.mip;
-      riscv_cosim_set_mcycle(cosim_handle, longint'(item.mcycle));
-      `uvm_info("cosim", $sformatf("IRQ-ONLY: PC=%08x", item.pc), UVM_HIGH)
+      riscv_cosim_set_debug_req(cosim_handle, int'(item.debug_req), tid);
+      riscv_cosim_set_nmi(cosim_handle, int'(item.nmi), tid);
+      riscv_cosim_set_nmi_int(cosim_handle, int'(item.nmi_int), tid);
+      riscv_cosim_set_mip(cosim_handle, int'(prev_mip[tid]), int'(item.mip), tid);
+      prev_mip[tid] = item.mip;
+      riscv_cosim_set_mcycle(cosim_handle, longint'(item.mcycle), tid);
+      `uvm_info("cosim", $sformatf("T%0d IRQ-ONLY: PC=%08x", tid, item.pc), UVM_HIGH)
 
       // RISK-9: Compare trap CSRs after Spike processes interrupt
       begin
         int unsigned spike_mcause, spike_mepc;
-        spike_mcause = riscv_cosim_get_mcause(cosim_handle);
-        spike_mepc   = riscv_cosim_get_mepc(cosim_handle);
+        spike_mcause = riscv_cosim_get_mcause(cosim_handle, tid);
+        spike_mepc   = riscv_cosim_get_mepc(cosim_handle, tid);
 
         if (item.dut_mcause != 0 && spike_mcause != item.dut_mcause) begin
           `uvm_info("cosim", $sformatf(
-            "IRQ mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x",
-            item.dut_mcause, spike_mcause, item.pc), UVM_MEDIUM)
+            "T%0d IRQ mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x",
+            tid, item.dut_mcause, spike_mcause, item.pc), UVM_MEDIUM)
         end
 
         `uvm_info("cosim", $sformatf(
-          "IRQ-COMPARE: PC=%08x DUT_mcause=%08x Spike_mcause=%08x DUT_mepc=%08x Spike_mepc=%08x",
-          item.pc, item.dut_mcause, spike_mcause, item.dut_mepc, spike_mepc), UVM_HIGH)
+          "T%0d IRQ-COMPARE: PC=%08x DUT_mcause=%08x Spike_mcause=%08x DUT_mepc=%08x Spike_mepc=%08x",
+          tid, item.pc, item.dut_mcause, spike_mcause, item.dut_mepc, spike_mepc), UVM_HIGH)
       end
 
       return;
@@ -594,22 +573,8 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
       suppress_reg_write = 0;
     end
 
-    // Async overrides: NB-load completion supplies the writeback data the
-    // trace packet could not.
-    //
-    // DIV behavior: in EH2 a younger instruction writing the same rd as a
-    // pending div triggers `dec_div_cancel`, which kills the div writeback
-    // in the regular pipeline. The architectural rd value Spike expects is
-    // the div result, but the RTL never writes it. Bridging this gap from
-    // a separate async hint cannot be done reliably (cancels and writebacks
-    // do not pair 1:1 with retired div trace entries because the div unit
-    // also runs speculative divs). For Phase 1 we set div writeback to the
-    // async hint's data when one is available; otherwise we tell Spike the
-    // DUT did not write rd. This leaves Spike's RF view of div results
-    // potentially stale, but that is acceptable for the random-arithmetic
-    // sign-off slice (later phases will tighten this with per-div RTL
-    // tagging).
-    if (try_consume_async_wb(item, async_hint)) begin
+    // Async overrides
+    if (try_consume_async_wb(tid, item, async_hint)) begin
       if (async_hint.suppress) begin
         suppress_reg_write = 1;
         write_reg          = 0;
@@ -620,10 +585,6 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
         suppress_reg_write = 0;
       end
     end else if (item.is_div()) begin
-      // No async hint available - div completion happens later, or the div
-      // was cancelled. Tell Spike the DUT did not write rd; Spike will keep
-      // its own computed value internally, leaving an architectural divergence
-      // that subsequent same-rd writes will reconcile.
       suppress_reg_write = 1;
       write_reg          = 0;
       write_reg_data     = 0;
@@ -632,48 +593,48 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     sync_trap = item.exception && !item.interrupt;
 
     // Spike notification ordering (Ibex pattern)
-    riscv_cosim_set_debug_req(cosim_handle, int'(item.debug_req));
-    riscv_cosim_set_nmi(cosim_handle, int'(item.nmi));
-    riscv_cosim_set_nmi_int(cosim_handle, int'(item.nmi_int));
-    riscv_cosim_set_mip(cosim_handle, int'(prev_mip), int'(item.mip));
-    prev_mip = item.mip;
-    riscv_cosim_set_mcycle(cosim_handle, longint'(item.mcycle));
+    riscv_cosim_set_debug_req(cosim_handle, int'(item.debug_req), tid);
+    riscv_cosim_set_nmi(cosim_handle, int'(item.nmi), tid);
+    riscv_cosim_set_nmi_int(cosim_handle, int'(item.nmi_int), tid);
+    riscv_cosim_set_mip(cosim_handle, int'(prev_mip[tid]), int'(item.mip), tid);
+    prev_mip[tid] = item.mip;
+    riscv_cosim_set_mcycle(cosim_handle, longint'(item.mcycle), tid);
     if (item.exception && !item.interrupt && item.ecause == 5'd1) begin
-      riscv_cosim_set_iside_error(cosim_handle, int'(item.pc));
+      riscv_cosim_set_iside_error(cosim_handle, int'(item.pc), tid);
     end
 
     result = riscv_cosim_step(cosim_handle,
       int'(write_reg), int'(write_reg_data),
       int'(item.pc), sync_trap ? 1 : 0,
-      suppress_reg_write ? 1 : 0);
+      suppress_reg_write ? 1 : 0, tid);
 
     if (result == 0) begin
-      mismatch_count++;
+      mismatch_count[tid]++;
       `uvm_info("cosim", $sformatf(
-        "MISMATCH: PC=%08x insn=%08x slot=%0d rd=x%0d data=%08x",
-        item.pc, item.insn, item.slot, write_reg, write_reg_data), UVM_LOW)
+        "T%0d MISMATCH: PC=%08x insn=%08x slot=%0d rd=x%0d data=%08x",
+        tid, item.pc, item.insn, item.slot, write_reg, write_reg_data), UVM_LOW)
       if (fatal_on_mismatch) begin
-        `uvm_fatal("cosim", $sformatf("MISMATCH at PC=%08x insn=%08x\n%s",
-          item.pc, item.insn, get_cosim_error_str()))
+        `uvm_fatal("cosim", $sformatf("T%0d MISMATCH at PC=%08x insn=%08x\n%s",
+          tid, item.pc, item.insn, get_cosim_error_str()))
       end else begin
-        `uvm_error("cosim", $sformatf("MISMATCH at PC=%08x insn=%08x\n%s",
-          item.pc, item.insn, get_cosim_error_str()))
+        `uvm_error("cosim", $sformatf("T%0d MISMATCH at PC=%08x insn=%08x\n%s",
+          tid, item.pc, item.insn, get_cosim_error_str()))
       end
     end else begin
-      `uvm_info("cosim", $sformatf("MATCH: PC=%08x insn=%08x rd=x%0d data=%08x",
-        item.pc, item.insn, write_reg, write_reg_data), UVM_HIGH)
+      `uvm_info("cosim", $sformatf("T%0d MATCH: PC=%08x insn=%08x rd=x%0d data=%08x",
+        tid, item.pc, item.insn, write_reg, write_reg_data), UVM_HIGH)
     end
 
     // RISK-9: Compare trap CSRs on exception path
     if (sync_trap && result != 0) begin
       int unsigned spike_mcause, spike_mepc;
-      spike_mcause = riscv_cosim_get_mcause(cosim_handle);
-      spike_mepc   = riscv_cosim_get_mepc(cosim_handle);
+      spike_mcause = riscv_cosim_get_mcause(cosim_handle, tid);
+      spike_mepc   = riscv_cosim_get_mepc(cosim_handle, tid);
 
       if (item.dut_mcause != 0 && spike_mcause != item.dut_mcause) begin
         `uvm_info("cosim", $sformatf(
-          "EXC mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x ecause=%0d",
-          item.dut_mcause, spike_mcause, item.pc, item.ecause), UVM_MEDIUM)
+          "T%0d EXC mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x ecause=%0d",
+          tid, item.dut_mcause, spike_mcause, item.pc, item.ecause), UVM_MEDIUM)
       end
     end
 
@@ -733,16 +694,19 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     end
 
     step_count = 0;
-    mismatch_count = 0;
     trace_item_count = 0;
     probe_item_count = 0;
     suppressed_probe_item_count = 0;
     axi_item_count = 0;
-    prev_mip = 0;
-    pending_trace_q.delete();
-    pending_mem_access_q.delete();
-    async_wb_q.delete();
     pending_trace_high_watermark = 0;
+    for (int t = 0; t < 2; t++) begin
+      mismatch_count[t] = 0;
+      insn_cnt[t] = 0;
+      prev_mip[t] = 0;
+      pending_trace_q[t].delete();
+      async_wb_q[t].delete();
+    end
+    pending_mem_access_q.delete();
   endfunction
 
   protected function void cleanup_cosim();
@@ -754,31 +718,44 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   endfunction
 
   function void report_phase(uvm_phase phase);
+    int total_mismatch;
+    int total_pending_trace;
+    int total_pending_async;
+
     super.report_phase(phase);
+
+    total_mismatch = mismatch_count[0] + mismatch_count[1];
+    total_pending_trace = pending_trace_q[0].size() + pending_trace_q[1].size();
+    total_pending_async = async_wb_q[0].size() + async_wb_q[1].size();
+
     `uvm_info("cosim", "=== Co-simulation Scoreboard Report ===", UVM_LOW)
     `uvm_info("cosim", $sformatf("Trace items received: %0d", trace_item_count), UVM_LOW)
     `uvm_info("cosim", $sformatf("Probe items received: %0d (async-only)", probe_item_count), UVM_LOW)
     `uvm_info("cosim", $sformatf("AXI items received: %0d", axi_item_count), UVM_LOW)
-    `uvm_info("cosim", $sformatf("Pending trace items: %0d", pending_trace_q.size()), UVM_LOW)
+    `uvm_info("cosim", $sformatf("Pending trace items: T0=%0d T1=%0d",
+      pending_trace_q[0].size(), pending_trace_q[1].size()), UVM_LOW)
     `uvm_info("cosim", $sformatf("Pending LSU accesses: %0d", pending_mem_access_q.size()), UVM_LOW)
-    `uvm_info("cosim", $sformatf("Pending async wb hints: %0d", async_wb_q.size()), UVM_LOW)
+    `uvm_info("cosim", $sformatf("Pending async wb hints: T0=%0d T1=%0d",
+      async_wb_q[0].size(), async_wb_q[1].size()), UVM_LOW)
     `uvm_info("cosim", $sformatf("Trace backlog high watermark: %0d",
       pending_trace_high_watermark), UVM_LOW)
     `uvm_info("cosim", $sformatf("Steps executed: %0d", step_count), UVM_LOW)
-    `uvm_info("cosim", $sformatf("Mismatches: %0d", mismatch_count), UVM_LOW)
+    `uvm_info("cosim", $sformatf("Mismatches: T0=%0d T1=%0d total=%0d",
+      mismatch_count[0], mismatch_count[1], total_mismatch), UVM_LOW)
     if (cosim_handle != null) begin
-      `uvm_info("cosim", $sformatf("Instructions matched: %0d",
-        riscv_cosim_get_insn_cnt(cosim_handle)), UVM_LOW)
+      `uvm_info("cosim", $sformatf("Instructions matched: T0=%0d T1=%0d",
+        riscv_cosim_get_insn_cnt(cosim_handle, 0),
+        riscv_cosim_get_insn_cnt(cosim_handle, 1)), UVM_LOW)
     end
-    if (mismatch_count == 0 && step_count > 0) begin
-      if (pending_trace_q.size() > 0 || pending_mem_access_q.size() > 0) begin
+    if (total_mismatch == 0 && step_count > 0) begin
+      if (total_pending_trace > 0 || pending_mem_access_q.size() > 0) begin
         `uvm_info("cosim", $sformatf(
           "NOTE: %0d pending trace items, %0d pending LSU accesses at end-of-test (EH2 nb_load/store-buffer timing)",
-          pending_trace_q.size(), pending_mem_access_q.size()), UVM_LOW)
+          total_pending_trace, pending_mem_access_q.size()), UVM_LOW)
       end
       `uvm_info("cosim", "RESULT: PASS", UVM_LOW)
     end else if (trace_item_count > 0 || step_count > 0 ||
-                 pending_trace_q.size() > 0 ||
+                 total_pending_trace > 0 ||
                  pending_mem_access_q.size() > 0) begin
       `uvm_error("cosim", "RESULT: FAIL")
     end
@@ -787,8 +764,9 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   function void final_phase(uvm_phase phase);
     super.final_phase(phase);
     if (cosim_handle != null) begin
-      `uvm_info("cosim", $sformatf("Co-simulation matched %0d instructions",
-        riscv_cosim_get_insn_cnt(cosim_handle)), UVM_LOW)
+      `uvm_info("cosim", $sformatf("Co-simulation matched T0=%0d T1=%0d instructions",
+        riscv_cosim_get_insn_cnt(cosim_handle, 0),
+        riscv_cosim_get_insn_cnt(cosim_handle, 1)), UVM_LOW)
     end
     cleanup_cosim();
   endfunction

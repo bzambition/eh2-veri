@@ -3,6 +3,7 @@
 //
 // Based on Ibex's spike_cosim.cc, adapted for VeeR EH2.
 // Implements instruction-by-instruction comparison between DUT and Spike.
+// Supports NUM_THREADS=1 (single hart) and NUM_THREADS=2 (dual hart).
 
 #include "spike_cosim.h"
 
@@ -23,8 +24,10 @@
 SpikeCosim::SpikeCosim(const std::string &isa_string, uint32_t start_pc,
                        uint32_t start_mtvec, const std::string &trace_log_path,
                        uint32_t pmp_num_regions, uint32_t pmp_granularity,
-                       uint32_t mhpm_counter_num)
-    : nmi_mode(false), pending_iside_error(false), insn_cnt(0) {
+                       uint32_t mhpm_counter_num, int num_threads)
+    : num_threads(num_threads), active_thread(0) {
+  assert(num_threads >= 1 && num_threads <= COSIM_MAX_THREADS);
+
   FILE *log_file = nullptr;
   if (trace_log_path.length() != 0) {
     log = std::make_unique<log_file_t>(trace_log_path.c_str());
@@ -32,18 +35,21 @@ SpikeCosim::SpikeCosim(const std::string &isa_string, uint32_t start_pc,
   }
 
   isa_parser = std::make_unique<isa_parser_t>(isa_string.c_str(), "MU");
-  processor = std::make_unique<processor_t>(
-      isa_parser.get(), DEFAULT_VARCH, this, 0, false, log_file, std::cerr);
 
-  processor->set_pmp_num(pmp_num_regions);
-  processor->set_mhpm_counter_num(mhpm_counter_num);
-  processor->set_pmp_granularity(1 << (pmp_granularity + 2));
+  for (int t = 0; t < num_threads; ++t) {
+    processors[t] = std::make_unique<processor_t>(
+        isa_parser.get(), DEFAULT_VARCH, this, t, false, log_file, std::cerr);
 
-  initial_proc_setup(start_pc, start_mtvec, mhpm_counter_num);
+    processors[t]->set_pmp_num(pmp_num_regions);
+    processors[t]->set_mhpm_counter_num(mhpm_counter_num);
+    processors[t]->set_pmp_granularity(1 << (pmp_granularity + 2));
 
-  if (log) {
-    processor->set_debug(true);
-    processor->enable_log_commits();
+    initial_proc_setup(t, start_pc, start_mtvec, mhpm_counter_num);
+
+    if (log) {
+      processors[t]->set_debug(true);
+      processors[t]->enable_log_commits();
+    }
   }
 }
 
@@ -58,16 +64,20 @@ bool SpikeCosim::mmio_load(reg_t addr, size_t len, uint8_t *bytes) {
 
   bool bus_error = !bus.load(addr, len, bytes);
 
+  int tid = active_thread;
+  auto *proc = get_processor(tid);
+  auto &ts = thread_state[tid];
+
   // Incoming access may be an iside or dside access. Use PC to help determine
   // which. PC is 64 bits in spike, we only care about the bottom 32-bit so mask
   // off the top bits.
-  uint64_t pc = processor->get_state()->pc & 0xffffffff;
+  uint64_t pc = proc->get_state()->pc & 0xffffffff;
   uint32_t aligned_addr = addr & 0xfffffffc;
 
-  if (pending_iside_error && (aligned_addr == pending_iside_err_addr)) {
+  if (ts.pending_iside_error && (aligned_addr == ts.pending_iside_err_addr)) {
     // Check if the incoming access is subject to an iside error, in which case
     // assume it's an iside access and produce an error.
-    pending_iside_error = false;
+    ts.pending_iside_error = false;
     bus_error = true;
   } else {
     // Spike may attempt to access up to 8-bytes from the PC when fetching, so
@@ -79,7 +89,7 @@ bool SpikeCosim::mmio_load(reg_t addr, size_t len, uint8_t *bytes) {
       // pending_dside_accesses when a load check runs.  Treat dside
       // check failures as diagnostic — Spike already loaded the
       // correct data from its own memory via bus.load() above.
-      (void)check_mem_access(false, addr, len, bytes);
+      (void)check_mem_access(tid, false, addr, len, bytes);
     }
   }
 
@@ -94,6 +104,8 @@ bool SpikeCosim::mmio_store(reg_t addr, size_t len, const uint8_t *bytes) {
 
   bool bus_error = !bus.store(addr, len, bytes);
 
+  int tid = active_thread;
+
   // EH2 store-buffer coalescing / RMW semantics: store comparison failures
   // must NOT cause Spike to trap.  Reasons:
   //   1. Coalesced stores: sb+sw to the same word are merged; the AXI data
@@ -106,7 +118,7 @@ bool SpikeCosim::mmio_store(reg_t addr, size_t len, const uint8_t *bytes) {
   //
   // Errors are recorded in errors[] for UVM_ERROR reporting via step(),
   // but mmio_store always returns true so Spike never traps on stores.
-  (void)check_mem_access(true, addr, len, bytes);
+  (void)check_mem_access(tid, true, addr, len, bytes);
 
   return !bus_error;
 }
@@ -135,7 +147,7 @@ bool SpikeCosim::backdoor_read_mem(uint32_t addr, size_t len,
 // Instruction decoding helpers
 // ---------------------------------------------------------------
 
-bool SpikeCosim::pc_is_mret(uint32_t pc) {
+bool SpikeCosim::pc_is_mret(int thread_id, uint32_t pc) {
   uint32_t insn;
   if (!backdoor_read_mem(pc, 4, reinterpret_cast<uint8_t *>(&insn))) {
     return false;
@@ -143,14 +155,15 @@ bool SpikeCosim::pc_is_mret(uint32_t pc) {
   return insn == 0x30200073;
 }
 
-bool SpikeCosim::pc_is_debug_ebreak(uint32_t pc) {
-  uint32_t dcsr = processor->get_csr(CSR_DCSR);
+bool SpikeCosim::pc_is_debug_ebreak(int thread_id, uint32_t pc) {
+  auto *proc = get_processor(thread_id);
+  uint32_t dcsr = proc->get_csr(CSR_DCSR);
 
   // ebreak debug entry is controlled by ebreakm (bit 15) and ebreaku (bit 12).
   // If the appropriate bit of the current privilege level isn't set, ebreak
   // won't enter debug mode so return false.
-  if (((processor->get_state()->prv == PRV_M) && ((dcsr & 0x1000) == 0)) ||
-      ((processor->get_state()->prv == PRV_U) && ((dcsr & 0x8000) == 0))) {
+  if (((proc->get_state()->prv == PRV_M) && ((dcsr & 0x1000) == 0)) ||
+      ((proc->get_state()->prv == PRV_U) && ((dcsr & 0x8000) == 0))) {
     return false;
   }
 
@@ -171,14 +184,14 @@ bool SpikeCosim::pc_is_debug_ebreak(uint32_t pc) {
   return insn_32 == 0x00100073;
 }
 
-void SpikeCosim::check_debug_ebreak(uint32_t write_reg, uint32_t pc,
-                                    bool sync_trap) {
+void SpikeCosim::check_debug_ebreak(int thread_id, uint32_t write_reg,
+                                    uint32_t pc, bool sync_trap) {
   // A debug ebreak from the DUT should not write a register and will be
   // reported as a 'sync_trap' (though doesn't act like a trap in various
   // respects).
   if (write_reg != 0) {
     std::stringstream err_str;
-    err_str << "DUT executed ebreak at " << std::hex << pc
+    err_str << "T" << thread_id << " DUT executed ebreak at " << std::hex << pc
             << " but also wrote register x" << std::dec << write_reg
             << " which was unexpected";
     errors.emplace_back(err_str.str());
@@ -186,7 +199,8 @@ void SpikeCosim::check_debug_ebreak(uint32_t write_reg, uint32_t pc,
 
   if (sync_trap) {
     std::stringstream err_str;
-    err_str << "DUT executed ebreak into debug at " << std::hex << pc
+    err_str << "T" << thread_id << " DUT executed ebreak into debug at "
+            << std::hex << pc
             << " but indicated a synchronous trap, which was unexpected";
     errors.emplace_back(err_str.str());
   }
@@ -247,18 +261,23 @@ bool SpikeCosim::pc_is_div_or_rem(uint32_t pc) {
 // Interrupt/debug handling
 // ---------------------------------------------------------------
 
-void SpikeCosim::early_interrupt_handle() {
+void SpikeCosim::early_interrupt_handle(int thread_id) {
+  auto *proc = get_processor(thread_id);
+
   // Execute a spike step on the assumption an interrupt will occur so no new
   // instruction is executed just the state altered to reflect the interrupt.
-  uint32_t initial_spike_pc = (processor->get_state()->pc & 0xffffffff);
-  processor->step(1);
+  uint32_t initial_spike_pc = (proc->get_state()->pc & 0xffffffff);
 
-  if (processor->get_state()->last_inst_pc != PC_INVALID) {
+  active_thread = thread_id;
+  proc->step(1);
+
+  if (proc->get_state()->last_inst_pc != PC_INVALID) {
     std::stringstream err_str;
-    err_str << "Attempted step for interrupt, expecting no instruction would "
+    err_str << "T" << thread_id
+            << " Attempted step for interrupt, expecting no instruction would "
             << "be executed but saw one. PC before: " << std::hex
             << initial_spike_pc
-            << " PC after: " << (processor->get_state()->pc & 0xffffffff);
+            << " PC after: " << (proc->get_state()->pc & 0xffffffff);
     errors.emplace_back(err_str.str());
   }
 }
@@ -268,15 +287,20 @@ void SpikeCosim::early_interrupt_handle() {
 // ---------------------------------------------------------------
 
 bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
-                      bool sync_trap, bool suppress_reg_write) {
+                      bool sync_trap, bool suppress_reg_write,
+                      int thread_id) {
   assert(write_reg < 32);
+  assert(thread_id >= 0 && thread_id < num_threads);
+
+  auto *proc = get_processor(thread_id);
+  auto &ts = thread_state[thread_id];
 
   // First check if this is an ebreak that should enter debug mode. These need
   // specific handling. When spike steps over an ebreak entering debug mode it
   // immediately steps the next instruction (first instruction of debug handler)
   // too. To deal with this, skip the rest of the function for debug ebreaks.
-  if (pc_is_debug_ebreak(pc)) {
-    check_debug_ebreak(write_reg, pc, sync_trap);
+  if (pc_is_debug_ebreak(thread_id, pc)) {
+    check_debug_ebreak(thread_id, write_reg, pc, sync_trap);
     return errors.size() == 0;
   }
 
@@ -286,50 +310,54 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
   bool pending_sync_exception = false;
 
   if (suppress_reg_write) {
-    if (!check_suppress_reg_write(write_reg, pc, suppressed_write_reg)) {
+    if (!check_suppress_reg_write(thread_id, write_reg, pc,
+                                  suppressed_write_reg)) {
       return false;
     }
     suppressed_write_reg_data =
-        processor->get_state()->XPR[suppressed_write_reg];
+        proc->get_state()->XPR[suppressed_write_reg];
   }
 
   // Record current spike PC before stepping
-  initial_spike_pc = (processor->get_state()->pc & 0xffffffff);
+  initial_spike_pc = (proc->get_state()->pc & 0xffffffff);
 
+  active_thread = thread_id;
   try {
-    processor->step(1);
+    proc->step(1);
   } catch (const std::exception &e) {
     std::stringstream err_str;
-    err_str << "Spike step exception at PC " << std::hex << initial_spike_pc
-            << ": " << e.what();
+    err_str << "T" << thread_id << " Spike step exception at PC " << std::hex
+            << initial_spike_pc << ": " << e.what();
     errors.emplace_back(err_str.str());
     return false;
   } catch (...) {
     std::stringstream err_str;
-    err_str << "Spike unknown step exception at PC " << std::hex << initial_spike_pc;
+    err_str << "T" << thread_id << " Spike unknown step exception at PC "
+            << std::hex << initial_spike_pc;
     errors.emplace_back(err_str.str());
     return false;
   }
 
-  if (processor->get_state()->last_inst_pc == PC_INVALID) {
-    if (!(processor->get_state()->mcause->read() & 0x80000000) ||
-        processor->get_state()->debug_mode) {
+  if (proc->get_state()->last_inst_pc == PC_INVALID) {
+    if (!(proc->get_state()->mcause->read() & 0x80000000) ||
+        proc->get_state()->debug_mode) {
       // Synchronous trap
       pending_sync_exception = true;
     } else {
       // Asynchronous trap - step to first instruction of ISR
-      initial_spike_pc = (processor->get_state()->pc & 0xffffffff);
+      initial_spike_pc = (proc->get_state()->pc & 0xffffffff);
+      active_thread = thread_id;
       try {
-        processor->step(1);
+        proc->step(1);
       } catch (const std::exception &e) {
         std::stringstream err_str;
-        err_str << "Spike ISR step exception at PC " << std::hex << initial_spike_pc
-                << ": " << e.what();
+        err_str << "T" << thread_id << " Spike ISR step exception at PC "
+                << std::hex << initial_spike_pc << ": " << e.what();
         errors.emplace_back(err_str.str());
         return false;
       }
 
-      if (processor->get_state()->last_inst_pc == PC_INVALID) {
+      if (proc->get_state()->last_inst_pc == PC_INVALID) {
         pending_sync_exception = true;
       }
     }
@@ -337,14 +365,15 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
     if (pending_sync_exception) {
       if (!sync_trap) {
         std::stringstream err_str;
-        err_str << "Synchronous trap was expected at ISS PC: " << std::hex
-                << processor->get_state()->pc
+        err_str << "T" << thread_id
+                << " Synchronous trap was expected at ISS PC: " << std::hex
+                << proc->get_state()->pc
                 << " but the DUT didn't report one at PC " << pc;
         errors.emplace_back(err_str.str());
         return false;
       }
 
-      if (!check_sync_trap(write_reg, pc, initial_spike_pc)) {
+      if (!check_sync_trap(thread_id, write_reg, pc, initial_spike_pc)) {
         return false;
       }
 
@@ -355,25 +384,27 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
   // We reached a retired instruction
 
   // Check for mret - handle NMI mode exit
-  if (!sync_trap && pc_is_mret(pc)) {
-    if (nmi_mode) {
-      leave_nmi_mode();
+  if (!sync_trap && pc_is_mret(thread_id, pc)) {
+    if (ts.nmi_mode) {
+      leave_nmi_mode(thread_id);
     }
   }
 
   // Check for unconsumed iside error
-  if (pending_iside_error) {
+  if (ts.pending_iside_error) {
     std::stringstream err_str;
-    err_str << "DUT generated an iside error for address: " << std::hex
-            << pending_iside_err_addr << " but the ISS didn't produce one";
+    err_str << "T" << thread_id
+            << " DUT generated an iside error for address: " << std::hex
+            << ts.pending_iside_err_addr
+            << " but the ISS didn't produce one";
     errors.emplace_back(err_str.str());
-    pending_iside_error = false;
+    ts.pending_iside_error = false;
     return false;
   }
 
   if (suppress_reg_write) {
-    processor->get_state()->XPR.write(suppressed_write_reg,
-                                      suppressed_write_reg_data);
+    proc->get_state()->XPR.write(suppressed_write_reg,
+                                 suppressed_write_reg_data);
   }
 
   // Clear diagnostic errors generated during processor->step(1) by
@@ -383,7 +414,8 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
   // which would otherwise see errors.size()!=0 and return false.
   errors.clear();
 
-  if (!check_retired_instr(write_reg, write_reg_data, pc, suppress_reg_write)) {
+  if (!check_retired_instr(thread_id, write_reg, write_reg_data, pc,
+                           suppress_reg_write)) {
     return false;
   }
 
@@ -397,25 +429,27 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
     errors.clear();
   }
 
-  insn_cnt++;
+  ts.insn_cnt++;
   return true;
 }
 
-bool SpikeCosim::check_retired_instr(uint32_t write_reg,
+bool SpikeCosim::check_retired_instr(int thread_id, uint32_t write_reg,
                                      uint32_t write_reg_data, uint32_t dut_pc,
                                      bool suppress_reg_write) {
+  auto *proc = get_processor(thread_id);
+
   // Check PC matches
-  if ((processor->get_state()->last_inst_pc & 0xffffffff) != dut_pc) {
+  if ((proc->get_state()->last_inst_pc & 0xffffffff) != dut_pc) {
     std::stringstream err_str;
-    err_str << "PC mismatch, DUT retired : " << std::hex << dut_pc
-            << " , but the ISS retired: " << std::hex
-            << (processor->get_state()->last_inst_pc & 0xffffffff);
+    err_str << "T" << thread_id << " PC mismatch, DUT retired : " << std::hex
+            << dut_pc << " , but the ISS retired: " << std::hex
+            << (proc->get_state()->last_inst_pc & 0xffffffff);
     errors.emplace_back(err_str.str());
     return false;
   }
 
   // Check register writes match
-  auto &reg_changes = processor->get_state()->log_reg_write;
+  auto &reg_changes = proc->get_state()->log_reg_write;
 
   bool gpr_write_seen = false;
 
@@ -429,14 +463,14 @@ bool SpikeCosim::check_retired_instr(uint32_t write_reg,
       assert(!gpr_write_seen);
 
       if (!suppress_reg_write &&
-          !check_gpr_write(reg_change, write_reg, write_reg_data)) {
+          !check_gpr_write(thread_id, reg_change, write_reg, write_reg_data)) {
         return false;
       }
 
       gpr_write_seen = true;
     } else if ((reg_change.first & 0xf) == 4) {
       // CSR write
-      on_csr_write(reg_change);
+      on_csr_write(thread_id, reg_change);
     } else {
       assert(false);
     }
@@ -444,7 +478,7 @@ bool SpikeCosim::check_retired_instr(uint32_t write_reg,
 
   if (write_reg != 0 && !gpr_write_seen) {
     std::stringstream err_str;
-    err_str << "DUT wrote register x" << write_reg
+    err_str << "T" << thread_id << " DUT wrote register x" << write_reg
             << " but a write was not expected" << std::endl;
     errors.emplace_back(err_str.str());
     return false;
@@ -457,11 +491,16 @@ bool SpikeCosim::check_retired_instr(uint32_t write_reg,
   return true;
 }
 
-bool SpikeCosim::check_sync_trap(uint32_t write_reg, uint32_t dut_pc,
+bool SpikeCosim::check_sync_trap(int thread_id, uint32_t write_reg,
+                                 uint32_t dut_pc,
                                  uint32_t initial_spike_pc) {
+  auto *proc = get_processor(thread_id);
+  auto &ts = thread_state[thread_id];
+
   if (initial_spike_pc != dut_pc) {
     std::stringstream err_str;
-    err_str << "PC mismatch at synchronous trap, DUT at pc: " << std::hex
+    err_str << "T" << thread_id
+            << " PC mismatch at synchronous trap, DUT at pc: " << std::hex
             << dut_pc << "while ISS pc is at : " << std::hex
             << initial_spike_pc;
     errors.emplace_back(err_str.str());
@@ -470,22 +509,23 @@ bool SpikeCosim::check_sync_trap(uint32_t write_reg, uint32_t dut_pc,
 
   if (write_reg != 0) {
     std::stringstream err_str;
-    err_str << "Synchronous trap occurred at PC: " << std::hex << dut_pc
+    err_str << "T" << thread_id << " Synchronous trap occurred at PC: "
+            << std::hex << dut_pc
             << "but DUT wrote to register: x" << std::dec << write_reg;
     errors.emplace_back(err_str.str());
     return false;
   }
 
   // Handle load/store access fault - apply fixup for misaligned accesses
-  if ((processor->get_state()->mcause->read() == 0x5) ||
-      (processor->get_state()->mcause->read() == 0x7)) {
-    misaligned_pmp_fixup(0, false);
+  if ((proc->get_state()->mcause->read() == 0x5) ||
+      (proc->get_state()->mcause->read() == 0x7)) {
+    misaligned_pmp_fixup(thread_id, 0, false);
   }
 
   // Handle internal NMI cause
-  if (processor->get_state()->mcause->read() == 0xFFFFFFE0) {
-    if (pending_dside_accesses.size() > 0) {
-      pending_dside_accesses.erase(pending_dside_accesses.begin());
+  if (proc->get_state()->mcause->read() == 0xFFFFFFE0) {
+    if (ts.pending_dside_accesses.size() > 0) {
+      ts.pending_dside_accesses.erase(ts.pending_dside_accesses.begin());
     }
   }
 
@@ -496,22 +536,23 @@ bool SpikeCosim::check_sync_trap(uint32_t write_reg, uint32_t dut_pc,
   return true;
 }
 
-bool SpikeCosim::check_gpr_write(const commit_log_reg_t::value_type &reg_change,
+bool SpikeCosim::check_gpr_write(int thread_id,
+                                 const commit_log_reg_t::value_type &reg_change,
                                  uint32_t write_reg, uint32_t write_reg_data) {
   uint32_t cosim_write_reg = (reg_change.first >> 4) & 0x1f;
 
   if (write_reg == 0) {
     std::stringstream err_str;
-    err_str << "DUT didn't write to register x" << cosim_write_reg
-            << ", but a write was expected";
+    err_str << "T" << thread_id << " DUT didn't write to register x"
+            << cosim_write_reg << ", but a write was expected";
     errors.emplace_back(err_str.str());
     return false;
   }
 
   if (write_reg != cosim_write_reg) {
     std::stringstream err_str;
-    err_str << "Register write index mismatch, DUT: x" << write_reg
-            << " expected: x" << cosim_write_reg;
+    err_str << "T" << thread_id << " Register write index mismatch, DUT: x"
+            << write_reg << " expected: x" << cosim_write_reg;
     errors.emplace_back(err_str.str());
     return false;
   }
@@ -537,11 +578,12 @@ bool SpikeCosim::check_gpr_write(const commit_log_reg_t::value_type &reg_change,
   return true;
 }
 
-bool SpikeCosim::check_suppress_reg_write(uint32_t write_reg, uint32_t pc,
+bool SpikeCosim::check_suppress_reg_write(int thread_id, uint32_t write_reg,
+                                          uint32_t pc,
                                           uint32_t &suppressed_write_reg) {
   if (write_reg != 0) {
     std::stringstream err_str;
-    err_str << "Instruction at " << std::hex << pc
+    err_str << "T" << thread_id << " Instruction at " << std::hex << pc
             << " indicated a suppressed register write but wrote to x"
             << std::dec << write_reg;
     errors.emplace_back(err_str.str());
@@ -551,7 +593,7 @@ bool SpikeCosim::check_suppress_reg_write(uint32_t write_reg, uint32_t pc,
   // EH2 can suppress killed loads and canceled non-blocking DIV/REM writes.
   if (!pc_is_load(pc) && !pc_is_div_or_rem(pc)) {
     std::stringstream err_str;
-    err_str << "Instruction at " << std::hex << pc
+    err_str << "T" << thread_id << " Instruction at " << std::hex << pc
             << " indicated a suppressed register write but is not a load/div";
     errors.emplace_back(err_str.str());
     return false;
@@ -582,49 +624,56 @@ bool SpikeCosim::check_suppress_reg_write(uint32_t write_reg, uint32_t pc,
   return false;
 }
 
-void SpikeCosim::on_csr_write(const commit_log_reg_t::value_type &reg_change) {
+void SpikeCosim::on_csr_write(int thread_id,
+                               const commit_log_reg_t::value_type &reg_change) {
   int cosim_write_csr = (reg_change.first >> 4) & 0xfff;
   uint32_t cosim_write_csr_data = reg_change.second.v[0];
 
   // Spike and EH2 have different WARL behaviours so after any CSR write
   // check the fields and adjust to match EH2 behaviour.
-  fixup_csr(cosim_write_csr, cosim_write_csr_data);
+  fixup_csr(thread_id, cosim_write_csr, cosim_write_csr_data);
 }
 
-void SpikeCosim::leave_nmi_mode() {
-  nmi_mode = false;
+void SpikeCosim::leave_nmi_mode(int thread_id) {
+  auto *proc = get_processor(thread_id);
+  auto &ts = thread_state[thread_id];
+
+  ts.nmi_mode = false;
 
   // Restore CSR status from mstack
-  uint32_t mstatus = processor->get_csr(CSR_MSTATUS);
-  mstatus = set_field(mstatus, MSTATUS_MPP, mstack.mpp);
-  mstatus = set_field(mstatus, MSTATUS_MPIE, mstack.mpie);
-  processor->put_csr(CSR_MSTATUS, mstatus);
+  uint32_t mstatus = proc->get_csr(CSR_MSTATUS);
+  mstatus = set_field(mstatus, MSTATUS_MPP, ts.mstack.mpp);
+  mstatus = set_field(mstatus, MSTATUS_MPIE, ts.mstack.mpie);
+  proc->put_csr(CSR_MSTATUS, mstatus);
 
-  processor->put_csr(CSR_MEPC, mstack.epc);
-  processor->put_csr(CSR_MCAUSE, mstack.cause);
+  proc->put_csr(CSR_MEPC, ts.mstack.epc);
+  proc->put_csr(CSR_MCAUSE, ts.mstack.cause);
 }
 
-void SpikeCosim::initial_proc_setup(uint32_t start_pc, uint32_t start_mtvec,
+void SpikeCosim::initial_proc_setup(int thread_id, uint32_t start_pc,
+                                    uint32_t start_mtvec,
                                     uint32_t mhpm_counter_num) {
-  processor->get_state()->pc = start_pc;
-  processor->get_state()->mtvec->write(start_mtvec);
+  auto *proc = get_processor(thread_id);
+
+  proc->get_state()->pc = start_pc;
+  proc->get_state()->mtvec->write(start_mtvec);
 
   // Set EH2 marchid
-  processor->get_state()->csrmap[CSR_MARCHID] =
-      std::make_shared<const_csr_t>(processor.get(), CSR_MARCHID, EH2_MARCHID);
+  proc->get_state()->csrmap[CSR_MARCHID] =
+      std::make_shared<const_csr_t>(proc, CSR_MARCHID, EH2_MARCHID);
 
-  processor->set_mmu_capability(IMPL_MMU_SBARE);
+  proc->set_mmu_capability(IMPL_MMU_SBARE);
 
   // Configure trigger modules
-  for (int i = 0; i < processor->TM.count(); ++i) {
-    processor->TM.tdata2_write(processor.get(), i, 0);
-    processor->TM.tdata1_write(processor.get(), i, 0x28001048);
+  for (int i = 0; i < proc->TM.count(); ++i) {
+    proc->TM.tdata2_write(proc, i, 0);
+    proc->TM.tdata1_write(proc, i, 0x28001048);
   }
 
   // Configure MHPM counters
-  for (int i = 0; i < mhpm_counter_num; i++) {
-    processor->get_state()->csrmap[CSR_MHPMEVENT3 + i] =
-        std::make_shared<const_csr_t>(processor.get(), CSR_MHPMEVENT3 + i,
+  for (int i = 0; i < (int)mhpm_counter_num; i++) {
+    proc->get_state()->csrmap[CSR_MHPMEVENT3 + i] =
+        std::make_shared<const_csr_t>(proc, CSR_MHPMEVENT3 + i,
                                       1 << i);
   }
 
@@ -663,10 +712,10 @@ void SpikeCosim::initial_proc_setup(uint32_t start_pc, uint32_t start_mtvec,
   };
 
   for (int csr : eh2_init_csrs) {
-    if (processor->get_state()->csrmap.find(csr) ==
-        processor->get_state()->csrmap.end()) {
-      processor->get_state()->csrmap[csr] =
-          std::make_shared<basic_csr_t>(processor.get(), csr, 0);
+    if (proc->get_state()->csrmap.find(csr) ==
+        proc->get_state()->csrmap.end()) {
+      proc->get_state()->csrmap[csr] =
+          std::make_shared<basic_csr_t>(proc, csr, 0);
     }
   }
 }
@@ -675,27 +724,30 @@ void SpikeCosim::initial_proc_setup(uint32_t start_pc, uint32_t start_mtvec,
 // set_mip() - Aligned with Ibex: delegate to Spike's interrupt logic
 // ---------------------------------------------------------------
 
-void SpikeCosim::set_mip(uint32_t pre_mip, uint32_t post_mip) {
-  uint32_t old_mip = processor->get_state()->mip->read();
+void SpikeCosim::set_mip(uint32_t pre_mip, uint32_t post_mip,
+                         int thread_id) {
+  auto *proc = get_processor(thread_id);
 
-  processor->get_state()->mip->write_with_mask(0xffffffff, post_mip);
-  processor->get_state()->mip->write_pre_val(pre_mip);
+  uint32_t old_mip = proc->get_state()->mip->read();
 
-  if (processor->get_state()->debug_mode ||
-      (processor->halt_request == processor_t::HR_REGULAR) ||
-      (!get_field(processor->get_csr(CSR_MSTATUS), MSTATUS_MIE) &&
-       processor->get_state()->prv == PRV_M)) {
+  proc->get_state()->mip->write_with_mask(0xffffffff, post_mip);
+  proc->get_state()->mip->write_pre_val(pre_mip);
+
+  if (proc->get_state()->debug_mode ||
+      (proc->halt_request == processor_t::HR_REGULAR) ||
+      (!get_field(proc->get_csr(CSR_MSTATUS), MSTATUS_MIE) &&
+       proc->get_state()->prv == PRV_M)) {
     return;
   }
 
-  uint32_t old_enabled_irq = old_mip & processor->get_state()->mie->read();
-  uint32_t new_enabled_irq = pre_mip & processor->get_state()->mie->read();
+  uint32_t old_enabled_irq = old_mip & proc->get_state()->mie->read();
+  uint32_t new_enabled_irq = pre_mip & proc->get_state()->mie->read();
 
   // Trigger interrupt handling if new MIP produces an enabled interrupt for
   // the first time. Use pre_mip (the MIP value at the start of the instruction)
   // to determine if an interrupt should be taken, matching Ibex behavior.
   if ((old_enabled_irq == 0) && (new_enabled_irq != 0)) {
-    early_interrupt_handle();
+    early_interrupt_handle(thread_id);
   }
 }
 
@@ -703,19 +755,22 @@ void SpikeCosim::set_mip(uint32_t pre_mip, uint32_t post_mip) {
 // set_nmi() - Aligned with Ibex: use Spike's native NMI mechanism
 // ---------------------------------------------------------------
 
-void SpikeCosim::set_nmi(bool nmi) {
-  if (nmi && !nmi_mode && !processor->get_state()->debug_mode &&
-      processor->halt_request != processor_t::HR_REGULAR) {
-    processor->get_state()->nmi = true;
-    nmi_mode = true;
+void SpikeCosim::set_nmi(bool nmi, int thread_id) {
+  auto *proc = get_processor(thread_id);
+  auto &ts = thread_state[thread_id];
+
+  if (nmi && !ts.nmi_mode && !proc->get_state()->debug_mode &&
+      proc->halt_request != processor_t::HR_REGULAR) {
+    proc->get_state()->nmi = true;
+    ts.nmi_mode = true;
 
     // Save CSR state for recoverable NMI to mstack
-    mstack.mpp = get_field(processor->get_csr(CSR_MSTATUS), MSTATUS_MPP);
-    mstack.mpie = get_field(processor->get_csr(CSR_MSTATUS), MSTATUS_MPIE);
-    mstack.epc = processor->get_csr(CSR_MEPC);
-    mstack.cause = processor->get_csr(CSR_MCAUSE);
+    ts.mstack.mpp = get_field(proc->get_csr(CSR_MSTATUS), MSTATUS_MPP);
+    ts.mstack.mpie = get_field(proc->get_csr(CSR_MSTATUS), MSTATUS_MPIE);
+    ts.mstack.epc = proc->get_csr(CSR_MEPC);
+    ts.mstack.cause = proc->get_csr(CSR_MCAUSE);
 
-    early_interrupt_handle();
+    early_interrupt_handle(thread_id);
   }
 }
 
@@ -723,19 +778,22 @@ void SpikeCosim::set_nmi(bool nmi) {
 // set_nmi_int() - Sets nmi_int (distinct from nmi in Spike)
 // ---------------------------------------------------------------
 
-void SpikeCosim::set_nmi_int(bool nmi_int) {
-  if (nmi_int && !nmi_mode && !processor->get_state()->debug_mode &&
-      processor->halt_request != processor_t::HR_REGULAR) {
-    processor->get_state()->nmi_int = true;
-    nmi_mode = true;
+void SpikeCosim::set_nmi_int(bool nmi_int, int thread_id) {
+  auto *proc = get_processor(thread_id);
+  auto &ts = thread_state[thread_id];
+
+  if (nmi_int && !ts.nmi_mode && !proc->get_state()->debug_mode &&
+      proc->halt_request != processor_t::HR_REGULAR) {
+    proc->get_state()->nmi_int = true;
+    ts.nmi_mode = true;
 
     // Save CSR state for recoverable NMI to mstack
-    mstack.mpp = get_field(processor->get_csr(CSR_MSTATUS), MSTATUS_MPP);
-    mstack.mpie = get_field(processor->get_csr(CSR_MSTATUS), MSTATUS_MPIE);
-    mstack.epc = processor->get_csr(CSR_MEPC);
-    mstack.cause = processor->get_csr(CSR_MCAUSE);
+    ts.mstack.mpp = get_field(proc->get_csr(CSR_MSTATUS), MSTATUS_MPP);
+    ts.mstack.mpie = get_field(proc->get_csr(CSR_MSTATUS), MSTATUS_MPIE);
+    ts.mstack.epc = proc->get_csr(CSR_MEPC);
+    ts.mstack.cause = proc->get_csr(CSR_MCAUSE);
 
-    early_interrupt_handle();
+    early_interrupt_handle(thread_id);
   }
 }
 
@@ -743,8 +801,9 @@ void SpikeCosim::set_nmi_int(bool nmi_int) {
 // set_debug_req() - Can both set and clear halt request
 // ---------------------------------------------------------------
 
-void SpikeCosim::set_debug_req(bool debug_req) {
-  processor->halt_request =
+void SpikeCosim::set_debug_req(bool debug_req, int thread_id) {
+  auto *proc = get_processor(thread_id);
+  proc->halt_request =
       debug_req ? processor_t::HR_REGULAR : processor_t::HR_NONE;
 }
 
@@ -752,7 +811,7 @@ void SpikeCosim::set_debug_req(bool debug_req) {
 // set_mcycle() - Consume DUT mcycle samples without touching Spike CSR state
 // ---------------------------------------------------------------
 
-void SpikeCosim::set_mcycle(uint64_t mcycle) {
+void SpikeCosim::set_mcycle(uint64_t mcycle, int thread_id) {
   // EH2 samples mcycle every retired instruction to keep the same DPI
   // ordering as Ibex. This Spike build has no public no-log backdoor for
   // mcycle; writing CSR_MCYCLE/CSR_MCYCLEH from this DPI callback can enter
@@ -760,28 +819,36 @@ void SpikeCosim::set_mcycle(uint64_t mcycle) {
   // architectural comparison. Treat the sample as ordering metadata and leave
   // Spike's architectural counter updates on the instruction execution path.
   (void)mcycle;
+  (void)thread_id;
 }
 
-void SpikeCosim::set_csr(const int csr_num, const uint32_t new_val) {
-  processor->put_csr(csr_num, new_val);
+void SpikeCosim::set_csr(const int csr_num, const uint32_t new_val,
+                         int thread_id) {
+  auto *proc = get_processor(thread_id);
+  proc->put_csr(csr_num, new_val);
 }
 
-void SpikeCosim::notify_dside_access(const DSideAccessInfo &access_info) {
+void SpikeCosim::notify_dside_access(const DSideAccessInfo &access_info,
+                                     int thread_id) {
   assert((access_info.addr & 0x3) == 0);
+  assert(thread_id >= 0 && thread_id < num_threads);
 
   PendingMemAccess pending_access;
   pending_access.dut_access_info = access_info;
   pending_access.be_spike = 0;
-  pending_dside_accesses.push_back(pending_access);
+  thread_state[thread_id].pending_dside_accesses.push_back(pending_access);
 }
 
-bool SpikeCosim::is_widened_load_pair(size_t first_idx) const {
-  if (first_idx + 1 >= pending_dside_accesses.size()) {
+bool SpikeCosim::is_widened_load_pair(int thread_id,
+                                      size_t first_idx) const {
+  auto &pending = thread_state[thread_id].pending_dside_accesses;
+
+  if (first_idx + 1 >= pending.size()) {
     return false;
   }
 
-  const auto &first = pending_dside_accesses[first_idx].dut_access_info;
-  const auto &second = pending_dside_accesses[first_idx + 1].dut_access_info;
+  const auto &first = pending[first_idx].dut_access_info;
+  const auto &second = pending[first_idx + 1].dut_access_info;
 
   return !first.store && !second.store &&
          first.widened_load && second.widened_load &&
@@ -792,17 +859,21 @@ bool SpikeCosim::is_widened_load_pair(size_t first_idx) const {
          first.error == second.error;
 }
 
-void SpikeCosim::set_iside_error(uint32_t addr) {
+void SpikeCosim::set_iside_error(uint32_t addr, int thread_id) {
   assert((addr & 0x3) == 0);
-  pending_iside_error = true;
-  pending_iside_err_addr = addr & 0xfffffffc;
+  assert(thread_id >= 0 && thread_id < num_threads);
+  thread_state[thread_id].pending_iside_error = true;
+  thread_state[thread_id].pending_iside_err_addr = addr & 0xfffffffc;
 }
 
 const std::vector<std::string> &SpikeCosim::get_errors() { return errors; }
 
 void SpikeCosim::clear_errors() { errors.clear(); }
 
-unsigned int SpikeCosim::get_insn_cnt() { return insn_cnt; }
+unsigned int SpikeCosim::get_insn_cnt(int thread_id) {
+  if (thread_id < 0 || thread_id >= num_threads) return 0;
+  return thread_state[thread_id].insn_cnt;
+}
 
 // ---------------------------------------------------------------
 // fixup_csr() - WARL fixup for EH2
@@ -811,17 +882,21 @@ unsigned int SpikeCosim::get_insn_cnt() { return insn_cnt; }
 // Misaligned PMP fixup stub - to be implemented if EH2 PMP support is needed
 // When PMP is enabled, misaligned accesses that cross PMP region boundaries
 // may need special handling to match EH2's behavior.
-void SpikeCosim::misaligned_pmp_fixup(uint32_t addr, bool store) {
+void SpikeCosim::misaligned_pmp_fixup(int thread_id, uint32_t addr,
+                                      bool store) {
   // Stub: EH2 currently configured with 0 PMP regions
   // If PMP is enabled, implement region boundary checking here
+  (void)thread_id;
 }
 
-void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
+void SpikeCosim::fixup_csr(int thread_id, int csr_num, uint32_t csr_val) {
+  auto *proc = get_processor(thread_id);
+
 #define ENSURE_CSR_EXISTS(num) \
-  if (processor->get_state()->csrmap.find(num) == \
-      processor->get_state()->csrmap.end()) { \
-    processor->get_state()->csrmap[num] = \
-        std::make_shared<basic_csr_t>(processor.get(), num, 0); \
+  if (proc->get_state()->csrmap.find(num) == \
+      proc->get_state()->csrmap.end()) { \
+    proc->get_state()->csrmap[num] = \
+        std::make_shared<basic_csr_t>(proc, num, 0); \
   }
 
   switch (csr_num) {
@@ -831,20 +906,20 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
                       MSTATUS_MPRV | MSTATUS_TW | MSTATUS_FS;
       reg_t new_val = csr_val & mask;
       new_val = set_field(new_val, MSTATUS_MPP, PRV_M);
-      processor->put_csr(csr_num, new_val);
+      proc->put_csr(csr_num, new_val);
       break;
     }
     case CSR_MISA: {
       // EH2 misa: RV32IMAC hardwired (ATOMIC_ENABLE=1 → bit 0 set)
       reg_t new_val = 0x40001105;  // RV32IMAC: I(8)+M(12)+A(0)+C(2)+MXL(30)=32
-      processor->put_csr(csr_num, new_val);
+      proc->put_csr(csr_num, new_val);
       break;
     }
     case CSR_MTVEC: {
       // EH2 mtvec: MODE must be 0 (direct), BASE 256-byte aligned
       uint32_t mtvec_and_mask = 0xFFFFFF00;
       reg_t new_val = csr_val & mtvec_and_mask;
-      processor->put_csr(csr_num, new_val);
+      proc->put_csr(csr_num, new_val);
       break;
     }
     case CSR_MCAUSE: {
@@ -856,7 +931,7 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
       if (any_interrupt && int_interrupt) {
         new_val |= 0x7fffffe0;
       }
-      processor->put_csr(csr_num, new_val);
+      proc->put_csr(csr_num, new_val);
       break;
     }
     // ---------------------------------------------------------------
@@ -876,12 +951,12 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
         fixed |= (se << (2*i));
         fixed |= ((ca & ~se) << (2*i+1));            // can't be cacheable+sideeffect
       }
-      if (processor->get_state()->csrmap.find(csr_num) ==
-          processor->get_state()->csrmap.end()) {
-        processor->get_state()->csrmap[csr_num] =
-            std::make_shared<basic_csr_t>(processor.get(), csr_num, 0);
+      if (proc->get_state()->csrmap.find(csr_num) ==
+          proc->get_state()->csrmap.end()) {
+        proc->get_state()->csrmap[csr_num] =
+            std::make_shared<basic_csr_t>(proc, csr_num, 0);
       }
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -889,12 +964,12 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
     // Only bit[1] is writable; reads as {30'b0, mpmc[1], 1'b0}
     case 0x7C6: {
       uint32_t fixed = csr_val & 0x2;  // only bit 1
-      if (processor->get_state()->csrmap.find(csr_num) ==
-          processor->get_state()->csrmap.end()) {
-        processor->get_state()->csrmap[csr_num] =
-            std::make_shared<basic_csr_t>(processor.get(), csr_num, 0);
+      if (proc->get_state()->csrmap.find(csr_num) ==
+          proc->get_state()->csrmap.end()) {
+        proc->get_state()->csrmap[csr_num] =
+            std::make_shared<basic_csr_t>(proc, csr_num, 0);
       }
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -902,12 +977,12 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
     // Bits [31:10] writable, low 10 bits hardwired 0 (1024-byte aligned)
     case 0xBC8: {
       uint32_t fixed = csr_val & 0xFFFFFC00;
-      if (processor->get_state()->csrmap.find(csr_num) ==
-          processor->get_state()->csrmap.end()) {
-        processor->get_state()->csrmap[csr_num] =
-            std::make_shared<basic_csr_t>(processor.get(), csr_num, 0);
+      if (proc->get_state()->csrmap.find(csr_num) ==
+          proc->get_state()->csrmap.end()) {
+        proc->get_state()->csrmap[csr_num] =
+            std::make_shared<basic_csr_t>(proc, csr_num, 0);
       }
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -919,12 +994,12 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
     case 0xBCC:
     case 0xBCB: {
       uint32_t fixed = csr_val & 0xF;
-      if (processor->get_state()->csrmap.find(csr_num) ==
-          processor->get_state()->csrmap.end()) {
-        processor->get_state()->csrmap[csr_num] =
-            std::make_shared<basic_csr_t>(processor.get(), csr_num, 0);
+      if (proc->get_state()->csrmap.find(csr_num) ==
+          proc->get_state()->csrmap.end()) {
+        proc->get_state()->csrmap[csr_num] =
+            std::make_shared<basic_csr_t>(proc, csr_num, 0);
       }
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -932,12 +1007,12 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
     // Bits [3:0] writable (both SW and HW). Not read-only despite comment.
     case 0x7FF: {
       uint32_t fixed = csr_val & 0xF;
-      if (processor->get_state()->csrmap.find(csr_num) ==
-          processor->get_state()->csrmap.end()) {
-        processor->get_state()->csrmap[csr_num] =
-            std::make_shared<basic_csr_t>(processor.get(), csr_num, 0);
+      if (proc->get_state()->csrmap.find(csr_num) ==
+          proc->get_state()->csrmap.end()) {
+        proc->get_state()->csrmap[csr_num] =
+            std::make_shared<basic_csr_t>(proc, csr_num, 0);
       }
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -960,7 +1035,7 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
       fixed |= ((mfdc_int >> 8) & 0x1) << 12;
       fixed |= (~(mfdc_int >> 9) & 0x7) << 16;
       ENSURE_CSR_EXISTS(csr_num);
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -970,7 +1045,7 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
       uint32_t fixed = csr_val & 0x3FF;
       fixed ^= 0x200;
       ENSURE_CSR_EXISTS(csr_num);
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -983,7 +1058,7 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
       if (threshold > 26) threshold = 26;
       uint32_t fixed = (threshold << 27) | (csr_val & 0x07FFFFFF);
       ENSURE_CSR_EXISTS(csr_num);
-      processor->get_state()->csrmap[csr_num]->write(fixed);
+      proc->get_state()->csrmap[csr_num]->write(fixed);
       break;
     }
 
@@ -997,7 +1072,7 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
     // Write-only / reads return 0
     case 0x7C2: {
       ENSURE_CSR_EXISTS(csr_num);
-      processor->get_state()->csrmap[csr_num]->write(0);
+      proc->get_state()->csrmap[csr_num]->write(0);
       break;
     }
 
@@ -1015,12 +1090,12 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
       };
 
       if (eh2_custom_csrs.count(csr_num)) {
-        if (processor->get_state()->csrmap.find(csr_num) ==
-            processor->get_state()->csrmap.end()) {
-          processor->get_state()->csrmap[csr_num] =
-              std::make_shared<basic_csr_t>(processor.get(), csr_num, 0);
+        if (proc->get_state()->csrmap.find(csr_num) ==
+            proc->get_state()->csrmap.end()) {
+          proc->get_state()->csrmap[csr_num] =
+              std::make_shared<basic_csr_t>(proc, csr_num, 0);
         }
-        processor->get_state()->csrmap[csr_num]->write(csr_val);
+        proc->get_state()->csrmap[csr_num]->write(csr_val);
       }
       break;
     }
@@ -1032,11 +1107,13 @@ void SpikeCosim::fixup_csr(int csr_num, uint32_t csr_val) {
 // ---------------------------------------------------------------
 
 SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
-    bool store, uint32_t addr, size_t len, const uint8_t *bytes) {
+    int thread_id, bool store, uint32_t addr, size_t len,
+    const uint8_t *bytes) {
   assert(len >= 1 && len <= 4);
   // Expect that no spike memory accesses cross a 32-bit boundary
   assert(((addr + (len - 1)) & 0xfffffffc) == (addr & 0xfffffffc));
 
+  auto &pending_dside_accesses = thread_state[thread_id].pending_dside_accesses;
   std::string iss_action = store ? "store" : "load";
 
   // Check if there are any pending DUT accesses to check against
@@ -1069,7 +1146,7 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
   }
 
   size_t pending_access_idx = 0;
-  if (!store && is_widened_load_pair(0)) {
+  if (!store && is_widened_load_pair(thread_id, 0)) {
     for (size_t idx = 0; idx < 2; ++idx) {
       const auto &candidate_info = pending_dside_accesses[idx].dut_access_info;
       if ((addr & 0xfffffffc) == candidate_info.addr) {
@@ -1088,9 +1165,10 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
   uint32_t aligned_addr = addr & 0xfffffffc;
   if (aligned_addr != top_pending_access_info.addr) {
     std::stringstream err_str;
-    err_str << "DUT generated " << dut_action << " at address " << std::hex
-            << top_pending_access_info.addr << " but " << iss_action
-            << " at address " << aligned_addr << " was expected";
+    err_str << "T" << thread_id << " DUT generated " << dut_action
+            << " at address " << std::hex << top_pending_access_info.addr
+            << " but " << iss_action << " at address " << aligned_addr
+            << " was expected";
     errors.emplace_back(err_str.str());
     return kCheckMemCheckFailed;
   }
@@ -1098,9 +1176,9 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
   // Check access type match
   if (store != top_pending_access_info.store) {
     std::stringstream err_str;
-    err_str << "DUT generated " << dut_action << " at addr " << std::hex
-            << top_pending_access_info.addr << " but a " << iss_action
-            << " was expected";
+    err_str << "T" << thread_id << " DUT generated " << dut_action
+            << " at addr " << std::hex << top_pending_access_info.addr
+            << " but a " << iss_action << " was expected";
     errors.emplace_back(err_str.str());
     return kCheckMemCheckFailed;
   }
@@ -1115,10 +1193,11 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
   if (misaligned) {
     if ((expected_be & top_pending_access.be_spike) != 0) {
       std::stringstream err_str;
-      err_str << "DUT generated " << dut_action << " at address " << std::hex
-              << top_pending_access_info.addr << " with BE "
-              << top_pending_access_info.be << " and expected BE "
-              << expected_be << " has been seen twice, so far seen "
+      err_str << "T" << thread_id << " DUT generated " << dut_action
+              << " at address " << std::hex << top_pending_access_info.addr
+              << " with BE " << top_pending_access_info.be
+              << " and expected BE " << expected_be
+              << " has been seen twice, so far seen "
               << top_pending_access.be_spike;
       errors.emplace_back(err_str.str());
       return kCheckMemCheckFailed;
@@ -1126,10 +1205,11 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
 
     if ((expected_be & ~top_pending_access_info.be) != 0) {
       std::stringstream err_str;
-      err_str << "DUT generated " << dut_action << " at address " << std::hex
-              << top_pending_access_info.addr << " with BE "
-              << top_pending_access_info.be << " but expected BE "
-              << expected_be << " has other bytes enabled";
+      err_str << "T" << thread_id << " DUT generated " << dut_action
+              << " at address " << std::hex << top_pending_access_info.addr
+              << " with BE " << top_pending_access_info.be
+              << " but expected BE " << expected_be
+              << " has other bytes enabled";
       errors.emplace_back(err_str.str());
       return kCheckMemCheckFailed;
     }
@@ -1149,20 +1229,22 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
     // existing memory contents.
     if (store && ((expected_be & ~top_pending_access_info.be) != 0)) {
       std::stringstream err_str;
-      err_str << "DUT generated " << dut_action << " at address " << std::hex
-              << top_pending_access_info.addr << " with BE "
-              << top_pending_access_info.be << " but expected BE "
-              << expected_be << " was not fully covered";
+      err_str << "T" << thread_id << " DUT generated " << dut_action
+              << " at address " << std::hex << top_pending_access_info.addr
+              << " with BE " << top_pending_access_info.be
+              << " but expected BE " << expected_be
+              << " was not fully covered";
       errors.emplace_back(err_str.str());
       return kCheckMemCheckFailed;
     }
 
     if (!store && ((expected_be & ~top_pending_access_info.be) != 0)) {
       std::stringstream err_str;
-      err_str << "DUT generated " << dut_action << " at address " << std::hex
-              << top_pending_access_info.addr << " with BE "
-              << top_pending_access_info.be << " but expected BE "
-              << expected_be << " was not fully covered";
+      err_str << "T" << thread_id << " DUT generated " << dut_action
+              << " at address " << std::hex << top_pending_access_info.addr
+              << " with BE " << top_pending_access_info.be
+              << " but expected BE " << expected_be
+              << " was not fully covered";
       errors.emplace_back(err_str.str());
       return kCheckMemCheckFailed;
     }
@@ -1184,10 +1266,11 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
 
     if (expected_data != masked_dut_data) {
       std::stringstream err_str;
-      err_str << "DUT generated " << iss_action << " at address " << std::hex
-              << top_pending_access_info.addr << " with data "
-              << masked_dut_data << " but data " << expected_data
-              << " was expected with byte mask " << expected_be;
+      err_str << "T" << thread_id << " DUT generated " << iss_action
+              << " at address " << std::hex << top_pending_access_info.addr
+              << " with data " << masked_dut_data << " but data "
+              << expected_data << " was expected with byte mask "
+              << expected_be;
       errors.emplace_back(err_str.str());
       return kCheckMemCheckFailed;
     }
@@ -1201,7 +1284,8 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
       if ((pending_dside_accesses.size() < 2) ||
           !pending_dside_accesses[1].dut_access_info.misaligned_second) {
         std::stringstream err_str;
-        err_str << "DUT generated first half of misaligned " << iss_action
+        err_str << "T" << thread_id
+                << " DUT generated first half of misaligned " << iss_action
                 << " at address " << std::hex << top_pending_access_info.addr
                 << " but second half was expected and not seen";
         errors.emplace_back(err_str.str());
@@ -1210,7 +1294,8 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
 
       if (!pending_dside_accesses[1].dut_access_info.error) {
         std::stringstream err_str;
-        err_str << "DUT generated first half of misaligned " << iss_action
+        err_str << "T" << thread_id
+                << " DUT generated first half of misaligned " << iss_action
                 << " at address " << std::hex << top_pending_access_info.addr
                 << " with error but second half had no error";
         errors.emplace_back(err_str.str());
@@ -1221,7 +1306,8 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
       if (pending_dside_accesses[1].dut_access_info.addr !=
           top_pending_access_info.addr + 4) {
         std::stringstream err_str;
-        err_str << "DUT generated first half of misaligned " << iss_action
+        err_str << "T" << thread_id
+                << " DUT generated first half of misaligned " << iss_action
                 << " at address " << std::hex << top_pending_access_info.addr
                 << " but second half address was "
                 << pending_dside_accesses[1].dut_access_info.addr
@@ -1241,7 +1327,7 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
 
   if (pending_access_done) {
     if (pending_access_error) {
-      if (!store && is_widened_load_pair(0)) {
+      if (!store && is_widened_load_pair(thread_id, 0)) {
         pending_dside_accesses.erase(pending_dside_accesses.begin(),
                                      pending_dside_accesses.begin() + 2);
       } else {
@@ -1251,7 +1337,7 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
       return kCheckMemBusError;
     }
 
-    if (!store && is_widened_load_pair(0)) {
+    if (!store && is_widened_load_pair(thread_id, 0)) {
       pending_dside_accesses.erase(pending_dside_accesses.begin(),
                                    pending_dside_accesses.begin() + 2);
     } else {
@@ -1267,16 +1353,16 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
 // Trap CSR queries (RISK-9: mcause/mepc/mtvec comparison)
 // ---------------------------------------------------------------
 
-uint32_t SpikeCosim::get_mcause() {
-  return processor->get_state()->mcause->read() & 0xffffffff;
+uint32_t SpikeCosim::get_mcause(int thread_id) {
+  return get_processor(thread_id)->get_state()->mcause->read() & 0xffffffff;
 }
 
-uint32_t SpikeCosim::get_mepc() {
-  return processor->get_state()->mepc->read() & 0xffffffff;
+uint32_t SpikeCosim::get_mepc(int thread_id) {
+  return get_processor(thread_id)->get_state()->mepc->read() & 0xffffffff;
 }
 
-uint32_t SpikeCosim::get_mtvec() {
-  return processor->get_state()->mtvec->read() & 0xffffffff;
+uint32_t SpikeCosim::get_mtvec(int thread_id) {
+  return get_processor(thread_id)->get_state()->mtvec->read() & 0xffffffff;
 }
 
 // ---------------------------------------------------------------
@@ -1286,6 +1372,7 @@ uint32_t SpikeCosim::get_mtvec() {
 extern "C" void *riscv_cosim_init(const char *config) {
   // Parse config string: "isa=<ISA>;pc=<PC>;mtvec=<MTVEC>;pmp_regions=<N>;"
   //                       "pmp_granularity=<G>;mhpm_counters=<N>;trace=<PATH>"
+  //                       ";num_threads=<N>"
   std::string config_str(config);
   std::string isa_string = "rv32imac";
   uint32_t start_pc = 0;
@@ -1293,6 +1380,7 @@ extern "C" void *riscv_cosim_init(const char *config) {
   uint32_t pmp_num_regions = 0;
   uint32_t pmp_granularity = 0;
   uint32_t mhpm_counter_num = 0;
+  int num_threads = 1;
   std::string trace_log_path;
 
   // Simple config parser
@@ -1314,13 +1402,18 @@ extern "C" void *riscv_cosim_init(const char *config) {
     else if (key == "pmp_granularity") pmp_granularity = strtoul(val.c_str(), nullptr, 0);
     else if (key == "mhpm_counters") mhpm_counter_num = strtoul(val.c_str(), nullptr, 0);
     else if (key == "trace") trace_log_path = val;
+    else if (key == "num_threads") num_threads = strtol(val.c_str(), nullptr, 0);
 
     pos = semi_pos + 1;
   }
 
+  // Clamp num_threads to valid range
+  if (num_threads < 1) num_threads = 1;
+  if (num_threads > COSIM_MAX_THREADS) num_threads = COSIM_MAX_THREADS;
+
   SpikeCosim *cosim = new SpikeCosim(
       isa_string, start_pc, start_mtvec, trace_log_path,
-      pmp_num_regions, pmp_granularity, mhpm_counter_num);
+      pmp_num_regions, pmp_granularity, mhpm_counter_num, num_threads);
 
   // SpikeCosim inherits simif_t first and Cosim second. Return the adjusted
   // Cosim subobject pointer because every DPI wrapper casts the chandle back to
