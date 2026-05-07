@@ -4,6 +4,7 @@
 build/
 out/
 csrc/
+docs/sphinx_cn/build/
 
 # VCS / simulator artifacts
 *.vcd

@@ -1,0 +1,6 @@
+# EH2 UVM 验证平台中文手册依赖
+# 安装：pip install --user -r docs/requirements-docs.txt
+# Python 推荐 3.10+（rinohtype 0.5.x 在 3.6 importlib_metadata 上有兼容问题）
+
+sphinx>=7.0
+rinohtype>=0.5.5

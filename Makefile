@@ -131,7 +131,8 @@ SHARED_F    := $(TB_DIR)/eh2_shared.f
 TB_F        := $(TB_DIR)/eh2_tb.f
 
 .PHONY: help compile compile_vcs compile_xlm run gen smoke nightly weekly \
-        regress signoff signoff_quick signoff_gate clean ci_unit ci_lint
+        regress signoff signoff_quick signoff_gate clean ci_unit ci_lint \
+        manual manual_html
 
 # -----------------------------------------------------------------------
 # Help
@@ -158,6 +159,8 @@ help:
 	@echo "  gen         - Generate riscv-dv instructions (TEST=)"
 	@echo "  regress     - Full regression via Python script"
 	@echo "  cov         - Collect and merge coverage"
+	@echo "  manual      - Build Chinese Sphinx PDF (requires rinohtype)"
+	@echo "  manual_html - Build Chinese Sphinx HTML preview"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Variables:"
@@ -441,6 +444,19 @@ dups = [n for n in set(names) if names.count(n) > 1]; \
 assert not dups, f'duplicate test names: {dups}'; \
 [t.update({'_': None}) for t in tests if all(k in t for k in ('test','description','rtl_test'))]; \
 print(f'testlist.yaml OK: {len(tests)} tests')"
+
+# -----------------------------------------------------------------------
+# Documentation
+#
+# `make manual` 构建中文 Sphinx 参考手册（PDF）。
+# `make manual_html` 构建 HTML 预览，用于当前 Python 3.6 环境下做结构检查。
+# 依赖：pip install -r docs/requirements-docs.txt（推荐 Python 3.10+）。
+# -----------------------------------------------------------------------
+manual:
+	@bash docs/build_manual_pdf.sh
+
+manual_html:
+	@sphinx-build -b html docs/sphinx_cn/source docs/sphinx_cn/build/html
 
 # -----------------------------------------------------------------------
 # Clean

@@ -1,5 +1,7 @@
 # EH2 UVM Verification Platform
 
+> **中文参考手册**：`docs/sphinx_cn/build/html/index.html`（HTML）。PDF 生成需 Python 3.10+，当前环境（3.6）不支持 rinohtype。
+
 EH2 UVM Verification Platform is the verification framework for VeeR EH2 in this
 repository. The implementation is intentionally modeled after the lowRISC Ibex
 `dv/uvm/core_ibex` flow and adapted to EH2's AXI4 buses, trace-only retire
