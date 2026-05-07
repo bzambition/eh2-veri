@@ -37,6 +37,12 @@ class eh2_trace_seq_item extends uvm_sequence_item;
   bit        debug_req;    // Debug request active
   bit [63:0] mcycle;       // Cycle counter
 
+  // DUT-side trap CSR snapshot (sampled by trace_monitor when exception/interrupt)
+  bit [31:0] dut_mtvec;
+  bit [31:0] dut_mepc;
+  bit [31:0] dut_mcause;
+  bit [31:0] dut_mtval;
+
   // Timing
   time       commit_time;
   int        cycle_count;
@@ -61,6 +67,10 @@ class eh2_trace_seq_item extends uvm_sequence_item;
     `uvm_field_int(nmi_int, UVM_ALL_ON)
     `uvm_field_int(debug_req, UVM_ALL_ON)
     `uvm_field_int(mcycle, UVM_ALL_ON)
+    `uvm_field_int(dut_mtvec, UVM_ALL_ON)
+    `uvm_field_int(dut_mepc, UVM_ALL_ON)
+    `uvm_field_int(dut_mcause, UVM_ALL_ON)
+    `uvm_field_int(dut_mtval, UVM_ALL_ON)
   `uvm_object_utils_end
 
   function new(string name = "eh2_trace_seq_item");

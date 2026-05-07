@@ -106,6 +106,16 @@ class eh2_trace_monitor extends uvm_monitor;
         commit_count++;
         if (txn.exception) exception_count++;
 
+        // Snapshot trap CSRs when exception or interrupt
+        if (txn.exception || txn.interrupt) begin
+          if (probe_vif != null) begin
+            txn.dut_mtvec  = probe_vif.mtvec;
+            txn.dut_mepc   = probe_vif.mepc;
+            txn.dut_mcause = probe_vif.mcause;
+          end
+          txn.dut_mtval  = 32'h0;  // EH2 has no mtval probe; placeholder
+        end
+
         `uvm_info("trace_monitor", $sformatf("Commit: %s wb=%0b rd=x%0d wdata=%08x",
           txn.convert2string(), txn.wb_valid, txn.wb_dest, txn.wb_data), UVM_HIGH)
         ap.write(txn);
@@ -137,6 +147,16 @@ class eh2_trace_monitor extends uvm_monitor;
 
         commit_count++;
         if (txn.exception) exception_count++;
+
+        // Snapshot trap CSRs when exception or interrupt
+        if (txn.exception || txn.interrupt) begin
+          if (probe_vif != null) begin
+            txn.dut_mtvec  = probe_vif.mtvec;
+            txn.dut_mepc   = probe_vif.mepc;
+            txn.dut_mcause = probe_vif.mcause;
+          end
+          txn.dut_mtval  = 32'h0;  // EH2 has no mtval probe; placeholder
+        end
 
         `uvm_info("trace_monitor", $sformatf("Commit: %s wb=%0b rd=x%0d wdata=%08x",
           txn.convert2string(), txn.wb_valid, txn.wb_dest, txn.wb_data), UVM_HIGH)
