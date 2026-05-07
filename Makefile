@@ -132,7 +132,7 @@ TB_F        := $(TB_DIR)/eh2_tb.f
 
 .PHONY: help compile compile_vcs compile_xlm run gen smoke nightly weekly \
         regress signoff signoff_quick signoff_gate clean ci_unit ci_lint \
-        manual manual_html
+        manual manual_html formal formal_clean
 
 # -----------------------------------------------------------------------
 # Help
@@ -457,6 +457,15 @@ manual:
 
 manual_html:
 	@sphinx-build -b html docs/sphinx_cn/source docs/sphinx_cn/build/html
+
+# -----------------------------------------------------------------------
+# Formal verification (Symbiyosys) — 骨架，不接入 sign-off
+# -----------------------------------------------------------------------
+formal:
+	+@$(MAKE) -C dv/formal formal
+
+formal_clean:
+	+@$(MAKE) -C dv/formal formal_clean
 
 # -----------------------------------------------------------------------
 # Clean
