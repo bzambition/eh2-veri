@@ -1,0 +1,33 @@
+name: Verilog Lint
+# 对 DV SystemVerilog 源码执行 Verible lint 检查。
+# Non-blocking：仅生成报告，不阻断 CI。
+
+on: [push, pull_request]
+
+jobs:
+  verible-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Verible
+        run: |
+          VERIBLE_VERSION=v0.0-3644-g6882e2b7
+          wget -q "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz" -O verible.tar.gz
+          tar xf verible.tar.gz
+          echo "$PWD/verible-${VERIBLE_VERSION}/bin" >> $GITHUB_PATH
+      - name: Lint DV SystemVerilog sources
+        run: |
+          find dv/uvm/core_eh2 -name '*.sv' -o -name '*.svh' | \
+            xargs verible-verilog-lint \
+              --rules=-line-length,-no-trailing-spaces \
+              --waiver_files=dv/uvm/core_eh2/fcov/cov_waivers/*.yaml \
+              2>&1 | tee lint_report.txt
+          # Non-blocking: report but don't fail
+          echo "Lint completed. See lint_report.txt for details."
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: lint_report.txt

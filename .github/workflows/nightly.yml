@@ -1,0 +1,27 @@
+name: Nightly Regression
+# 每日凌晨 2 点（UTC）自动跑完整回归，确保主干持续可签收。
+# 使用 self-hosted runner，因为需要 VCS license 和 spike-cosim。
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  signoff:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source environment
+        run: source env.sh || true
+      - name: Run full sign-off
+        run: make signoff SIGNOFF_PROFILE=full PARALLEL=4 SIGNOFF_ITERATIONS=1
+      - name: Upload sign-off report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signoff-report-${{ github.run_id }}
+          path: |
+            build/signoff/signoff_report.md
+            build/signoff/signoff_status.json
