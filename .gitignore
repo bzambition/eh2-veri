@@ -1,12 +1,13 @@
 # EH2 verification platform .gitignore
 
-# Build artifacts (large)
+# Build artifacts (large, regenerable)
 build/
 out/
 csrc/
 
 # VCS / simulator artifacts
 *.vcd
+*.fsdb
 *.daidir/
 *.vdb/
 simv*
@@ -14,9 +15,13 @@ ucli.key
 vc_hdrs.h
 .csrc.history
 *.log
+tr_db.log
+inter.vpd
+DVEfiles/
 
 # VCS stack/crash dumps
 stack.info.*
+stack.info.*/
 stack_*.log
 
 # Python/pytest
@@ -24,15 +29,20 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Editor
+# Editor / IDE
 .vscode/
+.idea/
 *.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Symlinked external code (don't track inside this repo)
 rtl/design
 rtl/snapshots
 vendor/google_riscv-dv
 
-# Scratch experiments (kept out of main commits)
-top.vcd
-tr_db.log
+# Phase snapshots (large tar.gz, kept locally)
+.scratch/snapshots/*.tar.gz
