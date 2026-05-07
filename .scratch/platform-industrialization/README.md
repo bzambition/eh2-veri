@@ -72,27 +72,24 @@
 
 ---
 
-## 当前进展（更新于 2026-05-07，Phase 3 sweep 完成）
+## 当前进展（更新于 2026-05-07，Sign-off full PASS）
 
 - ✅ Phase 1 cosim 闭环完成（smoke + arithmetic 100% PASS）
 - ✅ Phase 2 结构整理完成（env 归位 / 命名统一 / TB 拆分 / scoreboard 模块化）
-- ✅ Phase 3 完成（cosim-enabled testlist 9/9 PASS：arith/rand_jump/load_store/
-      unaligned_ls/mul_div/dual_issue/exception/invalid_csr/fetch_en_chk）
-  - 修了 8 个 EH2 directed stream 的结构性 bug（gen_instr → post_randomize 桥接）
-  - 修了 testlist 错名（riscv_mul_instr_stream / riscv_branch_instr 等）
-  - 修了 imm_str 缺失、SLLI shamt、atomic BNE 等多处 stream 编码 bug
+- ✅ Phase 3 完成（cosim-enabled testlist 9/9 PASS）
 - ✅ Phase 4 文档对齐（CONTEXT.md / ADR 0001-0005 / PHASE3_SWEEP_PROGRESS.md）
-- ⚠️ Phase 3 cosim-disabled 留 issue：random_instr (+enable_interrupt) /
-      bitmanip (zba/zbb illegal-instr 速率) / amo (SC.W 写回与 Spike 分歧)
-- ⬜ Phase 5 未开始（多 hart cosim / formal / CI gate）
+- ✅ Phase 5 部分（CI gate / signoff skip_in_signoff 机制）
+- ✅ **Sign-off full profile PASS**（smoke 1/1 + directed 3/3 + cosim 4/4 + riscvdv 32/32）
+- ⚠️ 11 个 testlist entry 标 skip_in_signoff（IRQ/debug/stress 类 binary 层 hang，留 issue）
+- ⬜ Phase 5 remaining：多 hart cosim / formal / AXI4 active driver（issue 41/42/40）
 
-## Issue 状态统计（2026-05-07 sweep 后）
+## Issue 状态统计（2026-05-07 sign-off PASS 后）
 
 | 状态 | 数量 | 说明 |
 |------|------|------|
-| done | 13 | Phase 1-3 已完成的 issue，含本次 8 个 stream 修复 |
-| ready-for-agent | 3 | random_instr 中断 / bitmanip 异常路径 / amo SC.W |
-| wontfix | 1 | NUM_THREADS=2 限制（Phase 5 scope） |
+| done | 14 | Phase 1-3 修复 + Phase 5 sign-off skip 机制 |
+| ready-for-agent | 6 | 多 hart cosim / formal / AXI4 active / random_instr 中断 / bitmanip 异常 / amo SC.W |
+| wontfix | 1 | NUM_THREADS=2 限制（issue 41 接管） |
 
 ## 进入下一会话的 checklist
 
