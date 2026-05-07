@@ -64,3 +64,27 @@
   cosim: disabled
   sim_opts: '+enable_axi4_error_inject=1 +axi4_error_pct=100'
   iterations: 1
+
+- test: directed_illegal_instr
+  desc: "Illegal instruction exception handling"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_illegal_instr.S
+  iterations: 1
+
+- test: directed_nested_irq
+  desc: "Nested ECALL trap handler"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_nested_irq.S
+  iterations: 1
+
+- test: directed_debug_basic
+  desc: "EBREAK breakpoint exception handling"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_debug_basic.S
+  iterations: 1
+
+- test: directed_pmp_regions
+  desc: "Multi-region PMP configuration and access fault"
+  config: eh2_directed
+  test_srcs: tests/asm/directed_pmp_regions.S
+  iterations: 1
