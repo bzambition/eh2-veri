@@ -608,10 +608,61 @@ class RegressionFrameworkTest(unittest.TestCase):
                  "eh2_rtl.f").read_text(encoding="utf-8")
 
         self.assertNotIn("-sv_lib", makefile)
-        self.assertIn("$(CURDIR)/$(BUILD_DIR)/libcosim.so", makefile)
+        # libcosim.so must be on the link line (directly or via $(LIBCOSIM)).
+        self.assertTrue(
+            "$(CURDIR)/$(BUILD_DIR)/libcosim.so" in makefile
+            or "$(CURDIR)/$(LIBCOSIM)" in makefile,
+            msg="compile_vcs link line must include libcosim.so")
         self.assertNotIn("-incdir ", rtl_f)
         self.assertIn("+incdir+rtl/snapshots/default", rtl_f)
         self.assertNotIn("-y rtl/design/lib", rtl_f)
+
+    def test_compile_vcs_hard_depends_on_libcosim_so(self):
+        # Without a hard prereq, wildcard-style linking silently produces a
+        # simv that lacks the cosim DPI symbols, and the failure only surfaces
+        # at run time as `Error-[DPI-DIFNF] riscv_cosim_init`. Ask make itself
+        # whether `compile_vcs` triggers the libcosim build.
+        root = SCRIPT_DIR.parents[3]
+        makefile_text = (root / "Makefile").read_text(encoding="utf-8")
+
+        self.assertNotIn("$(wildcard $(BUILD_DIR)/libcosim.so)", makefile_text)
+        # `$(LIBCOSIM):` must appear as a real file target on a line of its own.
+        self.assertRegex(
+            makefile_text,
+            r"(?m)^\$\(LIBCOSIM\)\s*:",
+            msg="libcosim.so must have an explicit file target so make can "
+                "track it as a build artefact")
+
+        # Use make --dry-run to verify the dependency is real, not just
+        # textually present. Skip if make/vcs aren't available — this gate is
+        # mainly for CI / local sign-off environments.
+        import shutil, subprocess
+        make_bin = shutil.which("make")
+        if make_bin is None:
+            self.skipTest("make not available")
+        with tempfile.TemporaryDirectory() as td:
+            # Probe order in --dry-run: making compile_vcs (without an existing
+            # libcosim.so) must list libcosim.so as a target.
+            result = subprocess.run(
+                [make_bin, "-n", "-C", str(root),
+                 "BUILD_DIR=" + td, "compile_vcs"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                universal_newlines=True, timeout=30)
+            self.assertIn("libcosim.so",
+                          (result.stdout or "") + (result.stderr or ""),
+                          msg="compile_vcs dry-run must mention libcosim.so")
+
+    def test_no_cosim_escape_hatch_skips_libcosim_link(self):
+        # Some users build without spike-cosim available. Allow opt-out via
+        # NO_COSIM=1 instead of silently producing a broken simv.
+        root = SCRIPT_DIR.parents[3]
+        makefile = (root / "Makefile").read_text(encoding="utf-8")
+
+        self.assertIn("NO_COSIM", makefile)
+        self.assertRegex(
+            makefile,
+            r"ifeq\s*\(\s*\$\(NO_COSIM\)\s*,\s*1\s*\)",
+            msg="NO_COSIM=1 must gate libcosim.so out of the link")
 
     def test_ifu_enum_state_flop_uses_vector_cast_bridge(self):
         ifu_mem_ctl = (SCRIPT_DIR.parents[3] / "rtl" / "design" / "ifu" /
@@ -828,6 +879,71 @@ class RegressionFrameworkTest(unittest.TestCase):
             self.assertTrue(result.passed)
             self.assertEqual(result.failure_mode, "NONE")
             self.assertEqual(result.uvm_errors, 0)
+
+    def test_check_logs_accepts_vcs_text_overlapping_fatal_summary_count(self):
+        # VCS sometimes interleaves the simulation banner with the UVM summary
+        # so the count after "UVM_FATAL :" is overwritten entirely. This is a
+        # cosmetic artefact, not a real fatal.
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "sim.log"
+            log.write_text(
+                "TEST PASSED (signature)\n"
+                "--- EH2 UVM TEST PASSED ---\n"
+                "--- UVM Report Summary ---\n"
+                "** Report counts by severity\n"
+                "UVM_INFO :   50\n"
+                "UVM_WARNING :    0\n"
+                "UVM_ERROR :    0\n"
+                "UVM_FATAL :            V C S   S i m u l a t i o n   R e p o r t \n",
+                encoding="utf-8")
+
+            result = check_logs.check_sim_log(str(log))
+
+            self.assertTrue(result.passed)
+            self.assertEqual(result.failure_mode, "NONE")
+            self.assertEqual(result.uvm_errors, 0)
+
+    def test_check_logs_accepts_vcs_text_when_summary_colon_also_eaten(self):
+        # Even more aggressive overlap: the colon itself is gone, leaving e.g.
+        # "UVM_FATAL            V C S   S i m u l a t i o n   R e p o r t".
+        # Still a summary artefact, not a real fatal.
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "sim.log"
+            log.write_text(
+                "TEST PASSED (signature)\n"
+                "--- EH2 UVM TEST PASSED ---\n"
+                "--- UVM Report Summary ---\n"
+                "** Report counts by severity\n"
+                "UVM_INFO :   50\n"
+                "UVM_WARNING :    0\n"
+                "UVM_ERROR :    0\n"
+                "UVM_FATAL            V C S   S i m u l a t i o n   R e p o r t \n",
+                encoding="utf-8")
+
+            result = check_logs.check_sim_log(str(log))
+
+            self.assertTrue(result.passed)
+            self.assertEqual(result.failure_mode, "NONE")
+            self.assertEqual(result.uvm_errors, 0)
+
+    def test_check_logs_still_detects_real_uvm_fatal_with_path(self):
+        # Genuine fatals come from uvm_report_fatal as
+        # "UVM_FATAL <path>(<line>) @ <time>: <id> [<tag>] <msg>" — no colon
+        # directly after UVM_FATAL. The summary-line guard must not mask these.
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "sim.log"
+            log.write_text(
+                "UVM_FATAL dv/uvm/core_eh2/foo.sv(42) @ 100: uvm_test_top "
+                "[FATAL] something exploded\n"
+                "UVM_WARNING :    0\n"
+                "UVM_ERROR :    0\n"
+                "UVM_FATAL :    1\n",
+                encoding="utf-8")
+
+            result = check_logs.check_sim_log(str(log))
+
+            self.assertFalse(result.passed)
+            self.assertEqual(result.failure_mode, "UVM_FATAL")
 
     def test_check_logs_treats_explicit_eh2_uvm_failed_banner_as_failure(self):
         with tempfile.TemporaryDirectory() as td:

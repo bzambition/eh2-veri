@@ -23,6 +23,18 @@ from test_entry import read_test_dot_seed
 UVM_SUMMARY_RE = re.compile(
     r"^\s*(UVM_WARNING|UVM_ERROR|UVM_FATAL)\s*:\s*(\d+)\b")
 
+# Lines starting with the UVM Report Summary severity tag are never real
+# fatals/errors/warnings — those come from `uvm_report_*` and embed a path
+# like "UVM_FATAL <path>(<line>) @ <time>: ...". VCS interleaves its banner
+# over the summary in two known shapes:
+#   "UVM_FATAL :            V C S   S i m u l a t i o n   R e p o r t"
+#   "UVM_FATAL            V C S   S i m u l a t i o n   R e p o r t"
+# (the colon and count are both eaten.) Match both — colon optional, banner
+# keyword required — so we can safely skip them.
+UVM_SUMMARY_LINE_RE = re.compile(
+    r"^\s*(UVM_WARNING|UVM_ERROR|UVM_FATAL)"
+    r"(\s*:|\s+(?=V\s*C\s*S\b))")
+
 
 TOOL_WARNING_RE = re.compile(r"\bWarning-\[")
 TOOL_CRASH_RE = re.compile(
@@ -83,6 +95,11 @@ def check_uvm_log(log_path: str, fail_on_warnings: bool = False,
                 summary_errors = (summary_errors or 0) + count
                 if severity == "UVM_FATAL":
                     has_fatal = True
+                continue
+
+            # Skip summary lines whose count was overwritten by tool banner
+            # text (still summary lines, not real fatals/errors/warnings).
+            if UVM_SUMMARY_LINE_RE.match(line):
                 continue
 
             if line.startswith("UVM_FATAL") or " UVM_FATAL " in line:

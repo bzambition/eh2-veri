@@ -182,8 +182,25 @@ $(BUILD_DIR):
 
 # -----------------------------------------------------------------------
 # VCS compilation
+#
+# compile_vcs hard-depends on $(LIBCOSIM) so simv always links the cosim DPI
+# symbols. With a soft `wildcard` link as before, a missing libcosim.so silently
+# yields a simv that throws `Error-[DPI-DIFNF] riscv_cosim_init` only at run
+# time. To opt out (e.g. machines without spike-cosim installed), pass
+# NO_COSIM=1 — this skips the .so prereq and link, and the simv runs only with
+# +disable_cosim=1.
 # -----------------------------------------------------------------------
-compile_vcs: | $(BUILD_DIR)
+LIBCOSIM := $(BUILD_DIR)/libcosim.so
+
+ifeq ($(NO_COSIM),1)
+COMPILE_LIBCOSIM_DEP :=
+COMPILE_LIBCOSIM_LINK :=
+else
+COMPILE_LIBCOSIM_DEP := $(LIBCOSIM)
+COMPILE_LIBCOSIM_LINK := $(CURDIR)/$(LIBCOSIM)
+endif
+
+compile_vcs: $(COMPILE_LIBCOSIM_DEP) | $(BUILD_DIR)
 	@echo "=== Compiling with VCS ==="
 	$(VCS) -full64 -assert svaext -sverilog \
 	  -ntb_opts uvm-1.2 \
@@ -201,7 +218,7 @@ compile_vcs: | $(BUILD_DIR)
 	  -f $(SHARED_F) \
 	  -f $(TB_F) \
 	  -top core_eh2_tb_top \
-	  $(if $(wildcard $(BUILD_DIR)/libcosim.so),$(CURDIR)/$(BUILD_DIR)/libcosim.so,) \
+	  $(COMPILE_LIBCOSIM_LINK) \
 	  -o $(BUILD_DIR)/simv \
 	  -l $(BUILD_DIR)/compile.log \
 	  -timescale=1ns/1ps \
@@ -218,7 +235,19 @@ SPIKE_CXX     ?= /home/Xilinx/Vivado/2019.1/tps/lnx64/gcc-6.2.0/bin/g++
 SPIKE_CXXFLAGS ?= -std=c++17 -static-libstdc++
 SPIKE_BUILD   ?= $(BUILD_DIR)/spike_objs
 
-cosim: | $(BUILD_DIR)
+# `cosim` is the user-facing alias; the real build is the file target so make
+# can track it as a prereq of compile_vcs.
+.PHONY: cosim
+cosim: $(LIBCOSIM)
+
+$(LIBCOSIM): $(COSIM_DIR)/spike_cosim.cc $(COSIM_DIR)/cosim_dpi.cc \
+             $(COSIM_DIR)/spike_cosim.h $(COSIM_DIR)/cosim.h | $(BUILD_DIR)
+	@if [ ! -d "$(SPIKE_INSTALL)" ]; then \
+	  echo "ERROR: SPIKE_INSTALL=$(SPIKE_INSTALL) does not exist."; \
+	  echo "       Build spike-cosim first, set SPIKE_DIR=<path>, or pass"; \
+	  echo "       NO_COSIM=1 to skip cosim linkage."; \
+	  exit 1; \
+	fi
 	@echo "=== Building co-simulation library (Spike) ==="
 	@mkdir -p $(SPIKE_BUILD)
 	@# Extract Spike library objects into a single directory
@@ -236,7 +265,7 @@ cosim: | $(BUILD_DIR)
 	  -I$(SPIKE_INSTALL)/include/softfloat \
 	  -I$(VCS_HOME)/include \
 	  $(SPIKE_CXXFLAGS) \
-	  -o $(BUILD_DIR)/libcosim.so \
+	  -o $(LIBCOSIM) \
 	  $(COSIM_DIR)/spike_cosim.cc \
 	  $(COSIM_DIR)/cosim_dpi.cc \
 	  -L$(SPIKE_BUILD) -lspike_all \
