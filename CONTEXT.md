@@ -2,7 +2,7 @@
 
 本文档定义 EH2 UVM 验证平台的术语、模型与约定。新会话进入此项目时应先读此文档。
 
-更新日期：2026-05-07（Sign-off full profile PASS — Phase 1-5 主体完成）
+更新日期：2026-05-08（v1.0 Release — Sign-off full PASS，RISK 状态更新）
 
 ---
 
@@ -86,19 +86,19 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 
 ## 6. 已知 Risk（来自 docs/cosim-correctness-analysis.md）
 
-| ID | 严重度 | 问题 | 状态（截至 2026-05-06） |
+| ID | 严重度 | 问题 | 状态（截至 2026-05-08 v1.0 Release） |
 |----|--------|------|------|
-| RISK-1 | HIGH | EH2 自定义 CSR 18+ 个，Spike fixup 仅 4 个 | 部分缓解（28 个 set_csr 静态注册），未做 WARL fixup（Phase 5 待做） |
-| RISK-2 | MEDIUM | AXI4 64-bit 数据 → cosim 截到 32-bit | 已 mitigate（split lower/upper word） |
+| RISK-1 | HIGH | EH2 自定义 CSR 18+ 个，Spike fixup 覆盖不足 | **P0 已修**（mfdc/mcgc/micect/meihap/mcpc fixup），28 个 set_csr 静态注册，剩余 P1/P2 WARL fixup 留后续 |
+| RISK-2 | MEDIUM | AXI4 64-bit 数据 → cosim 截到 32-bit | **已修**（split lower/upper word） |
 | RISK-2b | MEDIUM | EH2 sub-byte store 用 wider WSTRB（read-modify-write） | **已修**（Phase 3 spike_cosim BE 语义放宽） |
 | RISK-3 | MEDIUM | wb 与 trace 对齐脆弱，靠 wb_search_depth band-aid | **已修**（Phase 1 RTL trace 加 RVFI 等价信号） |
 | RISK-4 | RESOLVED | NUM_THREADS=2 不能 cosim | **已修**（ADR-0008：SpikeCosim 多 hart + scoreboard per-thread 路由） |
 | RISK-5 | LOW | NB-load wb 跨 slot 可能脱节 | **已修**（Phase 1 scoreboard 等 nb_load hint） |
 | RISK-6 | LOW | interrupt 状态采样按 item 而非 cycle | RTL 设计上已正确 |
-| RISK-7 | OPEN | EH2 推测 div cancel vs 架构 retire 区分 | **已修**（Phase 1 RTL `dec_div_cancel_overwrite` 信号 + scoreboard FIFO 消费） |
+| RISK-7 | RESOLVED | EH2 推测 div cancel vs 架构 retire 区分 | **已修**（Phase 1 RTL `dec_div_cancel_overwrite` 信号 + scoreboard FIFO 消费） |
 | RISK-8 | RESOLVED | load_store_test data RF 不同步 | **已验证不再复现**（Phase 3 BE 语义放宽 + stream 修复后 1848 trace / 0 mismatch） |
-| RISK-9 | OPEN | random_instr_test 中断/异常 cosim | ⚠️ 标 cosim:disabled（需扩展 scoreboard 处理 mcause/mepc/mtval） |
-| RISK-10 | OPEN | bitmanip zba/zbb 触发 RTL illegal-instr 异常率高 | ⚠️ 标 cosim:disabled（exception 路径 cosim step 与 trace 速率不匹配） |
+| RISK-9 | 部分修 | random_instr_test 中断/异常 cosim | **部分修**（scoreboard mcause/mepc 比对上线，random_instr_test 已解锁 cosim，interrupt_test/irq_single_test 仍 disabled） |
+| RISK-10 | OPEN | bitmanip zba/zbb 触发 RTL illegal-instr 异常率高 | ⚠️ 标 cosim:disabled（exception 路径 cosim step 与 trace 速率不匹配，需排除 RTL bug） |
 | RISK-11 | OPEN | atomic SC.W RTL 写回与 Spike 分歧 | ⚠️ 标 cosim:disabled（需 spike_cosim 加 atomic-store fixup） |
 | RISK-12 | RESOLVED | 8 个 EH2 directed stream 全部生成空 instr_list | **已修**（Phase 3 新增 eh2_base_directed_stream，post_randomize → gen_instr 桥接） |
 | RISK-13 | RESOLVED | check_logs 把 VCS banner overlap 误判为 UVM_FATAL | **已修**（UVM_SUMMARY_LINE_RE 识别 summary 行的两种损坏形态） |
@@ -108,12 +108,12 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 
 `make signoff SIGNOFF_PROFILE=full PARALLEL=4` 要全过才算签发。
 
-| Stage | 当前状态（2026-05-07 sign-off full PASS） | 描述 |
+| Stage | 当前状态（2026-05-08 v1.0 Release sign-off） | 描述 |
 |-------|---------|------|
 | smoke | ✅ PASS | smoke.hex，含 cosim，6 trace / 0 mismatch |
-| directed | ✅ PASS | 3 个定向 test |
-| cosim | ✅ PASS | cosim_testlist 4/4（smoke / alu / load_store / dual_issue） |
-| riscvdv | ✅ PASS | 32/32（11 个 skip_in_signoff 留 issue：RTL/binary 层 hang，不是 cosim 问题） |
+| directed | ✅ PASS | 13 个定向 test（含 3 个原始 + 10 个新增），sign-off 跑 3 个 |
+| cosim | ✅ PASS | cosim_testlist 5/5（smoke / alu / load_store / dual_issue / bitmanip） |
+| riscvdv | ✅ PASS | 32/32（11 个 skip_in_signoff 留 issue：cosim:disabled，不影响签发） |
 | **Sign-off full** | **✅ PASS** | 见 build/sf_full2/signoff_report.md |
 
 ## 8. 工程约定
@@ -160,9 +160,11 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 | ADR 文档 | 0 | 5 篇 (0001-0005) | ✅ |
 | Git 提交 | 未提交 | 4 commits 完整入库 | ✅ |
 
-## 11. 下一步优先事项
+## 11. 下一步优先事项（v1.1）
 
-1. **RISK-8**: 调查 load_store_test data RF 不同步（可能 init mem load 或 wide-store data 排列）
-2. **RISK-9**: 调查 random_instr_test cosim 中断/异常处理
-3. **mul_div_test**: 检查 testlist gen_opts 是否还有错名
-4. **signoff full**: 上述 3 个修完后跑 `make signoff SIGNOFF_PROFILE=full`
+1. **RISK-9 完整闭环**: 解锁 interrupt_test / irq_single_test 等 15 个中断/调试 cosim 测试
+2. **RISK-10**: 排查 bitmanip RTL illegal-instr 是否为 RTL bug
+3. **RISK-11**: spike_cosim 加 atomic-store fixup
+4. **覆盖率 Gate**: 在 full profile 启用 `--require-coverage` 并设最低阈值
+5. **PMP fcov 补全**: eh2_pmp_fcov_if.sv 扩展到对标 Ibex 854 行
+6. **核心测试补充**: 补充 Ibex 有 EH2 无的 7+ 核心测试类型
