@@ -22,12 +22,12 @@ Parent: docs/cosim-correctness-analysis.md — RISK-1 / 9 / 10 / 11
 
 ## 子 issue 列表
 
-| Issue | RISK | 范围 | 风险 | 推荐先后 |
-|-------|------|------|------|---------|
-| 11    | RISK-9  | 中断/异常 scoreboard 同步（10 个 test） | HIGH（动 scoreboard 主路径） | 第二步 |
-| 12    | RISK-10 | bitmanip / Zb* ISA 扩展（1 个 test）   | MEDIUM（动 spike ISA 字符串）| **可先做** |
-| 13    | RISK-11 | atomic / SC.W fixup（1 个 test）       | MEDIUM-HIGH（动 spike amo） | 第三步 |
-| 14    | RISK-1  | EH2 自定义 CSR + PMP fixup（20+ test） | MEDIUM（量大，单点风险低）  | 可与 12 并行 |
+| Issue | RISK | 范围 | 风险 | 推荐先后 | 实际进度 |
+|-------|------|------|------|---------|----------|
+| 11    | RISK-9  | 中断/异常 scoreboard 同步（10 个 test） | HIGH（动 scoreboard 主路径） | 第二步 | 未启动 |
+| 12    | RISK-10 | bitmanip / Zb* ISA 扩展（1 个 test）   | MEDIUM（动 spike ISA 字符串）| **可先做** | 调研中（RECON 完成，原假设已证伪） |
+| 13    | RISK-11 | atomic / SC.W fixup（1 个 test）       | MEDIUM-HIGH（动 spike amo） | 第三步 | 未启动 |
+| 14    | RISK-1  | EH2 自定义 CSR + PMP fixup（20+ test） | MEDIUM（量大，单点风险低）  | 可与 12 并行 | 未启动（WARL 表待抽取） |
 
 ## Acceptance criteria（D 路线总闭合）
 
@@ -49,6 +49,13 @@ Parent: docs/cosim-correctness-analysis.md — RISK-1 / 9 / 10 / 11
 - 任意一个子 issue 让既有 PASS bank 出现 mismatch_count > 0 立刻停
   下回报，**不准用 waiver 绕过** — 这是整条 D 路线的语义底线
 - 每关闭一个子 issue，刷新本 issue 的子 issue 状态表
+
+## 快照 1 — 2026-05-07
+
+- Issue 11: 未启动。scoreboard 中 interrupt/exception 处理路径待调研（任务卡 10）
+- Issue 12: 调研中。codex 完成 RECON.md，证伪了原假设（Spike 已链入 Zb*，UVM 路径已传 zba_zbb_zbc_zbs）。根因 UNKNOWN，需真跑仿真取 DRYRUN 现场（任务卡 4）
+- Issue 13: 未启动。atomic SC.W 写回 fixup 待设计
+- Issue 14: 未启动。需先从 RTL 抽取 WARL 行为表（任务卡 5），review 后才能写 fixup hook
 
 ## References
 
