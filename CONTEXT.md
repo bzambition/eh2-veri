@@ -2,7 +2,7 @@
 
 本文档定义 EH2 UVM 验证平台的术语、模型与约定。新会话进入此项目时应先读此文档。
 
-更新日期：2026-05-06（Phase 3 部分完成后）
+更新日期：2026-05-07（Phase 4 完成后）
 
 ---
 
@@ -88,25 +88,27 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 
 | ID | 严重度 | 问题 | 状态（截至 2026-05-06） |
 |----|--------|------|------|
-| RISK-1 | HIGH | EH2 自定义 CSR 18+ 个，Spike fixup 仅 4 个 | 部分缓解（28 个 set_csr 静态注册），未做 WARL fixup（Phase 4 待做） |
+| RISK-1 | HIGH | EH2 自定义 CSR 18+ 个，Spike fixup 仅 4 个 | 部分缓解（28 个 set_csr 静态注册），未做 WARL fixup（Phase 5 待做） |
 | RISK-2 | MEDIUM | AXI4 64-bit 数据 → cosim 截到 32-bit | 已 mitigate（split lower/upper word） |
 | RISK-2b | MEDIUM | EH2 sub-byte store 用 wider WSTRB（read-modify-write） | **已修**（Phase 3 spike_cosim BE 语义放宽） |
 | RISK-3 | MEDIUM | wb 与 trace 对齐脆弱，靠 wb_search_depth band-aid | **已修**（Phase 1 RTL trace 加 RVFI 等价信号） |
-| RISK-4 | BLOCKING | NUM_THREADS=2 不能 cosim | 已知限制，Phase 5 解锁 |
+| RISK-4 | BLOCKING | NUM_THREADS=2 不能 cosim | 已知限制，Phase 5 解锁（wontfix for now） |
 | RISK-5 | LOW | NB-load wb 跨 slot 可能脱节 | **已修**（Phase 1 scoreboard 等 nb_load hint） |
 | RISK-6 | LOW | interrupt 状态采样按 item 而非 cycle | RTL 设计上已正确 |
 | RISK-7 | OPEN | EH2 推测 div cancel vs 架构 retire 区分 | **已修**（Phase 1 RTL `dec_div_cancel_overwrite` 信号 + scoreboard FIFO 消费） |
+| RISK-8 | MEDIUM | load_store_test data RF 不同步 | ⚠️ OPEN（DUT 与 Spike 寄存器值分歧，Phase 3 发现） |
+| RISK-9 | MEDIUM | random_instr_test 中断/异常 cosim | ⚠️ OPEN（cosim 中断处理逻辑待补） |
 
 ## 7. Sign-off 标准
 
 `make signoff SIGNOFF_PROFILE=full PARALLEL=4` 要全过才算签发。
 
-| Stage | 当前状态（2026-05-06） | 描述 |
+| Stage | 当前状态（2026-05-07） | 描述 |
 |-------|---------|------|
 | smoke | ✅ PASS | hello_world.hex / smoke.hex，含 cosim |
 | directed | ✅ PASS | 3 个定向 test |
-| cosim | 🟡 部分 PASS | smoke + arithmetic_basic 多 seeds 100% PASS；其它 testlist 有独立 bug |
-| riscvdv | ⚠️ 未通过 | 多个 testlist 项目仍有 GEN_NO_ASM 或 cosim 不收敛 |
+| cosim | 🟡 部分 PASS | smoke + arithmetic_basic 多 seeds 100% PASS；load_store / random_instr 有独立 bug |
+| riscvdv | ⚠️ 未通过 | load_store data RF bug、random_instr 中断 cosim、mul_div GEN_NO_ASM |
 
 ## 8. 工程约定
 
@@ -129,7 +131,7 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 | `.scratch/snapshots/` | 各 Phase 完成快照 tar.gz |
 | `/home/host/ibex/dv/uvm/core_ibex/` | Ibex 参考平台 |
 
-## 10. 累计成果（截至 Phase 3 部分完成）
+## 10. 累计成果（截至 Phase 4 完成）
 
 | 指标 | Phase 0 baseline | 当前 | 变化 |
 |------|------------------|------|------|
@@ -147,3 +149,14 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 | 命名前缀一致性 | 部分 | EH2 全统一 | ✅ |
 | `make run TEST=...` 流程 | broken | works | ✅ |
 | Store wider BE 语义 | 报错 | 接受 | ✅ |
+| Issue triage 完成 | 否 | 12 done / 3 open / 1 wontfix | ✅ |
+| build/ 清理 | 7.7GB 残留 | 清理完毕 + .gitignore | ✅ |
+| ADR 文档 | 0 | 5 篇 (0001-0005) | ✅ |
+| Git 提交 | 未提交 | 4 commits 完整入库 | ✅ |
+
+## 11. 下一步优先事项
+
+1. **RISK-8**: 调查 load_store_test data RF 不同步（可能 init mem load 或 wide-store data 排列）
+2. **RISK-9**: 调查 random_instr_test cosim 中断/异常处理
+3. **mul_div_test**: 检查 testlist gen_opts 是否还有错名
+4. **signoff full**: 上述 3 个修完后跑 `make signoff SIGNOFF_PROFILE=full`
