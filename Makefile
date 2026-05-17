@@ -231,11 +231,45 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
 每个 target 统一字段：用途 / 耗时 / 依赖 / 变量 / 产出 / 示例。
 
 ──────────────────────────────────────────────────────────────────────────────
+[ build/ 目录约定 ] —— per-target 岛屿原则
+──────────────────────────────────────────────────────────────────────────────
+
+每个仿真类 target 是一个"岛"——simv / csrc / cov.vdb / compile.log 与
+work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
+
+  build/
+  ├── libcosim.so           共享只读 Spike DPI 库
+  ├── spike_objs/           共享 Spike 编译中间产物
+  ├── r3b_final/            历史 v1.1 sign-off 证据（clean 保护）
+  ├── r4a_final/            历史 v1.1 sign-off 证据（clean 保护）
+  ├── archive_signoffs_*    历史归档软链（clean 保护）
+  │
+  ├── compile/              make compile 独立调用
+  ├── smoke/                make smoke
+  ├── regress/              make regress（旧 build/regression/ 改名）
+  ├── signoff/              make signoff（含 runs/<stage>/...）
+  ├── signoff_replay/       make signoff_replay（gate-only，无 simv）
+  └── demo/                 make demo（含 runs/<stage>/...）
+
+每个 target 子目录内典型布局：
+  build/<target>/
+  ├── simv, simv.daidir/, csrc/        VCS 编译产物
+  ├── cov.vdb, cov/, cov_report/       覆盖率数据库（如 COV=1）
+  ├── compile.log                      编译日志
+  └── <test>_s<seed>/  或  runs/<stage>/<test>_s<seed>/
+      ├── waves.fsdb                   如 WAVES=1
+      ├── sim_*.log
+      └── result.yaml
+
+并行安全：可任意同时跑 make smoke + make demo + make signoff 三个 target，
+彼此不抢 simv、不抢 cov、不抢 ucli 锁。
+
+──────────────────────────────────────────────────────────────────────────────
 [ 一键运行 ] —— 演示 / 完整 sign-off / 复演
 ──────────────────────────────────────────────────────────────────────────────
 
   make demo
-        用途：导师演示 / release 自检。一条龙：clean → asm → cosim → compile
+        用途：完整端到端演示 / release 自检。一条龙：clean → asm → cosim → compile
               → synth → block-level LEC → signoff（含覆盖率） → HTML 报告
         耗时：PARALLEL=4 约 2-3 小时（DC ~30min + block_lec ~45min + 仿真+cov ~1h）
               WITH_SYNTH=0 可省 1-2 小时
@@ -246,6 +280,7 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
           DEMO_OUT=<dir>        输出目录（默认 build/demo）
           PARALLEL=<N>          回归并行度（默认 4）
         产出：
+          $(DEMO_OUT)/simv                     本 demo 用的 simv
           $(DEMO_OUT)/report.html              HTML 报告（含覆盖率仪表盘）
           $(DEMO_OUT)/signoff_status.json      机器可读结果
           $(DEMO_OUT)/signoff_report.md        Markdown 摘要
@@ -262,8 +297,9 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
   make signoff
         用途：完整 9-stage sign-off。不清理、不重编，复用已编译的 simv
         耗时：~1-1.5 小时（COV=1，PARALLEL=4）
-        依赖：build/simv（先跑 make compile 或包含在 demo 里）；
-              如启用 LEC_BLOCKLEVEL=1 需先有 syn/build/lec_summary.txt
+        依赖：本 target 自动调 compile 生成 $(SIGNOFF_OUT)/simv（如启用 COV
+              则带覆盖率插桩）；如启用 LEC_BLOCKLEVEL=1 需先有 syn/build/lec_summary.txt
+              GATE_ONLY=1 时跳过 compile，仅评估现有 runs/。
         变量：
           PROFILE=full|quick|cosim|nightly       profile（默认 full）
           GATE_ONLY=0|1                          仅评估、不重跑（默认 0）
@@ -281,6 +317,7 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
           LEC_KNOWN_LIMITED=0|1                  LEC 失败兜底（默认 0）
           LEC_SUMMARY_PATH=<file>                LEC 摘要（默认 syn/build/lec_summary.txt）
         产出：
+          $(SIGNOFF_OUT)/simv                       本 sign-off 用的 simv
           $(SIGNOFF_OUT)/report.html
           $(SIGNOFF_OUT)/signoff_status.json
           $(SIGNOFF_OUT)/signoff_report.md
@@ -359,10 +396,10 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
           WAVES=0|1                FSDB/VPD 波形 dump（默认 0）
           NO_COSIM=1               跳过 cosim 链接
         产出：
-          build/simv                       VCS 可执行
-          build/simv.daidir/               VCS 中间数据
-          build/csrc/                      VCS C 中间文件
-          build/compile.log                编译日志
+          build/compile/simv                       VCS 可执行
+          build/compile/simv.daidir/               VCS 中间数据
+          build/compile/csrc/                      VCS C 中间文件
+          build/compile/compile.log                编译日志
         示例：
           make compile                     # 默认 COV=0
           make compile COV=1               # 带覆盖率（demo/signoff 用）
@@ -379,8 +416,10 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
         变量：
           SIMULATOR=vcs|xlm                仿真器（默认 vcs）
         产出：
+          build/smoke/simv                         本 target 自己的 simv
           build/smoke/<test>_s1/sim_*.log
           build/smoke/<test>_s1/result.yaml
+          build/smoke/<test>_s1/waves.fsdb         如 WAVES=1
           build/smoke/regr.log
           build/smoke/report.json
         示例：
@@ -401,8 +440,10 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
           OUT=<dir>                         输出目录（默认 build/regress）
           SIMULATOR=vcs|xlm                 仿真器
         产出：
+          build/regress/simv                        本 target 自己的 simv（OUT 未覆盖时）
           $(OUT)/<test>_s<seed>/sim_*.log
           $(OUT)/<test>_s<seed>/result.yaml
+          $(OUT)/<test>_s<seed>/waves.fsdb          如 WAVES=1
           $(OUT)/regr.log
           $(OUT)/report.json
           $(OUT)/regr_junit.xml             JUnit XML（CI 友好）
@@ -708,7 +749,7 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
     make compile COV=1
     make signoff COV=1
 
-  导师演示 / release 自检（2-3 小时）：
+  完整端到端演示 / release 自检（2-3 小时）：
     make clean && make demo
     xdg-open build/demo/report.html
 
