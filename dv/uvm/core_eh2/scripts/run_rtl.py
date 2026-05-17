@@ -33,7 +33,7 @@ PRE_SIM_FAILURE_MODES = {
 
 def load_sim_config(config_path: str) -> dict:
     """Load simulator configuration from YAML."""
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -59,6 +59,7 @@ def build_sim_cmd(md: RegressionMetadata, sim_cfg: dict) -> str:
     variables = {
         "build_dir": md.build_dir,
         "out_dir": md.out_dir,
+        "tb_dir": str(DV_DIR),
         "test": md.test_name,
         "seed": md.seed,
         "binary": md.binary_path,
@@ -77,10 +78,16 @@ def build_sim_cmd(md: RegressionMetadata, sim_cfg: dict) -> str:
     if md.waves:
         cmd += " " + sim_cfg_inner.get("wave_opts", "")
 
-    return substitute_vars(cmd, variables)
+    cmd = substitute_vars(cmd, variables)
+    # Normalize whitespace: collapse newlines and multiple spaces from YAML
+    # multi-line values (sim_opts, cov_opts) that would otherwise break
+    # shell command parsing (shell=True).
+    cmd = " ".join(cmd.split())
+    return cmd
 
 
-def run_command(cmd: str, log_path: str, timeout: int = 3600) -> int:
+def run_command(cmd: str, log_path: str, timeout: int = 3600,
+                env: dict = None) -> int:
     """Run a command and capture output."""
     print(f"Running: {cmd}")
     print(f"Log: {log_path}")
@@ -91,7 +98,7 @@ def run_command(cmd: str, log_path: str, timeout: int = 3600) -> int:
         try:
             result = subprocess.run(
                 cmd, shell=True, stdout=log_f, stderr=subprocess.STDOUT,
-                timeout=timeout
+                timeout=timeout, env=env,
             )
             return result.returncode
         except subprocess.TimeoutExpired:
@@ -104,7 +111,7 @@ def run_rtl_simulation(md: RegressionMetadata) -> TestRunResult:
     if not md.eh2_root:
         md.eh2_root = str(EH2_ROOT)
     if not md.build_dir:
-        md.build_dir = os.path.join(md.eh2_root, "build")
+        md.build_dir = os.path.join(md.eh2_root, "build", "compile")
     if not md.out_dir:
         md.out_dir = os.path.join(md.eh2_root, "build", f"{md.test_name}_{md.seed}")
 
@@ -152,7 +159,8 @@ def run_rtl_simulation(md: RegressionMetadata) -> TestRunResult:
             log_f.write(f"ERROR: {err}\n")
         return trr
     trr.sim_cmd = sim_cmd
-    rc = run_command(sim_cmd, trr.sim_log_path, timeout=600)
+    sim_env = {**os.environ, "SIM_DIR": md.out_dir}
+    rc = run_command(sim_cmd, trr.sim_log_path, timeout=600, env=sim_env)
     trr.sim_returncode = rc
 
     # Parse results. A zero simulator return code is not sufficient for pass:
@@ -188,7 +196,7 @@ def _merge_sim_opts(test_entry: dict, global_sim_opts: str) -> str:
     )
     if not has_cosim_plusarg:
         cosim = str(test_entry.get("cosim", "enabled")).lower()
-        if cosim in ("disabled", "disable", "false", "0", "no"):
+        if cosim in ("disabled", "disable", "false", "0", "no", "rtl_only"):
             pieces.append("+disable_cosim=1")
         else:
             pieces.append("+enable_cosim=1")
@@ -227,7 +235,7 @@ def _riscvdv_test_entry(md: RegressionMetadata, test_name: str) -> dict:
     if not testlist_path.exists():
         return {}
 
-    with open(testlist_path, "r") as f:
+    with open(testlist_path, "r", encoding="utf-8") as f:
         entries = yaml.safe_load(f) or []
     for entry in entries:
         if isinstance(entry, dict) and entry.get("test") == test_name:
