@@ -106,11 +106,8 @@ BUILD_SUBDIR ?= $(BUILD_DIR)/compile
 # To get the old aggressive behaviour explicitly.
 # ----------------------------------------------------------------------------
 CLEAN_PRESERVE_BUILD := r3b_final r4a_final nightly \
-                        cov cov.vdb cov_report \
-                        simv simv.daidir simv.vdb \
-                        simv_compliance simv_compliance.daidir \
-                        libcosim.so spike_objs csrc \
-                        compile.log compliance_tb_compile.log
+                        libcosim.so spike_objs \
+                        compliance_tb_compile.log
 
 # Find expression: skip preserved names + archive_signoffs_* link family.
 CLEAN_PRESERVE_FIND := $(foreach n,$(CLEAN_PRESERVE_BUILD),! -name '$(n)') \
@@ -1033,8 +1030,10 @@ clean:
 	fi; \
 	case "$(SCOPE)" in \
 	  cov) \
-	    rm -rf $(BUILD_DIR)/simv.vdb $(BUILD_DIR)/cov.vdb $(BUILD_DIR)/cov $(BUILD_DIR)/cov_report; \
-	    echo "[clean] 已清覆盖率数据库" ;; \
+	    find $(BUILD_DIR) -mindepth 2 -maxdepth 2 \
+	      \( -name 'cov.vdb' -o -name 'cov' -o -name 'cov_report' -o -name 'simv.vdb' \) \
+	      -exec rm -rf {} + 2>/dev/null || true; \
+	    echo "[clean] 已清各 target 子目录下的覆盖率数据库（build/*/cov.vdb 等）" ;; \
 	  syn) \
 	    $(MAKE) --no-print-directory -C syn clean; \
 	    echo "[clean] 已清 syn/build/（wrapper 下次 syn-dc 会自动重建）" ;; \
