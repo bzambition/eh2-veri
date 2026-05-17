@@ -859,7 +859,8 @@ compile_xlm: | $(BUILD_DIR)
 # ============================================================
 # 仿真 — smoke / regress / compliance
 # ============================================================
-smoke: compile asm
+smoke: asm
+	@$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(BUILD_DIR)/smoke
 	@echo "=== [smoke] 运行 smoke 测试 ==="
 	python3 $(SCRIPTS_DIR)/run_regress.py \
 	  --test smoke \
@@ -868,11 +869,13 @@ smoke: compile asm
 	  --seed 1 \
 	  --rtl-test core_eh2_base_test \
 	  --sim-opts "+disable_cosim=1" \
+	  --build-dir $(BUILD_DIR)/smoke \
 	  --output $(BUILD_DIR)/smoke \
 	  $(if $(filter 1,$(WAVES)),--waves,)
 	@echo "=== [smoke] 完成 ==="
 
-regress: compile
+regress:
+	@$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(BUILD_DIR)/regress
 	@echo "=== [regress] testlist=$(TESTLIST) parallel=$(PARALLEL) iter=$(ITERATIONS) ==="
 	python3 $(SCRIPTS_DIR)/run_regress.py \
 	  $(if $(TEST),--test $(TEST),--testlist $(TESTLIST_PATH)) \
@@ -880,7 +883,8 @@ regress: compile
 	  --seed $(SEED) \
 	  --iterations $(ITERATIONS) \
 	  --parallel $(PARALLEL) \
-	  --output $(if $(OUT),$(OUT),$(BUILD_DIR)/regression) \
+	  --build-dir $(BUILD_DIR)/regress \
+	  --output $(if $(OUT),$(OUT),$(BUILD_DIR)/regress) \
 	  $(if $(filter 1,$(COV)),--coverage,) \
 	  $(if $(filter 1,$(WAVES)),--waves,)
 	@echo "=== [regress] 完成 ==="
@@ -924,6 +928,7 @@ synth:
 # 一键 — demo / signoff / signoff_replay
 # ============================================================
 signoff:
+	@$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(SIGNOFF_OUT) COV=$(COV))
 	@echo "=== [signoff] profile=$(PROFILE) gate_only=$(GATE_ONLY) out=$(SIGNOFF_OUT) ==="
 	python3 $(SCRIPTS_DIR)/signoff.py \
 	  --profile $(PROFILE) \
@@ -973,7 +978,7 @@ demo:
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory asm
 	@$(MAKE) --no-print-directory cosim COV=1
-	@$(MAKE) --no-print-directory compile COV=1
+	@$(MAKE) --no-print-directory compile COV=1 BUILD_SUBDIR=$(DEMO_OUT)
 	@if [ "$(WITH_SYNTH)" = "1" ]; then \
 	  $(MAKE) --no-print-directory synth || echo "[demo] synth 失败，syn stage 将以 known-limited 处理"; \
 	else \
