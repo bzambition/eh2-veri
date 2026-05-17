@@ -126,9 +126,9 @@ class RegressionFrameworkTest(unittest.TestCase):
 
             calls = []
 
-            def fake_run(cmd, log_path, timeout=3600):
+            def fake_run(cmd, log_path, timeout=3600, env=None):
                 calls.append((cmd, log_path, timeout))
-                del cmd, timeout
+                del cmd, timeout, env
                 Path(log_path).write_text("TEST PASSED (signature)\n",
                                           encoding="utf-8")
                 return 0
@@ -167,8 +167,8 @@ class RegressionFrameworkTest(unittest.TestCase):
             md.out_dir = str(out_dir)
             md.eh2_root = str(root)
 
-            def fake_run(cmd, log_path, timeout=3600):
-                del cmd, timeout
+            def fake_run(cmd, log_path, timeout=3600, env=None):
+                del cmd, timeout, env
                 Path(log_path).write_text("UVM_INFO stopped cleanly\n",
                                           encoding="utf-8")
                 return 0
@@ -1347,6 +1347,7 @@ class RegressionFrameworkTest(unittest.TestCase):
                 coverage = False
                 waves = False
                 fail_on_warnings = False
+                build_dir = None
 
             def fake_run_single_test(*args, **kwargs):
                 del args, kwargs
@@ -1845,7 +1846,15 @@ class RegressionFrameworkTest(unittest.TestCase):
         self.assertGreaterEqual(len(directed_model.tests), 1)
         self.assertEqual(
             {test.test for test in cosim_model.tests},
-            {"cosim_smoke", "cosim_alu", "cosim_load_store", "cosim_dual_issue"},
+            {
+                "cosim_smoke",
+                "cosim_alu",
+                "cosim_load_store",
+                "cosim_dual_issue",
+                "cosim_bitmanip",
+                "cosim_exception_compare",
+                "cosim_atomic_basic",
+            },
         )
         for test in cosim_model.tests:
             self.assertEqual(test.rtl_test, "core_eh2_cosim_test")
@@ -1856,13 +1865,38 @@ class RegressionFrameworkTest(unittest.TestCase):
 
         entries = run_regress.load_regression_testlist(str(directed_path))
 
-        self.assertEqual(len(entries), 4)
+        self.assertEqual(len(entries), 7)
         self.assertEqual(entries[0]["test"], "cosim_smoke")
         self.assertEqual(entries[0]["test_type"], "DIRECTED")
         self.assertEqual(entries[0]["rtl_test"], "core_eh2_cosim_test")
         self.assertEqual(entries[0]["cosim"], "enabled")
         self.assertTrue(entries[0]["asm"].endswith("tests/asm/cosim_smoke.S"))
         self.assertTrue(entries[0]["linker"].endswith("tests/asm/cosim_link.ld"))
+
+    def test_load_regression_testlist_preserves_directed_test_overrides(self):
+        directed_path = SCRIPT_DIR.parent / "directed_tests" / "directed_testlist.yaml"
+
+        entries = run_regress.load_regression_testlist(str(directed_path))
+        by_name = {entry["test"]: entry for entry in entries}
+
+        debug_walk = by_name["directed_dbg_dret_walk"]
+        self.assertIn("+enable_debug_seq=1", debug_walk["sim_opts"])
+        self.assertIn("+enable_debug_single=1", debug_walk["sim_opts"])
+        self.assertEqual(debug_walk["cosim"], "disabled")
+
+    def test_debug_coverage_sequence_is_finite_and_exercises_dmi_commands(self):
+        vseq_path = SCRIPT_DIR.parent / "tests" / "core_eh2_vseq.sv"
+        seq_lib_path = SCRIPT_DIR.parent / "tests" / "core_eh2_seq_lib.sv"
+
+        vseq_text = vseq_path.read_text(encoding="utf-8")
+        seq_text = seq_lib_path.read_text(encoding="utf-8")
+
+        self.assertIn("debug_stress_h.stress_mode = cfg.enable_debug_stress;", vseq_text)
+        self.assertIn("send_core_register_read", seq_text)
+        self.assertIn("send_core_local_memory_read", seq_text)
+        self.assertIn("send_external_system_bus_read", seq_text)
+        self.assertIn("DMI_COMMAND", seq_text)
+        self.assertIn("DMI_SBADDRESS0", seq_text)
 
     def test_run_single_test_compiles_directed_asm_without_instr_gen(self):
         with tempfile.TemporaryDirectory() as td:
