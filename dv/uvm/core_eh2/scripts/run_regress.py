@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import os
+import shutil
 import sys
 import time
 import yaml
@@ -59,8 +60,14 @@ def load_regression_testlist(testlist_path: str) -> list:
     if any(isinstance(entry, dict) and "config" in entry and "test" not in entry
            for entry in raw_entries):
         model = directed_test_schema.import_model(testlist_path)
+        raw_by_name = {
+            entry.get("test"): entry
+            for entry in raw_entries
+            if isinstance(entry, dict) and entry.get("test")
+        }
         entries = []
         for test in model.tests:
+            raw_entry = raw_by_name.get(test.test, {})
             entry = {
                 "test": test.test,
                 "description": test.desc,
@@ -74,6 +81,9 @@ def load_regression_testlist(testlist_path: str) -> list:
             }
             if test.ld_script:
                 entry["linker"] = test.ld_script
+            for key in ("sim_opts", "gen_opts", "skip_in_signoff"):
+                if key in raw_entry:
+                    entry[key] = raw_entry[key]
             entries.append(entry)
         return entries
 
@@ -122,7 +132,7 @@ def build_sim_opts(test_entry: dict, cli_sim_opts: str = "") -> str:
         "+disable_cosim=" in joined
     )
     if not has_cosim_plusarg:
-        if cosim in ("disabled", "disable", "false", "0", "no"):
+        if cosim in ("disabled", "disable", "false", "0", "no", "rtl_only"):
             pieces.append("+disable_cosim=1")
         else:
             pieces.append("+enable_cosim=1")
@@ -163,7 +173,8 @@ def run_single_test(test_entry: dict, seed: int, simulator: str,
                     cli_sim_opts: str = "",
                     coverage: bool = False,
                     waves: bool = False,
-                    fail_on_warnings: bool = False) -> TestRunResult:
+                    fail_on_warnings: bool = False,
+                    build_dir: str = None) -> TestRunResult:
     """
     Run a single test: generate, compile, simulate, check.
 
@@ -288,7 +299,7 @@ def run_single_test(test_entry: dict, seed: int, simulator: str,
         "--simulator", simulator,
         "--rtl-test", rtl_test,
         "--sim-opts", sim_opts,
-        "--build-dir", os.path.join(EH2_ROOT, "build"),
+        "--build-dir", build_dir or os.path.join(EH2_ROOT, "build", "compile"),
         "--out-dir", work_dir,
     ]
     if coverage:
@@ -378,7 +389,8 @@ def run_regression(args) -> RegressionSummary:
                 future = executor.submit(
                     run_single_test, entry, seed, args.simulator,
                     output_dir, args.binary, args.sim_opts,
-                    args.coverage, args.waves, args.fail_on_warnings
+                    args.coverage, args.waves, args.fail_on_warnings,
+                    args.build_dir
                 )
                 futures[future] = (entry["test"], seed)
 
@@ -398,7 +410,7 @@ def run_regression(args) -> RegressionSummary:
             result = run_single_test(entry, seed, args.simulator,
                                      output_dir, args.binary, args.sim_opts,
                                      args.coverage, args.waves,
-                                     args.fail_on_warnings)
+                                     args.fail_on_warnings, args.build_dir)
             summary.add_result(result)
             status = "PASS" if result.passed else "FAIL"
             print(f"[{status}] {test_name} seed={seed} "
@@ -410,6 +422,17 @@ def run_regression(args) -> RegressionSummary:
     summary.to_log(os.path.join(output_dir, "regr.log"))
     summary.to_junit_xml(os.path.join(output_dir, "regr_junit.xml"))
     generate_report_json(summary, os.path.join(output_dir, "report.json"))
+
+    if args.coverage and args.simulator == "vcs":
+        cov_db = os.path.join(EH2_ROOT, "build", "cov.vdb")
+        out_cov_db = os.path.join(output_dir, "cov.vdb")
+        if os.path.isdir(cov_db):
+            if os.path.isdir(out_cov_db):
+                shutil.rmtree(out_cov_db)
+            shutil.copytree(cov_db, out_cov_db)
+            print(f"Coverage DB: {out_cov_db}")
+        else:
+            print(f"[WARN] Coverage requested, but VCS DB not found: {cov_db}")
 
     print(f"\n{'='*60}")
     print(f"Regression Complete")
@@ -463,6 +486,9 @@ Examples:
 
     # Output
     parser.add_argument("--output", help="Output directory")
+    parser.add_argument("--build-dir", default=None,
+                        help="Per-target build root containing simv. "
+                             "Defaults to <eh2_root>/build/compile when omitted.")
 
     # Parallelism
     parser.add_argument("--parallel", type=int, default=1,
