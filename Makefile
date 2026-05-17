@@ -398,7 +398,7 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
           ITERATIONS=<N>                    迭代次数（默认 1；旧 weekly 用 5）
           PARALLEL=<N>                      并行度（默认 4）
           COV=0|1                           覆盖率（默认 1）
-          OUT=<dir>                         输出目录（默认 build/regression）
+          OUT=<dir>                         输出目录（默认 build/regress）
           SIMULATOR=vcs|xlm                 仿真器
         产出：
           $(OUT)/<test>_s<seed>/sim_*.log
@@ -686,7 +686,7 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
 
       # regress 单测 —— 调试某个具体测试
       make regress TEST=riscv_arithmetic_basic_test SEED=1 WAVES=1
-      verdi -ssf build/regression/riscv_arithmetic_basic_test_s1/waves.fsdb &
+      verdi -ssf build/regress/riscv_arithmetic_basic_test_s1/waves.fsdb &
 
       # signoff —— 所有 stage 都 dump（磁盘显著上升）
       make signoff WAVES=1
