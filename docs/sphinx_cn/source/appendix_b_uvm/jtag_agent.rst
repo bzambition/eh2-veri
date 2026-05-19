@@ -1936,3 +1936,38 @@ request，再等待 5 个 ``vif.clk``，随后发送 NOP 并捕获 response；``
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§13  v2-17 源码片段闭环
+--------------------------------------------------------------------------------
+
+本节补齐 JTAG agent 的 package、agent wrapper 和 sequencer 源码片段。JTAG driver
+的 TAP state、DMI scan 和 retry 逻辑已在前文展开；这里补足最小 UVM 骨架，便于读者
+从 package 入口追到 active component。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_agent_pkg.sv
+   :language: systemverilog
+   :lines: 1-15
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_agent_pkg.sv:L1-L15
+
+逐段精读：L4-L7 建立 package 与 UVM 依赖；L9-L14 汇入 item、driver、sequencer、
+sequence 和 agent。这个顺序与 IRQ agent 一致，是简单 active UVM agent 的标准结构。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_agent.sv
+   :language: systemverilog
+   :lines: 1-32
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_agent.sv:L1-L32
+
+逐段精读：L4-L10 声明 driver 和 sequencer 成员；L16-L24 只在 active 模式创建二者；
+L26-L30 连接 ``seq_item_port``。源码没有 ``eh2_jtag_monitor``，所以 DMI response
+不通过 analysis port 发布。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_sequencer.sv
+   :language: systemverilog
+   :lines: 1-12
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_sequencer.sv:L1-L12
+
+逐段精读：L5-L11 声明 typed sequencer。JTAG 事务的复杂性集中在 driver 的 TAP/DMI
+task，而不是 sequencer 派生类。

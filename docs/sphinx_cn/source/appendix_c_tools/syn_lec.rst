@@ -1964,3 +1964,24 @@ packed-port、EXU matching 和 timeout 问题。
 逐行讲解：这一行只用 ``read_verilog -sv`` 读取 snapshot 下的 ``eh2_pdef.vh``，用于确认
 DC/Formality 环境能找到上游 EH2 snapshot include。它不是完整综合脚本；完整 DC flow
 见 :doc:`syn_nangate` 和 :file:`syn/scripts/dc_*.tcl`。
+
+§15  v2-17 源码片段闭环：旧版 top-level LEC wrapper
+--------------------------------------------------------------------------------
+
+``syn/lec/eh2_lec.tcl`` 是早期 top-level Formality wrapper，当前 release gate 已经
+转向 block-level LEC，并以 ``31635/31635 PASS`` 为签核证据。本节补齐该文件的
+源码片段，是为了让历史入口也可追溯，而不是把它重新定义为主 gate。
+
+.. literalinclude:: ../../../../syn/lec/eh2_lec.tcl
+   :language: text
+   :lines: 1-18
+   :linenos:
+   :caption: syn/lec/eh2_lec.tcl:L1-L18
+
+逐段精读：
+
+* L1-L7：设置 SV reader、search path 与 wrapper/netlist 路径，说明脚本目标是
+  top-level reference 对 implementation。
+* L8-L13：读取 reference 和 implementation，并设置 ``eh2_veer`` 为 top。
+* L14-L18：执行 match、verify 和 report。这个简短入口适合 smoke 级 LEC 探针；
+  完整 release 仍以 block-level flow 和 summary 为准。

@@ -2061,3 +2061,31 @@ block-level LEC 为 31635/31635 PASS。
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§15  v2-17 源码片段闭环：CSR 分类与 waiver package
+--------------------------------------------------------------------------------
+
+本节补齐 coverage 辅助文件的真实源码片段。``eh2_csr_categories.svh`` 是 CSR
+地址分类头文件；``eh2_cov_waiver_pkg.sv`` 是 waiver 加载、匹配和报告的轻量
+SystemVerilog package。二者都不改变 VCS ``-cm line+tgl+assert+fsm+branch`` 五维
+覆盖率口径，只服务于功能覆盖和 waiver 可追溯性。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/fcov/eh2_csr_categories.svh
+   :language: systemverilog
+   :lines: 1-55
+   :linenos:
+   :caption: dv/uvm/core_eh2/fcov/eh2_csr_categories.svh:L1-L55
+
+逐段精读：L1-L8 说明文件定位为 CSR 分类宏；L10-L38 列出 machine、debug 和
+PMP/ePMP 相关 CSR 地址；L40-L55 预留分类宏，供后续 covergroup 或 helper 复用。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/fcov/cov_waivers/eh2_cov_waiver_pkg.sv
+   :language: systemverilog
+   :lines: 1-120
+   :linenos:
+   :caption: dv/uvm/core_eh2/fcov/cov_waivers/eh2_cov_waiver_pkg.sv:L1-L120
+
+逐段精读：L1-L32 定义 waiver item、动态数组和基本字段；L34-L66 提供字符串裁剪与
+key/value 解析 helper；L67-L120 展开 ``load_waiver_file`` 的前半段，按行读取
+YAML-like 文件并构造 waiver 记录。后半段在前文章节已经逐段解释，这里以入口片段
+保证审计闭环。

@@ -1661,7 +1661,28 @@ scoreboard。
 接口边界：这些 C 头文件可帮助复现 VCS 编译环境问题，但 sign-off 行为仍由
 SystemVerilog testbench、``eh2_dec_csr`` wrapper、reg model 和 scoreboard 决定。
 
-§12.7  ``fetch_enable_intf.sv`` — fetch gate 最小接口
+§12.7  ``scripts/run_compliance.py`` — CSR unit 兼容入口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+CSR unit 子环境也带有一个轻量 runner，用于从 CSR unit 目录调用 compliance 风格的
+编译/运行检查。它不同于 full compliance framework 的
+``dv/uvm/riscv_compliance/scripts/run_compliance.py``；本文件的职责是服务
+``dv/uvm/cs_registers_eh2`` 本地测试。
+
+.. literalinclude:: ../../../../dv/uvm/cs_registers_eh2/scripts/run_compliance.py
+   :language: python
+   :lines: 1-147
+   :linenos:
+   :caption: dv/uvm/cs_registers_eh2/scripts/run_compliance.py:L1-L147
+
+逐段精读：
+
+* L1-L23：定义脚本入口和路径常量，把工作目录限定在 CSR unit 子环境。
+* L25-L79：封装命令执行、日志打印和错误返回，避免 Makefile 里堆叠 shell 逻辑。
+* L81-L147：解析命令行参数并调度 compile/run/report；它服务 CSR unit stage，
+  不替代 full-core UVM regression 或 RISC-V compliance stage。
+
+§12.8  ``fetch_enable_intf.sv`` — fetch gate 最小接口
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../../dv/uvm/core_eh2/common/fetch_enable_intf.sv

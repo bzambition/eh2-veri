@@ -10,7 +10,8 @@ the Chinese Sphinx manual should eventually provide three levels of evidence:
 * explanation: the same page contains a paragraph-level explanation marker.
 
 Default mode is an audit baseline and exits 0. Use ``--strict`` to turn any
-missing snippet/explanation into a failing gate once the backlog is cleared.
+missing explanation into a failing gate once the backlog is cleared. Add
+``--require-snippet`` when every asset must also have a rendered source block.
 """
 
 import argparse
@@ -204,8 +205,8 @@ def audit(assets, docs):
     return result
 
 
-def print_summary(results, max_missing):
-    # type: (Dict[Asset, Hit], int) -> int
+def print_summary(results, max_missing, require_snippet=False):
+    # type: (Dict[Asset, Hit], int, bool) -> int
     by_area = defaultdict(list)  # type: Dict[str, List[Tuple[Asset, Hit]]]
     for asset, hit in results.items():
         by_area[asset.area].append((asset, hit))
@@ -215,6 +216,7 @@ def print_summary(results, max_missing):
     snippet = sum(1 for hit in results.values() if hit.snippet)
     explained = sum(1 for hit in results.values() if hit.explained)
     missing_explained = total - explained
+    missing_snippet = total - snippet
 
     print("=== v2 source paragraph explanation audit ===")
     print(f"doc_root: {DOC_ROOT}")
@@ -222,6 +224,7 @@ def print_summary(results, max_missing):
     print(f"referenced: {referenced}")
     print(f"with_snippet: {snippet}")
     print(f"with_paragraph_explanation: {explained}")
+    print(f"missing_snippet: {missing_snippet}")
     print(f"missing_paragraph_explanation: {missing_explained}")
     print("---")
     print("area,total,referenced,with_snippet,with_paragraph_explanation,missing")
@@ -236,18 +239,26 @@ def print_summary(results, max_missing):
             f"{area_explained},{area_total - area_explained}"
         )
 
-    missing = [(asset, hit) for asset, hit in results.items() if not hit.explained]
+    if require_snippet:
+        missing = [(asset, hit) for asset, hit in results.items()
+                   if not hit.explained or not hit.snippet]
+    else:
+        missing = [(asset, hit) for asset, hit in results.items() if not hit.explained]
     if missing:
         print("---")
-        print(f"first_missing_paragraph_explanations (limit {max_missing})")
+        title = "first_missing_snippet_or_paragraph_explanations" if require_snippet else "first_missing_paragraph_explanations"
+        print(f"{title} (limit {max_missing})")
         for asset, hit in missing[:max_missing]:
             status = []
             if not hit.referenced:
                 status.append("no_reference")
             if not hit.snippet:
                 status.append("no_snippet")
-            status.append("no_paragraph_explanation")
+            if not hit.explained:
+                status.append("no_paragraph_explanation")
             print(f"{asset.area}: {asset.label} [{', '.join(status)}]")
+    if require_snippet:
+        return len(missing)
     return missing_explained
 
 
@@ -260,6 +271,11 @@ def main():
         help="exit non-zero when any source asset lacks paragraph explanation",
     )
     parser.add_argument(
+        "--require-snippet",
+        action="store_true",
+        help="include missing literalinclude/code-block snippet in the strict gate",
+    )
+    parser.add_argument(
         "--max-missing",
         type=int,
         default=120,
@@ -269,7 +285,7 @@ def main():
 
     assets = collect_assets()
     docs = load_docs()
-    missing = print_summary(audit(assets, docs), args.max_missing)
+    missing = print_summary(audit(assets, docs), args.max_missing, args.require_snippet)
     if args.strict and missing:
         return 1
     return 0

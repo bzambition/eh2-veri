@@ -3284,3 +3284,50 @@ UVM monitor transaction；它通过生成程序、testlist、plusarg 和 trace C
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§13  v2-17 源码片段闭环：EH2 riscv-dv 扩展核心文件
+--------------------------------------------------------------------------------
+
+本节补齐 riscv-dv 扩展中四个核心源文件的 ``literalinclude``。前文已经把每个
+class、override、directed stream 和 trace CSV parser 分段解释；这里保留较长但可
+构建的片段，让源码审计能确认这些资产确实有渲染级代码证据。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/riscv_dv_extension/eh2_asm_program_gen.sv
+   :language: systemverilog
+   :lines: 1-148
+   :linenos:
+   :caption: dv/uvm/core_eh2/riscv_dv_extension/eh2_asm_program_gen.sv:L1-L148
+
+逐段精读：L13-L44 定义 EH2 program generator 与 mailbox 地址；L46-L86 生成
+header、trap vector 和 ECALL 入口；L88-L146 生成 test done、debug ROM 和 NMI
+handler，使随机程序能按 EH2 TB mailbox 协议退出。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/riscv_dv_extension/eh2_directed_instr_lib.sv
+   :language: systemverilog
+   :lines: 1-180
+   :linenos:
+   :caption: dv/uvm/core_eh2/riscv_dv_extension/eh2_directed_instr_lib.sv:L1-L180
+
+逐段精读：L1-L46 建立 directed instruction library 的基础类与 CSR helper；
+L52-L137 覆盖 interrupt、debug 和 CSR access stream 的早期实现；L142-L180 开始
+PMP/ePMP 相关 stream。完整文件后续段落已逐类解释。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/riscv_dv_extension/eh2_debug_triggers_overrides.sv
+   :language: systemverilog
+   :lines: 1-144
+   :linenos:
+   :caption: dv/uvm/core_eh2/riscv_dv_extension/eh2_debug_triggers_overrides.sv:L1-L144
+
+逐段精读：L1-L29 引入 debug trigger override 的 class 关系；L41-L98 生成 trigger
+setup、debug entry 和 resume 相关汇编；L101-L144 把 hardware trigger program
+generator 绑定到 EH2 debug ROM 生成策略。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/riscv_dv_extension/eh2_log_to_trace_csv.py
+   :language: python
+   :lines: 1-120
+   :linenos:
+   :caption: dv/uvm/core_eh2/riscv_dv_extension/eh2_log_to_trace_csv.py:L1-L120
+
+逐段精读：L1-L33 定义脚本用途、CSV 字段和 trace 正则；L35-L93 解析 EH2 retire
+日志、寄存器写回和异常字段；L96-L120 开始输出 CSV 记录。后续 compare/CLI 路径
+在前文 §7 已逐段说明。

@@ -1976,3 +1976,39 @@ mismatch 数；final/pre_abort 负责销毁 Spike handle。
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§16  v2-17 源码片段闭环
+--------------------------------------------------------------------------------
+
+本节把 v2 源码审计中仍缺少 ``literalinclude`` 的 cosim agent 资产补成可渲染源码片段。
+前文已经逐段解释 package、agent wrapper、scoreboard 和 helper header 的职责；这里
+补齐真实文件引用，确保 Sphinx build 能直接验证路径与行号。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_agent_pkg.sv
+   :language: systemverilog
+   :lines: 1-26
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_agent_pkg.sv:L1-L26
+
+逐段精读：L1-L12 建立 package、UVM、trace 和 AXI4 依赖；L14-L24 按 cfg、DPI、
+scoreboard、agent 的顺序 include，保证 ``eh2_cosim_agent`` 能看到 scoreboard 类型。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_agent.sv
+   :language: systemverilog
+   :lines: 1-66
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_agent.sv:L1-L66
+
+逐段精读：L1-L17 声明 agent class、scoreboard 和 ``dmem_port``；L23-L39 在
+``build_phase`` 创建 scoreboard 与 analysis export；L41-L64 在 ``connect_phase`` 把
+外部 LSU AXI4 transaction 接到 scoreboard FIFO。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_binary_loader.svh
+   :language: systemverilog
+   :lines: 1-125
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_binary_loader.svh:L1-L125
+
+逐段精读：L1-L17 说明 helper 的职责是把 ELF/HEX binary 装入 Spike cosim memory；
+L19-L73 处理文件打开、地址递增和 byte 写入；L75-L125 负责错误报告和关闭路径。
+它是 scoreboard 初始化前的 helper，不直接参与 retire compare。

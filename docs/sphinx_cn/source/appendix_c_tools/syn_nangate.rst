@@ -847,3 +847,60 @@ library；生产流片目标需要替换为 foundry ``.db``。本章只描述当
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§11  v2-17 源码片段闭环：DC 与行为库脚本
+--------------------------------------------------------------------------------
+
+本节补齐综合路径中仍缺少 ``literalinclude`` 的源码资产。``dc_synth.tcl`` 是
+当前 ``syn-dc`` 主入口；``dc_synth_keep2d.tcl`` 是 packed-array 诊断实验；
+``dc_elab_fixed.tcl`` 与 ``dc_elaborate_flat.tcl`` 是早期 elaboration/flat netlist
+尝试；``beh_lib_syn.sv`` 是综合/LEC 需要的行为库补充。
+
+.. literalinclude:: ../../../../syn/scripts/dc_synth.tcl
+   :language: text
+   :lines: 1-69
+   :linenos:
+   :caption: syn/scripts/dc_synth.tcl:L1-L69
+
+逐段精读：L1-L13 设置 Synopsys library、SV 标准和 build 目录；L15-L32 建立 run
+目录、message 抑制和 search path；L34-L69 读取 wrapper、elaborate、compile 并输出
+netlist/report。
+
+.. literalinclude:: ../../../../syn/scripts/dc_synth_keep2d.tcl
+   :language: text
+   :lines: 1-77
+   :linenos:
+   :caption: syn/scripts/dc_synth_keep2d.tcl:L1-L77
+
+逐段精读：L1-L20 说明 keep-2D 实验目标；L21-L50 读取同一 RTL 输入并保留数组结构；
+L51-L77 输出 ``eh2_synth_keep2d.v`` 和报告。它用于定位 Formality matching 难点，
+不是 release gate。
+
+.. literalinclude:: ../../../../syn/scripts/dc_elab_fixed.tcl
+   :language: text
+   :lines: 1-72
+   :linenos:
+   :caption: syn/scripts/dc_elab_fixed.tcl:L1-L72
+
+逐段精读：L1-L25 设置 elaboration 环境；L26-L55 读取 EH2 RTL 和 wrapper；
+L56-L72 只做 elaborate/link/report，不执行最终 compile。它保留为 DC 读入诊断脚本。
+
+.. literalinclude:: ../../../../syn/scripts/dc_elaborate_flat.tcl
+   :language: text
+   :lines: 1-104
+   :linenos:
+   :caption: syn/scripts/dc_elaborate_flat.tcl:L1-L104
+
+逐段精读：L1-L34 建立 flat elaboration 环境；L35-L78 尝试读入并展开上游 RTL；
+L79-L104 输出 flat Verilog 诊断产物。当前 release 采用 wrapper/block-level 路径，
+不依赖该脚本完成签核。
+
+.. literalinclude:: ../../../../syn/beh_lib_syn.sv
+   :language: systemverilog
+   :lines: 1-140
+   :linenos:
+   :caption: syn/beh_lib_syn.sv:L1-L140
+
+逐段精读：L1-L40 定义综合/LEC 所需的基础行为模型；L41-L100 补充 memory、clock
+或 library wrapper 行为；L101-L140 继续提供工具可读的 SystemVerilog stub。该文件
+用于商业工具读入闭环，不改变 RTL golden source。

@@ -1504,3 +1504,26 @@ formal property 体系由三层组成：
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§11  v2-17 源码片段闭环：EXU property
+--------------------------------------------------------------------------------
+
+v2-17 源码审计要求每个 formal property 文件不仅有逐段解释，还要有可由
+Sphinx 渲染的真实源码片段。``eh2_exu_assert.sv`` 已在 §4.1 逐段说明
+ALU、MUL/DIV、flush 和 cover property 的意图；这里补充同一文件的
+``literalinclude``，让读者能从页面直接跳回实现。
+
+.. literalinclude:: ../../../../dv/formal/properties/eh2_exu_assert.sv
+   :language: systemverilog
+   :lines: 1-131
+   :linenos:
+   :caption: dv/formal/properties/eh2_exu_assert.sv:L1-L131
+
+逐段精读锚点：
+
+* L1-L18：声明 EXU property 模块及 ALU/MUL/DIV、valid、flush、branch 和 clock/reset
+  端口；这些端口必须由 formal top 或 bind 层提供真实信号。
+* L20-L66：用 ``disable iff (!rst_l)`` 包裹断言，确保 reset 期间不产生假失败。
+  ALU valid、MUL/DIV mutual exclusion 和 flush behavior 是 EXU proof 的核心。
+* L68-L131：cover property 给 formal 收敛和可达性提供观察点，不替代 sign-off
+  中的 VCS coverage；它们说明 proof engine 已经看见关键 EXU 场景。

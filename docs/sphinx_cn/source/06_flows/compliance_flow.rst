@@ -3143,3 +3143,172 @@ timeout 与 trace 输出。
 3. VCS/URG 路径和 NC/IMC 备选路径在本页中是否被分开解释？
 4. 失败时第一份应打开的日志是哪一个，第二步应检查哪个变量或 YAML 配置？
 5. 本页中的 sign-off 数字是否仍为 9/9 PASS、102/104、LEC 31635/31635 和 LINE 95.05%？
+
+§14  v2-17 源码片段闭环：多 ISA device 与 runner
+--------------------------------------------------
+
+本节补齐 compliance framework 中此前只有逐段解释、没有 ``literalinclude`` 的资产。
+EH2 的 device 目录按 ISA 拆分，``rv32i``、``rv32im``、``rv32imc``、
+``rv32Zicsr`` 和 ``rv32Zifencei`` 共用相同的 mailbox/signature 设计；``rv32imac``
+是压缩/原子组合的精简 device 变体。下面的片段用于审计闭环，不改变当前实测
+``85/88 (96.59%)`` compliance sign-off 结果。
+
+§14.1  ``rv32i`` device 基线
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32i/compliance_test.h
+   :language: c
+   :lines: 1-52
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32i/compliance_test.h:L1-L52
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32i/compliance_io.h
+   :language: c
+   :lines: 1-25
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32i/compliance_io.h:L1-L25
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32i/startup.S
+   :language: text
+   :lines: 1-111
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32i/startup.S:L1-L111
+
+逐段精读：``compliance_test.h`` 定义 test entry、signature begin/end 和 PASS/FAIL
+宏；``compliance_io.h`` 保持 IO 宏为空，说明结果通过 signature/mailbox 传递；
+``startup.S`` 完成 reset entry、stack/global pointer、signature 清零和最终退出。
+
+§14.2  ``rv32im`` 与 ``rv32imc`` device
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32im/compliance_test.h
+   :language: c
+   :lines: 1-52
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32im/compliance_test.h:L1-L52
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32im/compliance_io.h
+   :language: c
+   :lines: 1-25
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32im/compliance_io.h:L1-L25
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32im/startup.S
+   :language: text
+   :lines: 1-111
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32im/startup.S:L1-L111
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32imc/compliance_test.h
+   :language: c
+   :lines: 1-52
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32imc/compliance_test.h:L1-L52
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32imc/compliance_io.h
+   :language: c
+   :lines: 1-25
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32imc/compliance_io.h:L1-L25
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32imc/startup.S
+   :language: text
+   :lines: 1-111
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32imc/startup.S:L1-L111
+
+逐段精读：``rv32im`` 和 ``rv32imc`` 复用 rv32i device 结构，但 suite 选择不同；
+前者覆盖 M 扩展，后者覆盖 M+C 扩展。runner 通过 ``--isa`` 参数选择目录，不在
+SystemVerilog TB 中硬编码 ISA。
+
+§14.3  ``rv32Zicsr``、``rv32Zifencei`` 和 ``rv32imac`` device
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32Zicsr/compliance_test.h
+   :language: c
+   :lines: 1-52
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32Zicsr/compliance_test.h:L1-L52
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32Zicsr/compliance_io.h
+   :language: c
+   :lines: 1-25
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32Zicsr/compliance_io.h:L1-L25
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32Zicsr/startup.S
+   :language: text
+   :lines: 1-111
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32Zicsr/startup.S:L1-L111
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32Zifencei/compliance_test.h
+   :language: c
+   :lines: 1-52
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32Zifencei/compliance_test.h:L1-L52
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32Zifencei/compliance_io.h
+   :language: c
+   :lines: 1-25
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32Zifencei/compliance_io.h:L1-L25
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32Zifencei/startup.S
+   :language: text
+   :lines: 1-111
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32Zifencei/startup.S:L1-L111
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32imac/compliance_io.h
+   :language: c
+   :lines: 1-21
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32imac/compliance_io.h:L1-L21
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/device/rv32imac/startup.S
+   :language: text
+   :lines: 1-48
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/device/rv32imac/startup.S:L1-L48
+
+逐段精读：Zicsr/Zifencei 目录复用标准 signature 结构，分别承接 CSR 与 FENCE.I
+suite；``rv32imac`` 目录较短，说明它只保留该组合测试需要的最小启动和 IO 边界。
+
+§14.4  runner、collector、known fail 与 standalone TB
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/scripts/run_compliance.py
+   :language: python
+   :lines: 1-160
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/scripts/run_compliance.py:L1-L160
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/scripts/collect_compliance.py
+   :language: python
+   :lines: 1-205
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/scripts/collect_compliance.py:L1-L205
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/known_fail.yaml
+   :language: yaml
+   :lines: 1-32
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/known_fail.yaml:L1-L32
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/tb/eh2_compliance_tb.sv
+   :language: systemverilog
+   :lines: 1-180
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/tb/eh2_compliance_tb.sv:L1-L180
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/tb/eh2_compliance_tb.cc
+   :language: c++
+   :lines: 1-89
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/tb/eh2_compliance_tb.cc:L1-L89
+
+逐段精读：``run_compliance.py`` 前 160 行定义路径、命令执行、ELF/HEX/signature
+构建基础；``collect_compliance.py`` 全文件重扫 work 目录并汇总 JSON；
+``known_fail.yaml`` 记录允许跟踪的失败；standalone SV/C++ TB 负责时钟、reset、
+存储器加载和 Verilator 驱动。它们共同支撑 sign-off compliance stage。
