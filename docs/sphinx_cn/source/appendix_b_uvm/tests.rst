@@ -14,7 +14,8 @@
 
 ``dv/uvm/core_eh2/tests/`` 下的 SystemVerilog 测试库由 package、report server、base test、
 directed test library、integrity test library、virtual sequence library 和独立 RVFI smoke
-test 组成。本文只解释 SV/Python 测试基础设施；汇编测试程序本身见
+test 组成。本文先解释 SV/Python 测试基础设施，再在 §5.4 给出所有 ``.S`` directed/cosim
+汇编测试的逐文件字典；汇编工具链、链接脚本和 objcopy 细节见
 :ref:`appendix_c_tools/asm_tests`。
 
 **测试类数据流**：
@@ -918,6 +919,1413 @@ instruction 时触发 stimulus。
 * 被调用：directed tests 可用这些函数决定是否触发 interrupt/debug stimulus。
 * 调用：只访问队列和 UVM fatal。
 * 共享状态：读写 ``seen_instr`` 和 ``seen_compressed_instr``。
+
+§5.4  Directed Tests 字典总览
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+本节覆盖 ``dv/uvm/core_eh2/tests/asm/*.S`` 和顶层 ``tests/asm/*.S`` 的全部 46 个汇编
+测试文件。它们不是随机指令流的替代品，而是把难以稳定命中的结构性窗口固定下来：
+cosim proof 负责把 Spike lockstep 的基础语义打牢，directed tests 负责 trap/PMP/debug/AXI4
+错误注入和覆盖率泵，顶层 smoke/nop 则服务于最短 bring-up 与 sign-off smoke stage。
+
+.. note::
+
+   2026-05-19 VCS full sign-off 中，相关 stage 证据为 ``smoke 1/1``、``directed 40/40``、
+   ``cosim 7/7`` 全部 PASS。合并覆盖率来自 URG dut-only dashboard：
+   LINE 95.05%、BRANCH 84.97%、TOGGLE 53.52%、ASSERT 33.33%、FSM 54.74%、
+   GROUP 69.42%、OVERALL 65.17%。当前 HTML/Markdown dashboard 不发布逐测试 coverage
+   增量，所以每个条目的「当前实测」只引用 stage 通过状态和全局合并指标。
+
+**测试族与 sign-off stage 对照**：
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 28 48
+
+   * - 测试族
+     - stage
+     - 验证价值
+   * - ``cosim_*.S``
+     - ``cosim``，部分也被 ``directed`` 复用
+     - 建立 ALU、LSU、dual-issue、exception、atomic 与 bitmanip 的 Spike lockstep proof point。
+   * - ``directed_pmp_*.S``
+     - ``directed``
+     - 固定 PMP CSR、region priority、地址模式、I-side/D-side fault 和 mscause 观察窗口。
+   * - ``directed_toggle_*.S``
+     - ``directed``
+     - 为 R3-B 结构覆盖率泵高翻转数据，补 random 稳定性不足的 datapath toggles。
+   * - ``directed_*`` 其它测试
+     - ``directed``
+     - 覆盖 IRQ、debug、AXI4 error、DMA burst、IFU BP/BTB、LSU store buffer 和 NB-load 风险。
+   * - 顶层 ``tests/asm/*.S``
+     - ``smoke`` 或 bring-up artifact
+     - ``smoke.S`` 是 sign-off smoke stage 输入；``nop.S`` 是最小 ELF/HEX 构建与波形定位样例。
+
+§5.4.01  ``cosim_alu.S`` — ALU lockstep proof
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：用确定性 ``addi/add/sub/and/or/xor/sll/srl/sra/slt/sltu`` 序列证明 EXU ALU
+结果、写回寄存器和 Spike ISS 预期一致。
+
+**为什么 random 覆盖不了**：riscv-dv 能生成 ALU 指令，但很难在短回归中保证每个运算符、
+正负立即数、移位和比较路径都按固定顺序出现，并带有源码级可读的期望值。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/cosim_alu.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/cosim_alu.S
+
+**逐段精读**：
+
+* L1-L7：声明测试目标和最终 mailbox PASS 协议。
+* L11-L43：构造立即数、寄存器算术、逻辑和移位结果，覆盖 ``eh2_exu_alu_ctl.sv`` 的主 ALU
+  选择路径。
+* L45-L82：逐项 ``bne`` 自检，失败写 ``0x1``，成功写 ``0xFF`` 到 ``0xD0580000``。
+
+**覆盖到的 RTL/coverage 面**：``exu/eh2_exu_alu_ctl.sv``、``dec/eh2_dec_decode_ctl.sv``、
+``common/cosim_agent/eh2_cosim_scoreboard.sv`` 的 retire/writeback 比对。
+
+**这条测试在哪个 sign-off stage 跑**：``cosim``；同时在 ``directed`` 中以
+``directed_alu`` 复用。
+
+**预期通过条件**：所有寄存器结果命中期望值，scoreboard 无 PC/写回 mismatch，mailbox 写
+``0xFF``。当前实测：VCS full sign-off 中 ``cosim 7/7``、``directed 40/40`` PASS。
+
+§5.4.02  ``cosim_atomic_basic.S`` — LR/SC 与 AMO proof
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：覆盖 issue 52 引入的 atomic cosim proof，验证 LR/SC reservation、SC 成功返回值和
+AMOSWAP/AMOADD/AMOXOR/AMOAND 的内存更新。
+
+**为什么 random 覆盖不了**：atomic 指令既依赖 DCCM 地址、reservation 状态，也依赖 scoreboard
+对原子读写的建模；随机流很难稳定形成「无竞争 LR/SC + 多个 AMO 后读回」的短闭环。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/cosim_atomic_basic.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/cosim_atomic_basic.S
+
+**逐段精读**：
+
+* L1-L13：列出 7 个验证点，说明该文件是 atomic lockstep 的 sign-off proof。
+* L17-L35：在 ``0xF0040000`` 上执行 LR/SC 获取锁，检查 ``sc.w`` 返回 0。
+* L37-L82：依次执行 AMO swap/add/xor/and 并读回结果，失败统一跳 ``fail``。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_amo.sv``、``lsu/eh2_lsu_dccm_ctl.sv``、
+``dv/cosim/spike_cosim.cc`` 的 atomic retire 建模。
+
+**这条测试在哪个 sign-off stage 跑**：``cosim``。
+
+**预期通过条件**：LR/SC 和 AMO 读回值全部匹配，Spike 与 DUT retire 序列一致。当前实测：
+VCS full sign-off 中 ``cosim 7/7`` PASS。
+
+§5.4.03  ``cosim_bitmanip.S`` — Zba/Zbb deterministic proof
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：把 EH2 支持的 Zba/Zbb 指令放入短序列，覆盖 ``sh1add/sh2add/sh3add``、
+``andn/orn/xnor/clz/ctz/cpop/max/min`` 等 bitmanip ALU 分支。
+
+**为什么 random 覆盖不了**：bitmanip 指令在普通随机混合中占比低，且 ``clz/ctz/cpop`` 这类
+结果对 operand pattern 敏感；固定 operand 能让 cosim mismatch 可复现。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/cosim_bitmanip.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/cosim_bitmanip.S
+
+**逐段精读**：
+
+* L1-L7：说明本测试只走寄存器路径，不依赖 memory exception。
+* L13-L44：准备 ``0xAAAAAAAA``、``0x55555555``、``0x12345678`` 等高辨识度 operand。
+* L46-L119：执行 Zba/Zbb 指令并写 mailbox，覆盖 decode 到 EXU bitmanip datapath。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_decode_ctl.sv``、``exu/eh2_exu_alu_ctl.sv`` 和
+cosim writeback scoreboard。
+
+**这条测试在哪个 sign-off stage 跑**：``cosim``。
+
+**预期通过条件**：所有 bitmanip retire 的 rd 写回与 Spike 一致，mailbox PASS。当前实测：
+VCS full sign-off 中 ``cosim 7/7`` PASS。
+
+§5.4.04  ``cosim_dual_issue.S`` — 双发射顺序 proof
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：构造可双发射的独立 ALU pair 和随后检查，证明 EH2 双线程/双发射 retire 在
+program order 上能被 trace/cosim 正确消费。
+
+**为什么 random 覆盖不了**：随机流会被依赖、结构冲突和分支打散，难以稳定制造连续可双发射
+窗口；本测试把 pair 边界写在源码里，便于定位 i0/i1 顺序问题。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/cosim_dual_issue.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/cosim_dual_issue.S
+
+**逐段精读**：
+
+* L1-L11：给出双发射成立条件：无数据依赖、无结构冲突、slot 类型兼容。
+* L17-L52：构造多组独立 ALU pair，覆盖 i0/i1 retire 同周期路径。
+* L54-L109：执行结果检查并通过 mailbox 结束。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec.sv``、``dec/eh2_dec_ib_ctl.sv``、
+``common/trace_agent/eh2_trace_monitor.sv`` 和 cosim scoreboard 的顺序匹配。
+
+**这条测试在哪个 sign-off stage 跑**：``cosim``。
+
+**预期通过条件**：无论 DUT 单发还是双发，最终寄存器结果与 Spike program order 一致。当前实测：
+VCS full sign-off 中 ``cosim 7/7`` PASS。
+
+§5.4.05  ``cosim_exception_compare.S`` — mcause/mepc 比对 proof
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：覆盖 issue 51 的异常比较路径，故意触发 M-mode ECALL 和非法指令，让 scoreboard
+比较 DUT 与 Spike 的 ``mcause`` / ``mepc``。
+
+**为什么 random 覆盖不了**：异常路径需要 mtvec、handler、mepc advance 和 mret 成套出现；
+随机非法指令可能出现，但很少带有可预测 handler 和多异常连续检查。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/cosim_exception_compare.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/cosim_exception_compare.S
+
+**逐段精读**：
+
+* L1-L13：声明 3 个异常点：ECALL、全 0 illegal、全 1 illegal。
+* L20-L42：设置 mtvec，触发 ECALL 和非法指令。
+* L58-L84：handler 检查 cause、推进 mepc 并 mret 回主流程。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_tlu_ctl.sv``、``dec/eh2_dec_csr.sv``、
+``common/cosim_agent/eh2_cosim_scoreboard.sv`` 的异常 CSR 比对。
+
+**这条测试在哪个 sign-off stage 跑**：``cosim``。
+
+**预期通过条件**：每次异常的 cause 与返回 PC 符合预期，DUT/Spike 无异常状态 mismatch。当前实测：
+VCS full sign-off 中 ``cosim 7/7`` PASS。
+
+§5.4.06  ``cosim_load_store.S`` — LSU load/store proof
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：用 ``lb/lh/lw/lbu/lhu/sb/sh/sw`` 的短序列证明 LSU byte lane、sign extension、
+store mask 和 cosim memory notification 一致。
+
+**为什么 random 覆盖不了**：随机 load/store 能增加覆盖率，但 byte/halfword sign-extension 与
+固定地址偏移组合不稳定；本测试给每个宽度指定数据和偏移。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/cosim_load_store.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/cosim_load_store.S
+
+**逐段精读**：
+
+* L1-L6：说明覆盖 load/store 指令族和小数据区。
+* L11-L40：向 ``0x80010000`` 附近写 word/half/byte。
+* L42-L83：用 signed/unsigned load 读回并检查扩展结果。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_lsc_ctl.sv``、``lsu/eh2_lsu_bus_buffer.sv``、
+AXI4 monitor 和 cosim memory scoreboard。
+
+**这条测试在哪个 sign-off stage 跑**：``cosim``；同时在 ``directed`` 中以
+``directed_load_store`` 复用。
+
+**预期通过条件**：每个 load 的返回值与源码中期望一致，store 通知不产生 scoreboard mismatch。
+当前实测：VCS full sign-off 中 ``cosim 7/7``、``directed 40/40`` PASS。
+
+§5.4.07  ``cosim_smoke.S`` — cosim 最小闭环
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：只写 mailbox PASS，验证 cosim 初始化、binary load、第一条 retire 和基本
+fetch/decode/execute/store 闭环。
+
+**为什么 random 覆盖不了**：random 用来扩展空间，不适合作为最短故障隔离点；当 cosim bootstrap
+失败时，需要一个几乎没有业务逻辑的基线程序。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/cosim_smoke.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/cosim_smoke.S
+
+**逐段精读**：
+
+* L1-L5：定义该文件只验证最小 cosim loop。
+* L10-L13：构造 ``0xD0580000`` mailbox 地址并写 ``0xFF``。
+* L16-L17：进入自旋，等待 UVM 侧通过 mailbox 判定完成。
+
+**覆盖到的 RTL/coverage 面**：``ifu/eh2_ifu.sv``、``dec/eh2_dec_decode_ctl.sv``、
+``lsu/eh2_lsu.sv`` 和 base test mailbox 观察逻辑。
+
+**这条测试在哪个 sign-off stage 跑**：``cosim``；同时作为 ``directed_smoke`` 在 ``directed``
+stage 复用。
+
+**预期通过条件**：mailbox 写 ``0xFF``，无 UVM error/fatal。当前实测：VCS full sign-off 中
+``cosim 7/7``、``directed 40/40`` PASS。
+
+§5.4.08  ``directed_axi4_error_inject.S`` — AXI4 错误响应注入
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配合 ``+enable_axi4_error_inject=1 +axi4_error_pct=100``，确认外部 AXI4
+SLVERR/DECERR 会转化为 load access fault。
+
+**为什么 random 覆盖不了**：随机程序不会稳定触发外部总线 error response；错误注入还会改变
+总线语义，因此必须关闭 cosim 并用 directed trap handler 自检。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_axi4_error_inject.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_axi4_error_inject.S
+
+**逐段精读**：
+
+* L1-L18：说明测试目标、必需 plusargs 和 cosim disabled 原因。
+* L23-L50：设置 mtvec 后对外部地址发起 load，等待 AXI4 driver 注入错误。
+* L62-L99：trap handler 检查 ``mcause == 5``，正确则写 PASS。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_bus_intf.sv``、``lsu/eh2_lsu_bus_buffer.sv``、
+``common/axi4_agent/axi4_driver.sv`` 的错误响应路径。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``，testlist 中显式 ``cosim: disabled``。
+
+**预期通过条件**：core 捕获 load access fault，handler 写 mailbox PASS。当前实测：VCS full
+sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.09  ``directed_csr_warl.S`` — EH2 custom CSR WARL
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：写读 ``mscause``、``mrac``、``mfdc`` 等 EH2 custom CSR，观察硬件 WARL 合法化行为。
+
+**为什么 random 覆盖不了**：Spike 对 EH2 custom CSR 建模不完整，随机 CSR 流无法把实现定义的
+readback mask 作为稳定判据；该测试以 RTL 行为为准并关闭 cosim。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_csr_warl.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_csr_warl.S
+
+**逐段精读**：
+
+* L1-L7：标注 custom CSR 和 cosim disabled 原因。
+* L11-L33：定义 CSR 地址并对 ``mscause`` 写全 1 后读回。
+* L35-L71：继续覆盖 ``mrac``、``mfdc``，把观测值留在内存后写 PASS。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和 CSR
+coverage 的 custom CSR bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：CSR 访问不产生非预期 trap，mailbox PASS；custom readback 供波形和日志复查。
+当前实测：VCS full sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.10  ``directed_dbg_dret_walk.S`` — debug halt/resume 窗口
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配合 UVM debug plusargs 产生 halt/resume 脉冲，同时用 ``ebreak``、trap 和短循环
+提供可观测窗口。
+
+**为什么 random 覆盖不了**：debug request 是 testbench 侧异步刺激，随机指令不能保证在 halt
+窗口内正好有 breakpoint、trap return 和 resume 交错。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_dbg_dret_walk.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_dbg_dret_walk.S
+
+**逐段精读**：
+
+* L1-L7：说明 companion UVM plusargs 驱动 debug request。
+* L12-L28：设置 mtvec、触发 ``ebreak`` 并检查 handler 标志。
+* L30-L51：进入 debug spin，给 JTAG/halt-run agent 留出交互周期。
+
+**覆盖到的 RTL/coverage 面**：``dbg/eh2_dbg.sv``、``dec/eh2_dec_tlu_ctl.sv``、
+``common/jtag_agent`` 和 ``common/halt_run_agent``。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``，testlist 中 ``cosim: disabled``。
+
+**预期通过条件**：debug request 不破坏 trap return，程序最终写 PASS。当前实测：VCS full
+sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.11  ``directed_debug_basic.S`` — EBREAK breakpoint trap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：验证 M-mode ``ebreak`` 进入 breakpoint exception，handler 推进 ``mepc`` 后返回。
+
+**为什么 random 覆盖不了**：随机 ``ebreak`` 若无配套 handler，通常只表现为不可控退出；本测试把
+``mcause == 3`` 和 handler flag 固定为可检查结果。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_debug_basic.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_debug_basic.S
+
+**逐段精读**：
+
+* L1-L9：定义 breakpoint exception 目标和 cosim enabled 状态。
+* L13-L30：设置 mtvec、清 flag、执行 ``ebreak``。
+* L44-L63：handler 检查 ``mcause``，推进 ``mepc`` 并置位 flag。
+
+**覆盖到的 RTL/coverage 面**：``dbg/eh2_dbg.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和
+``dec/eh2_dec_trigger.sv`` 的 debug/trap 交界。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：``mcause == 3``，返回后 flag 正确，mailbox PASS。当前实测：VCS full sign-off
+中 ``directed 40/40`` PASS。
+
+§5.4.12  ``directed_dma_burst.S`` — DMA/AXI burst 压力
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：在 UVM 可选 DMA/debug command 刺激之外，制造连续 aligned store/load burst，
+让 LSU、AXI memory FSM 和 DCCM/外部 memory 看到持续流量。
+
+**为什么 random 覆盖不了**：随机访存很难形成 32 word 连续 burst，且地址对齐和 readback 顺序
+不可控；该文件把 burst pattern 固定下来。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_dma_burst.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_dma_burst.S
+
+**逐段精读**：
+
+* L1-L7：说明 DMA-like memory burst 的覆盖意图。
+* L12-L24：连续写 32 个 word，数据每次加 3。
+* L26-L54：fence 后读回检查，最后写 mailbox。
+
+**覆盖到的 RTL/coverage 面**：``eh2_dma_ctrl.sv``、``lsu/eh2_lsu_bus_buffer.sv``、
+``lib/axi4_to_ahb.sv`` 和 AXI4 agent monitor。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：burst 数据读回一致，memory path 无 UVM error。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.13  ``directed_double_issue_hazard.S`` — 双发射 hazard 顺序
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：构造 same-cycle RAW、WAR、WAW hazard，验证双发射流水线 writeback 仍保持程序顺序。
+
+**为什么 random 覆盖不了**：随机流可能产生依赖，但不保证依赖正好跨 i0/i1 slot；本测试把 hazard
+pair 按源码相邻顺序固定，便于 trace_pkt 对齐。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_double_issue_hazard.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_double_issue_hazard.S
+
+**逐段精读**：
+
+* L1-L7：声明 RAW/WAR/WAW 和 trace order 检查目标。
+* L11-L45：构造 RAW 与 WAR hazard pair。
+* L47-L85：构造 WAW 和最终结果检查，失败写 fail mailbox。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_ib_ctl.sv``、``dec/eh2_dec_gpr_ctl.sv``、
+``exu/eh2_exu.sv`` 和 trace monitor。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：所有 hazard pair 的最终寄存器值符合程序顺序。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.14  ``directed_iccm_eccerror.S`` — ICCM fetch/ECC 注入窗口
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配合 ``+enable_mem_error=1``，让 IFU/ICCM 在 aligned fetch loop 中持续活动，
+为 ECC/error injection 提供稳定窗口。
+
+**为什么 random 覆盖不了**：随机程序不保证在注入窗口内反复访问同一类 ICCM/fetch 路径；固定
+``fence.i`` 和小函数调用能让波形定位更直接。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_iccm_eccerror.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_iccm_eccerror.S
+
+**逐段精读**：
+
+* L1-L6：说明该文件是 fetch/ECC error stimulus shell。
+* L11-L24：设置 handler、执行 ``fence.i``，循环调用 ``iccm_probe``。
+* L26-L55：通过 magic check 和 trap handler 结束，保证测试有界。
+
+**覆盖到的 RTL/coverage 面**：``ifu/eh2_ifu_iccm_mem.sv``、``ifu/eh2_ifu_ifc_ctl.sv``、
+``ifu/eh2_ifu_aln_ctl.sv`` 和 memory error 注入逻辑。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：fetch loop 和注入窗口不导致非预期 timeout，最终 mailbox PASS。当前实测：
+VCS full sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.15  ``directed_ifu_bp_btb.S`` — IFU BP/BTB walk
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：用重复 taken/not-taken 分支、join path 和 call/return 目标训练 IFU branch predictor
+和 BTB。
+
+**为什么 random 覆盖不了**：随机分支的历史模式不可控，短回归中很难稳定命中同一个 BTB set 和
+taken/not-taken 翻转；本测试显式构造训练循环。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_ifu_bp_btb.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_ifu_bp_btb.S
+
+**逐段精读**：
+
+* L1-L5：声明 BP/BTB walk 目标。
+* L9-L27：96 次分支训练，按 ``s0 & 3`` 产生 taken/not-taken 交替。
+* L29-L54：补充 call target 与最终 mailbox，形成 fetch toggle coverage。
+
+**覆盖到的 RTL/coverage 面**：``ifu/eh2_ifu_bp_ctl.sv``、``ifu/eh2_ifu_btb_mem.sv`` 和
+``ifu/eh2_ifu_ifc_ctl.sv``。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``，使用 ``core_eh2_fetch_toggle_test``。
+
+**预期通过条件**：分支训练循环有界退出，fetch toggle 侧带不报错。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.16  ``directed_illegal_instr.S`` — illegal instruction trap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：执行 ``.word 0x00000000``，验证 illegal instruction exception 的 ``mcause == 2``
+和 ``mepc`` advance。
+
+**为什么 random 覆盖不了**：随机非法编码常常会破坏后续流控制；本测试把非法编码、handler 和
+return PC 固定为最小可诊断闭环。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_illegal_instr.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_illegal_instr.S
+
+**逐段精读**：
+
+* L1-L7：说明非法全 0 编码和 cosim enabled。
+* L11-L25：设置 mtvec、清 flag、执行非法 instruction。
+* L39-L58：handler 检查 cause、推进 mepc、置 flag 并返回。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_decode_ctl.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和
+cosim exception 比对。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：``mcause == 2``，返回后 flag 正确，mailbox PASS。当前实测：VCS full sign-off
+中 ``directed 40/40`` PASS。
+
+§5.4.17  ``directed_irq_basic.S`` — 基础 trap/return
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：用 M-mode ECALL 走最小同步 trap/return 路径，作为 IRQ/PIC 复杂场景之前的基线。
+
+**为什么 random 覆盖不了**：随机 ECALL 需要和 handler、mepc advance、flag 检查配套才有诊断
+价值；该文件把同步 trap 闭环最小化。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_irq_basic.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_irq_basic.S
+
+**逐段精读**：
+
+* L1-L8：说明该测试不依赖外部 interrupt controller。
+* L12-L26：设置 mtvec、清 flag、执行 ECALL。
+* L40-L61：handler 检查 ``mcause == 11`` 并 mret。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_tlu_ctl.sv``、``dec/eh2_dec_csr.sv``、
+``common/irq_agent`` 的基础状态观察。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``；也被 PIC directed config 作为基础样例引用。
+
+**预期通过条件**：ECALL 后返回主流程，flag 正确，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.18  ``directed_lsu_stbuf_full.S`` — LSU store buffer 压力
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：连续发出 4 个 word store 为一组的 store pressure loop，观察 store buffer、
+fence 和 DCCM/外部写路径。
+
+**为什么 random 覆盖不了**：随机 store 通常被 load/branch 打断，不稳定填满或接近填满 store
+buffer；该测试让 store burst 以固定步长推进。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_lsu_stbuf_full.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_lsu_stbuf_full.S
+
+**逐段精读**：
+
+* L1-L5：声明 store-buffer pressure 目标。
+* L8-L22：从 ``0xF0040000`` 开始连续写 64 个 word 等效流量。
+* L24-L48：fence 后写 mailbox，确保 store drain 完成。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_stbuf.sv``、``lsu/eh2_lsu_lsc_ctl.sv`` 和
+``lsu/eh2_lsu_dccm_ctl.sv``。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：store pressure 不导致 hang，fence 后 mailbox PASS。当前实测：VCS full sign-off
+中 ``directed 40/40`` PASS。
+
+§5.4.19  ``directed_nb_load_chain.S`` — NB-load 写回风险回归
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：覆盖 RISK-5：连续 non-blocking loads 后立刻使用结果分支，防止 cross-slot
+writeback 问题回归。
+
+**为什么 random 覆盖不了**：随机 load-use 序列不保证形成三连 load 加 dependent branch 的紧凑窗口；
+该测试把 hazard 距离固定到最短可读形式。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_nb_load_chain.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_nb_load_chain.S
+
+**逐段精读**：
+
+* L1-L6：说明该文件是 NB-load wb cross-slot 回归。
+* L11-L23：初始化 3 个连续 memory word 并 fence。
+* L25-L45：连续 load 后立即比较结果，任一错误跳 fail。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_lsc_ctl.sv``、``lsu/eh2_lsu_bus_buffer.sv``、
+``dec/eh2_dec_gpr_ctl.sv`` 的 load writeback 交界。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：三次 load 的结果全部正确，dependent branch 不误判。当前实测：VCS full sign-off
+中 ``directed 40/40`` PASS。
+
+§5.4.20  ``directed_nested_irq.S`` — nested ECALL trap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：构造两层 ECALL trap，验证 handler 中保存/恢复 ``mepc`` 和栈状态后能正确回到两级
+调用点。
+
+**为什么 random 覆盖不了**：嵌套 trap 需要 handler 内再次触发 ECALL，随机流几乎不会稳定生成
+这种可返回结构；手写汇编能直接检查 x30/x31 标志。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_nested_irq.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_nested_irq.S
+
+**逐段精读**：
+
+* L1-L9：说明二级 ECALL 和最终 ``x30/x31`` 检查。
+* L13-L33：设置 stack、mtvec 和 flag，触发第一层 ECALL。
+* L72-L111：handler 区分 level，保存 mepc 并在一级 handler 中触发第二层 ECALL。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_tlu_ctl.sv``、CSR mepc/mcause path 和 IRQ/trap
+scoreboard 观察。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：``x30 == 0xBEEF`` 且 ``x31 == 0xCAFE``，mailbox PASS。当前实测：VCS full
+sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.21  ``directed_pic_state_walk.S`` — PIC/trap 状态 walk
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：在 UVM ``+enable_irq_seq`` 驱动外部 IRQ 的同时，用 ECALL 保证至少一个 trap
+entry/complete 周期，使 PIC/claim/complete 相关状态有可观测窗口。
+
+**为什么 random 覆盖不了**：外部 IRQ pulse 与指令流的相位关系随机，短测试可能错过关键窗口；
+该文件用本地 trap 保证 TLU/PIC 侧活动。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pic_state_walk.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pic_state_walk.S
+
+**逐段精读**：
+
+* L1-L7：说明外部 IRQ 由 UVM sequence 驱动。
+* L11-L23：打开 ``mstatus.MIE`` 和 ``mie.MEIE`` 后触发 ECALL。
+* L25-L63：handler 标记 trap 完成，给 PIC state walk 留出时间。
+
+**覆盖到的 RTL/coverage 面**：``eh2_pic_ctrl.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和
+``common/irq_agent/eh2_irq_driver.sv``。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``，使用 ``eh2_directed_pic`` config。
+
+**预期通过条件**：trap 与 IRQ sideband 不导致死锁，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.22  ``directed_pmp_addr_alignment.S`` — PMP 地址对齐
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：写入不同低位形态的 ``pmpaddr``，验证 PMP 地址 LSB、NAPOT granularity 和 WARL
+合法化不会破坏后续访问。
+
+**为什么 random 覆盖不了**：PMP 地址编码对低位非常敏感，随机 CSR 写入可能直接 trap 或不可诊断；
+该测试把每个地址形态和 cfg 写入顺序固定。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_addr_alignment.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_addr_alignment.S
+
+**逐段精读**：
+
+* L1-L4：声明地址 LSB alignment 和 granularity 目标。
+* L8-L27：写 NAPOT 4KB、no-rwx cfg 和第二个 word-boundary 地址。
+* L29-L55：执行观察性访问并通过 trap/mailbox 判定。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和
+``fcov/eh2_pmp_fcov_if.sv`` 的 PMP 地址 bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：PMP CSR 写入与访问序列有界结束，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.23  ``directed_pmp_after_trap.S`` — PMP fault 后 CSR 内容
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：触发 PMP access violation 后检查 ``mtval`` / ``mcause`` 是否记录失败地址与原因。
+
+**为什么 random 覆盖不了**：随机 PMP fault 不保证 handler 知道期望 failing address；本测试把
+地址放入 ``mscratch``，handler 可直接比较。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_after_trap.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_after_trap.S
+
+**逐段精读**：
+
+* L1-L4：说明目标是 fault 后 ``mtval/mcause``。
+* L8-L25：配置锁定 no-rwx region，并把期望 fault address 放入 ``mscratch``。
+* L27-L64：触发访问，handler 检查 cause/address 后 PASS。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_tlu_ctl.sv``、``lsu/eh2_lsu_addrcheck.sv`` 和 PMP
+fault covergroup。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：trap cause 和 fault address 与预期一致。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.24  ``directed_pmp_cross_region.S`` — 跨 region 访问
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：验证 load/store 跨两个 PMP region 边界时按低 index/匹配规则产生正确 fault。
+
+**为什么 random 覆盖不了**：跨边界访问需要地址、宽度和 region 边界严格对齐；随机生成器很难
+稳定把 access 放在 4B region 边界。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_cross_region.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_cross_region.S
+
+**逐段精读**：
+
+* L1-L4：声明跨 region boundary 目标。
+* L8-L25：配置 region0 no-access 与 region1 full-access。
+* L27-L57：执行边界访问并由 handler 判断是否按预期 fault。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``dec/eh2_dec_tlu_ctl.sv``、
+``fcov/eh2_pmp_fcov_if.sv`` 的 priority/cross-region bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：跨边界访问触发预期 fault 或按配置完成，最终 mailbox PASS。当前实测：VCS full
+sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.25  ``directed_pmp_csr_warl.S`` — PMP CSR WARL
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：对 ``pmpaddr0`` 和 ``pmpcfg0`` 写非法或边界值，验证 WARL 合法化后系统仍可继续。
+
+**为什么 random 覆盖不了**：非法 PMP CSR 写入会受到实现定义行为约束；随机写法缺少读回记录和
+后续恢复步骤，难以形成稳定 gate。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_csr_warl.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_csr_warl.S
+
+**逐段精读**：
+
+* L1-L4：说明目标是 pmpcfg/pmpaddr WARL。
+* L8-L24：写 ``0xFFFFFFFF`` 到 ``pmpaddr0`` 并读回记录。
+* L26-L56：写 pmpcfg 边界值，确保 CSR 路径不崩溃并 PASS。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``fcov/eh2_pmp_fcov_if.sv`` 的 CSR
+WARL 相关 bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：非法/边界 CSR 写不会造成非预期 hang，mailbox PASS。当前实测：VCS full
+sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.26  ``directed_pmp_dside_load.S`` — D-side load enforcement
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置 mailbox 附近 no-read PMP region，验证 data-side load 会触发 PMP fault。
+
+**为什么 random 覆盖不了**：随机 load 很难刚好打到受保护地址且配有 trap handler；本测试固定
+``0xD0580000`` region 和检查路径。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_dside_load.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_dside_load.S
+
+**逐段精读**：
+
+* L1-L4：声明 data-side load enforcement。
+* L8-L25：配置保护 region 并读回 pmpcfg。
+* L27-L54：执行 load fault 观察并通过 handler/mailbox 判定。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``lsu/eh2_lsu_lsc_ctl.sv`` 和 PMP
+D-side load coverpoints。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：受保护 load 触发预期 fault，handler PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.27  ``directed_pmp_dside_store.S`` — D-side store enforcement
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置 read-only/TOR region，验证 data-side store 被 PMP 拒绝。
+
+**为什么 random 覆盖不了**：store fault 依赖 PMP cfg、TOR bound 和地址共同成立；随机程序很难
+稳定命中写禁止窗口并继续运行到 PASS。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_dside_store.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_dside_store.S
+
+**逐段精读**：
+
+* L1-L4：声明 data-side store enforcement。
+* L8-L27：配置 TOR + R-only region 和 upper bound。
+* L29-L56：发起 store，handler 判断 store access fault 后 PASS。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``lsu/eh2_lsu_stbuf.sv`` 和 PMP
+D-side store bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：受保护 store 不落入内存，trap cause 正确。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.28  ``directed_pmp_iside.S`` — I-side fetch enforcement
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置 execute-deny window，验证 instruction-side fetch fault 后测试有界退出。
+
+**为什么 random 覆盖不了**：随机跳转不保证落入 execute-deny region，且容易形成无限 trap；
+本测试使用 ``.option norvc`` 和固定 handler 保证 PC advance 可控。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_iside.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_iside.S
+
+**逐段精读**：
+
+* L1-L5：说明该测试专注 instruction-side trap 且必须有界。
+* L10-L27：配置 TOR execute-deny window 并 ``fence.i``。
+* L29-L54：跳转/handler 观察 fetch fault，最后写 PASS。
+
+**覆盖到的 RTL/coverage 面**：``ifu/eh2_ifu_ifc_ctl.sv``、``lsu/eh2_lsu_addrcheck.sv``、
+``dec/eh2_dec_tlu_ctl.sv`` 和 PMP I-side coverpoints。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：fetch fault 被 handler 接住且不无限循环。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.29  ``directed_pmp_lock.S`` — PMP L-bit 锁定
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置 PMP L-bit 后尝试改写 cfg，验证锁定位直到 reset 前阻止重配置或合法化改写。
+
+**为什么 random 覆盖不了**：PMP lock 是跨 CSR 写的状态性行为，随机单次 CSR 访问无法证明「先锁定、
+再改写失败/被合法化」的顺序。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_lock.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_lock.S
+
+**逐段精读**：
+
+* L1-L4：声明 L-bit lock 目标。
+* L8-L24：配置 NAPOT region 和 ``pmpcfg0`` byte0 ``0x9F``。
+* L26-L60：尝试覆盖 locked cfg，读回并继续 PASS。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``fcov/eh2_pmp_fcov_if.sv`` 的 lock
+bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：锁定后改写不会破坏 PMP 状态，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.30  ``directed_pmp_mscause_decode.S`` — EH2 mscause 二级原因
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：在 PMP fault 后读取 EH2 custom ``mscause``，验证 secondary cause decode 可观察。
+
+**为什么 random 覆盖不了**：``mscause`` 是 EH2 custom CSR，Spike 语义有限；必须用固定 PMP fault
+和 handler 才能稳定检查 RTL secondary cause。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_mscause_decode.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_mscause_decode.S
+
+**逐段精读**：
+
+* L1-L7：声明 custom ``CSR_MSCAUSE`` 地址和 no-compressed 约束。
+* L11-L25：配置 PMP no-rwx data region。
+* L27-L63：触发 fault，handler 读取 ``mscause`` 并判定结束。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和 PMP
+secondary cause coverage。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：PMP fault 后 ``mscause`` 可读且测试 PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.31  ``directed_pmp_na4_basic.S`` — NA4 mode
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：验证 naturally-aligned 4-byte PMP region 的基本配置和访问 fault 行为。
+
+**为什么 random 覆盖不了**：NA4 需要精确 4B 对齐地址和 cfg A field；随机 CSR 写很难稳定覆盖
+这一模式并完成 handler 检查。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_na4_basic.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_na4_basic.S
+
+**逐段精读**：
+
+* L1-L4：声明 NA4 4-byte region 目标。
+* L8-L25：写 ``pmpaddr0`` 和 ``pmpcfg0`` 的 NA4/no-rwx/lock 配置。
+* L27-L56：配置第二个 NA4 地址并执行访问观察。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``lsu/eh2_lsu_addrcheck.sv``、
+``fcov/eh2_pmp_fcov_if.sv`` 的 NA4 bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：NA4 配置后访问行为符合 handler 预期。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.32  ``directed_pmp_napot_basic.S`` — NAPOT size sweep
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：覆盖 NAPOT 4B、16B、256B、4KB 等 size encoding，验证地址低位编码和权限组合。
+
+**为什么 random 覆盖不了**：NAPOT size 由 pmpaddr 低位连续 1 的形态决定，随机值覆盖到正确 size
+并形成有界访问检查的概率低。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_napot_basic.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_napot_basic.S
+
+**逐段精读**：
+
+* L1-L4：声明 NAPOT 多尺寸 sweep。
+* L8-L29：配置 4KB 和 16B NAPOT 地址。
+* L31-L64：继续配置更小/更大窗口并完成访问检查。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``dec/eh2_dec_csr.sv``、
+``fcov/eh2_pmp_fcov_if.sv`` 的 NAPOT size bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：所有 NAPOT 配置序列有界完成，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.33  ``directed_pmp_no_match_default.S`` — no-match default
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置远离测试地址的 PMP region，观察无匹配时的默认行为和 handler 路径。
+
+**为什么 random 覆盖不了**：no-match 场景要求所有 region 都避开目标地址；随机 PMP 配置很容易
+意外覆盖或完全无效，难以作为 gate。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_no_match_default.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_no_match_default.S
+
+**逐段精读**：
+
+* L1-L4：声明 no-match default deny 目标。
+* L8-L26：配置远端 TOR/no-rwx region，并让 byte1 OFF。
+* L28-L52：执行不匹配地址访问和 handler 判定。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``fcov/eh2_pmp_fcov_if.sv`` 的
+no-match bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：无匹配访问按实现定义路径有界结束，mailbox PASS。当前实测：VCS full sign-off
+中 ``directed 40/40`` PASS。
+
+§5.4.34  ``directed_pmp_off_basic.S`` — OFF mode
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：先配置一个 NAPOT no-access region，再把 ``pmpcfg0`` 置 OFF，验证 region disabled
+后访问不再被该 entry 拦截。
+
+**为什么 random 覆盖不了**：OFF mode 是「先开启再关闭」的状态序列；随机 CSR 写缺少前后访问对照。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_off_basic.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_off_basic.S
+
+**逐段精读**：
+
+* L1-L4：声明 region disabled/invalidated 目标。
+* L8-L24：设置 NAPOT no-access region。
+* L26-L55：写 ``pmpcfg0 = 0`` 关闭 entry 后执行访问观察。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``lsu/eh2_lsu_addrcheck.sv`` 和 PMP OFF
+mode coverpoints。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：OFF 后访问路径不被旧 entry 误拦截，mailbox PASS。当前实测：VCS full sign-off
+中 ``directed 40/40`` PASS。
+
+§5.4.35  ``directed_pmp_priority.S`` — low-index priority
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置重叠 PMP region，验证低 index region 优先级高于后续宽 region。
+
+**为什么 random 覆盖不了**：priority 需要重叠 base/size 和冲突权限，随机配置命中概率低，且失败
+时难以判断是 priority 还是地址编码错误。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_priority.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_priority.S
+
+**逐段精读**：
+
+* L1-L4：声明 lowest-index wins。
+* L8-L27：配置 region0 no-access 和 region1 full-access 的重叠窗口。
+* L29-L58：访问重叠地址，handler 判断 region0 是否获胜。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``fcov/eh2_pmp_fcov_if.sv`` 的
+priority bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：重叠地址按低 index 权限处理。当前实测：VCS full sign-off 中 ``directed 40/40``
+PASS。
+
+§5.4.36  ``directed_pmp_regions.S`` — 多 region resilient test
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：尝试配置 4 个 PMP region，并在 PMP 不可用或写入不粘住时安全跳过访问测试，避免把
+实现差异误判为基础平台失败。
+
+**为什么 random 覆盖不了**：多 region 权限矩阵需要 setup、probe 和访问阶段分离；随机流不能处理
+「PMP CSR 写本身可能 trap」这种弹性路径。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_regions.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_regions.S
+
+**逐段精读**：
+
+* L1-L22：说明 setup/probe/access 三阶段和 4 个规划 region。
+* L24-L49：容忍 trap 的 PMP setup。
+* L61-L112：根据 readback 判断是否执行 5 个访问控制检查。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``lsu/eh2_lsu_addrcheck.sv``、
+``fcov/eh2_pmp_fcov_if.sv`` 的多 region bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：PMP 可用时访问矩阵符合预期；不可用或不粘住时按源码逻辑安全 PASS。当前实测：
+VCS full sign-off 中 ``directed 40/40`` PASS。
+
+§5.4.37  ``directed_pmp_smoke.S`` — PMP 最小 fault
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置一个 4KB NAPOT no-access region 并触发访问 fault，作为 PMP directed 族的最小
+smoke。
+
+**为什么 random 覆盖不了**：随机 PMP 场景缺少最小诊断闭环；当 PMP 族失败时，需要先用 smoke
+确认 CSR 写、fault 和 handler 的基本连接。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_smoke.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_smoke.S
+
+**逐段精读**：
+
+* L1-L7：声明 PMP region config 和 access fault 目标。
+* L12-L33：设置 trap handler 和 NAPOT 4KB region。
+* L35-L78：执行违规访问，handler 捕获后写 PASS。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和 PMP
+smoke coverpoints。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：访问 fault 被 handler 捕获，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.38  ``directed_pmp_tor_basic.S`` — TOR mode
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：配置 TOR base/end，验证 basic access 和 out-of-bounds fault。
+
+**为什么 random 覆盖不了**：TOR region 由相邻 ``pmpaddr`` 共同定义，随机 CSR 写需要两项组合正确
+才有意义；本测试固定 base/end 和 cfg。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_tor_basic.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_tor_basic.S
+
+**逐段精读**：
+
+* L1-L4：声明 TOR basic access + out-of-bounds。
+* L8-L27：设置 ``pmpaddr0`` base、``pmpaddr1`` end 和 TOR no-read cfg。
+* L29-L55：执行访问并由 handler 判定。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``fcov/eh2_pmp_fcov_if.sv`` 的
+TOR bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：TOR 边界访问符合 cfg 预期，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.39  ``directed_pmp_xwr_combinations.S`` — R/W/X 组合
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：覆盖 PMP R/W/X permission bits 的 8 种组合，至少用源码顺序固定代表性组合。
+
+**为什么 random 覆盖不了**：权限组合需要 cfg bit、访问类型和 trap handler 对齐；随机 CSR 写难以
+保证 8 组合都在短回归中被碰到。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_pmp_xwr_combinations.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_pmp_xwr_combinations.S
+
+**逐段精读**：
+
+* L1-L4：声明 R/W/X 8 permission combinations。
+* L8-L24：先配置 X-only，再重配 full RWX。
+* L26-L57：执行访问观察和 PASS/FAIL mailbox。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_addrcheck.sv``、``ifu/eh2_ifu_ifc_ctl.sv``、
+``fcov/eh2_pmp_fcov_if.sv`` 的 permission bins。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：权限组合转换后访问结果有界且符合 handler 判定。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS。
+
+§5.4.40  ``directed_toggle_axi4_data_walk.S`` — AXI4 data toggle pump
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：用高翻转数据 pattern 反复写读外部 memory，提升 AXI4 data bus、WSTRB 和 LSU bus
+buffer 的 toggle 覆盖。
+
+**为什么 random 覆盖不了**：随机数据未必覆盖 ``0xAAAAAAAA/0x55555555/0xFF00FF00`` 这类高翻转
+pattern，也不保证连续落在 AXI4 path 上。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_toggle_axi4_data_walk.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_toggle_axi4_data_walk.S
+
+**逐段精读**：
+
+* L1-L5：声明 R3-B AXI4 data bus toggle pump。
+* L8-L27：写入多组高翻转 word pattern。
+* L29-L116：读回比较并写 mailbox，确保 toggle pump 不只是 blind traffic。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_bus_intf.sv``、``lsu/eh2_lsu_bus_buffer.sv``、
+``common/axi4_agent/axi4_monitor.sv``。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：所有 pattern 读回一致，AXI4 monitor 无协议错误。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS；全局 TOGGLE 为 53.52%。
+
+§5.4.41  ``directed_toggle_csr_walk.S`` — CSR toggle pump
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：对 ``mstatus``、custom CSR 和 counters 写入交替 pattern，提升 CSR flops 和 decode
+路径的 toggle 覆盖。
+
+**为什么 random 覆盖不了**：随机 CSR 访问受合法性、privilege 和 WARL 限制，无法稳定给同一 CSR
+施加 ``0xAAAAAAAA/0x55555555`` 类 pattern。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_toggle_csr_walk.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_toggle_csr_walk.S
+
+**逐段精读**：
+
+* L1-L13：声明 CSR toggle pump 并定义 custom CSR/counter 地址。
+* L16-L31：对 ``mstatus`` 写交替 pattern 并保存 shadow。
+* L33-L160：继续 walk custom CSR/counter，最终写 PASS。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_csr.sv``、``dec/eh2_dec_tlu_ctl.sv`` 和 CSR functional
+coverage。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：CSR 写读不会造成非预期 trap，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS；全局 GROUP 为 69.42%。
+
+§5.4.42  ``directed_toggle_dccm_walk.S`` — DCCM byte/half/word toggle
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：在 DCCM 地址上执行 byte、halfword、word 的高翻转写读，提升 DCCM data/ECC/byte lane
+结构覆盖。
+
+**为什么 random 覆盖不了**：随机访存不保证集中打到 DCCM，也不保证每种 width 的 sign/zero
+extension 和 byte lane 都被固定检查。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_toggle_dccm_walk.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_toggle_dccm_walk.S
+
+**逐段精读**：
+
+* L1-L5：声明 DCCM byte/halfword/word toggle pump。
+* L8-L26：执行 byte 写读并检查 ``lbu/lb`` 结果。
+* L28-L109：继续 halfword/word pattern，覆盖更多 byte lane。
+
+**覆盖到的 RTL/coverage 面**：``lsu/eh2_lsu_dccm_ctl.sv``、``lsu/eh2_lsu_dccm_mem.sv``、
+``lsu/eh2_lsu_ecc.sv``。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：所有 DCCM width 读回一致，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS；全局 TOGGLE 为 53.52%。
+
+§5.4.43  ``directed_toggle_mul_div_walk.S`` — M-extension toggle pump
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：对 multiply/divide datapath 施加正数、负数和高活动 operand，提升 EXU M-extension
+toggle 覆盖。
+
+**为什么 random 覆盖不了**：随机 M 指令占比有限，且 divide corner case 需要明确期望值；本测试
+逐条检查 ``mul/div/rem`` 等结果。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_toggle_mul_div_walk.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_toggle_mul_div_walk.S
+
+**逐段精读**：
+
+* L1-L7：声明 EXU multiply/divide toggle pump。
+* L11-L28：检查 ``mul`` 和 ``div`` 的基本结果。
+* L30-L123：继续覆盖 signed/unsigned、remainder 和高翻转 operand。
+
+**覆盖到的 RTL/coverage 面**：``exu/eh2_exu_mul_ctl.sv``、``exu/eh2_exu_div_ctl.sv``、
+``exu/eh2_exu_alu_ctl.sv``。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：所有 M-extension 结果匹配源码期望，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS；全局 TOGGLE 为 53.52%。
+
+§5.4.44  ``directed_toggle_rf_walk.S`` — register file toggle pump
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：把多个整数寄存器依次写入高翻转 pattern，提升 GPR write port、read port 和 bypass
+路径 toggle。
+
+**为什么 random 覆盖不了**：随机寄存器分配可能偏置到热寄存器，无法保证 x1 到多个寄存器都经历
+相同高翻转 pattern。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/asm/directed_toggle_rf_walk.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_toggle_rf_walk.S
+
+**逐段精读**：
+
+* L1-L5：声明 register file toggle pump。
+* L8-L30：对 x1 起的一批寄存器写 ``0xAAAAAAAA/0x55555555/0xDEADBEEF``。
+* L32-L121：继续覆盖更多 GPR 并通过 mailbox 结束。
+
+**覆盖到的 RTL/coverage 面**：``dec/eh2_dec_gpr_ctl.sv``、``dec/eh2_dec_decode_ctl.sv`` 和
+trace writeback monitor。
+
+**这条测试在哪个 sign-off stage 跑**：``directed``。
+
+**预期通过条件**：寄存器写入序列不触发异常，mailbox PASS。当前实测：VCS full sign-off 中
+``directed 40/40`` PASS；全局 TOGGLE 为 53.52%。
+
+§5.4.45  ``nop.S`` — 顶层最小 NOP artifact
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：提供顶层 ``tests/asm`` 目录中最小 NOP 程序，验证 standalone asm Makefile 能构建
+ELF/HEX/DIS，并保留 mailbox PASS 作为可运行样例。
+
+**为什么 random 覆盖不了**：这是 bring-up artifact，不是随机覆盖测试；它用于排除 toolchain、
+linker 和 smoke loader 的基础问题。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../tests/asm/nop.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/tests/asm/nop.S
+
+**逐段精读**：
+
+* L1-L4：说明最小 NOP 和 boot address。
+* L7-L11：连续执行 4 个 ``nop``，让波形中 reset 后的 fetch/decode 极易识别。
+* L13-L17：写 byte PASS 到 mailbox 后自旋。
+
+**覆盖到的 RTL/coverage 面**：顶层 asm 构建、IFU 最小取指、base test mailbox 观测。
+
+**这条测试在哪个 sign-off stage 跑**：不作为 9-stage sign-off 的独立 gate；它由
+``tests/asm/Makefile`` 构建，供 bring-up 和波形调试使用。
+
+**预期通过条件**：``make asm`` 生成 ``nop.hex``，手动 run 时 mailbox 写 ``0xFF``。当前实测：
+VCS full sign-off 的 smoke gate 使用同目录 ``smoke.S``，整体 ``smoke 1/1`` PASS。
+
+§5.4.46  ``smoke.S`` — sign-off smoke 输入
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**作者意图**：作为 ``make smoke`` 和 sign-off smoke stage 的直接二进制输入，只做 mailbox PASS，
+用于最快确认编译产物、loader、DUT reset 和 UVM completion 连接。
+
+**为什么 random 覆盖不了**：smoke gate 的目标是隔离基础环境，不是扩展覆盖；随机测试失败时诊断面
+太大，不能替代这个最短程序。
+
+**完整源码**：
+
+.. literalinclude:: ../../../../tests/asm/smoke.S
+   :language: text
+   :linenos:
+   :caption: /home/host/eh2-veri/tests/asm/smoke.S
+
+**逐段精读**：
+
+* L1-L5：声明 boot address 和 mailbox address。
+* L8-L13：用 ``lui`` 构造 ``0xD0580000``，写 ``0xFF`` PASS byte。
+* L15：自旋，等待 UVM 侧 completion。
+
+**覆盖到的 RTL/coverage 面**：``ifu/eh2_ifu.sv`` 最小取指、``lsu/eh2_lsu.sv`` store path、
+``core_eh2_base_test.wait_for_completion``。
+
+**这条测试在哪个 sign-off stage 跑**：``smoke``，由 ``signoff.py`` 传入
+``--binary /home/host/eh2-veri/tests/asm/smoke.hex``。
+
+**预期通过条件**：mailbox 写 ``0xFF``，run_regress 报告 1/1 PASS。当前实测：VCS full sign-off
+中 ``smoke 1/1`` PASS。
 
 §6  ``core_eh2_test_lib.sv`` — 常规 test class 分组
 --------------------------------------------------------------------------------
