@@ -3,4 +3,5 @@
 # Python 推荐 3.10+（rinohtype 0.5.x 在 3.6 importlib_metadata 上有兼容问题）
 
 sphinx>=7.0
+sphinx-tabs>=3.4.5
 rinohtype>=0.5.5

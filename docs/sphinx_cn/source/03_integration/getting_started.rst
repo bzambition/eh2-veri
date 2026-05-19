@@ -42,23 +42,38 @@ regress、sign-off 与 gate-only 复演。这里不重复解释每个 driver 的
 
 当前源码里存在两套容易混淆的入口：
 
-.. code-block:: bash
+.. tabs::
 
-   # 当前推荐：GOAL 为空，使用顶层 Makefile 规整后的 core targets
-   make compile NO_COSIM=1 SIMULATOR=vcs
-   make smoke
-   make regress TESTLIST=directed PARALLEL=4
-   make signoff PROFILE=quick PARALLEL=4
+   .. tab:: 入门：顶层 Makefile 入口
 
-   # 兼容路径：GOAL 非空时，make run 会进入 wrapper.mk staged flow
-   make run GOAL=<wrapper-target> CONFIG=default SEED=1
+      .. code-block:: bash
+
+         # 当前推荐：GOAL 为空，使用顶层 Makefile 规整后的 core targets
+         make compile NO_COSIM=1 SIMULATOR=vcs
+         make smoke
+         make regress TESTLIST=directed PARALLEL=4
+         make signoff PROFILE=quick PARALLEL=4
+
+      这条路径面向首次上手和日常开发。它用顶层 ``Makefile`` 统一设置
+      ``SIMULATOR``、``COV``、``WAVES``、``PROFILE`` 和输出目录，最容易和
+      sign-off 文档、CI 文档对齐。
+
+   .. tab:: 进阶：Ibex-style staged flow
+
+      .. code-block:: bash
+
+         # 兼容路径：GOAL 非空时，make run 会进入 wrapper.mk staged flow
+         make run GOAL=<wrapper-target> CONFIG=default SEED=1
+
+      这条路径保留给需要调试 metadata、riscv-dv wrapper 或 Ibex-style dependency
+      graph 的维护者。第一次跑 smoke 不需要从这里开始。
 
 逐段解释：
 
-* 第 1-5 行：这些命令对应 :file:`Makefile` 的默认分支，也就是 `GOAL`
+* 入门 tab 的命令对应 :file:`Makefile` 的默认分支，也就是 `GOAL`
   为空时的 `else` 分支。该分支定义 `compile`、`smoke`、`regress`、
   `signoff` 等核心 target。
-* 第 7-8 行：`GOAL` 非空时，顶层 `Makefile` 在前置分支只保留一个
+* 进阶 tab 中 `GOAL` 非空时，顶层 `Makefile` 在前置分支只保留一个
   `run` target；它先调用 `metadata.py --op create_metadata`，再把工作转交给
   :file:`dv/uvm/core_eh2/wrapper.mk`。
 * 本章后续以默认分支为主。原因不是 `wrapper.mk` 不可用，而是当前顶层
@@ -80,24 +95,45 @@ regress、sign-off 与 gate-only 复演。这里不重复解释每个 driver 的
 
 关键代码（`README.md:L124-L139`）：
 
-.. code-block:: bash
+.. tabs::
 
-   ## Quick Start
+   .. tab:: VCS quick start 源码片段
 
-   The following three commands run the smoke path from a prepared workspace with
-   VCS and the RISC-V toolchain available:
+      .. code-block:: bash
 
-   ```bash
-   cd /home/host/eh2-veri
-   source env.sh
-   python3 dv/uvm/core_eh2/scripts/run_regress.py --test smoke --binary tests/asm/smoke.hex --simulator vcs --rtl-test core_eh2_base_test --sim-opts "+disable_cosim=1" --output build/quick_smoke
-   ```
+         ## Quick Start
 
-   If `build/simv` is missing, compile first:
+         The following three commands run the smoke path from a prepared workspace with
+         VCS and the RISC-V toolchain available:
 
-   ```bash
-   make compile NO_COSIM=1 SIMULATOR=vcs
-   ```
+         ```bash
+         cd /home/host/eh2-veri
+         source env.sh
+         python3 dv/uvm/core_eh2/scripts/run_regress.py --test smoke --binary tests/asm/smoke.hex --simulator vcs --rtl-test core_eh2_base_test --sim-opts "+disable_cosim=1" --output build/quick_smoke
+         ```
+
+         If `build/simv` is missing, compile first:
+
+         ```bash
+         make compile NO_COSIM=1 SIMULATOR=vcs
+         ```
+
+   .. tab:: NC 备选等价入口
+
+      .. code-block:: bash
+
+         cd /home/host/eh2-veri
+         source env.sh
+
+         # 先编译 NC 备选 simulator 的 testbench
+         make compile SIMULATOR=nc COV=0
+
+         # 再跑同一个 smoke hex；需要波形时打开 WAVES
+         make smoke SIMULATOR=nc WAVES=1
+
+      README 的最小例子固定展示 VCS，是因为 release 参考默认走 VCS/URG。NC 入口
+      使用同一套顶层 target，只是把 simulator、coverage 数据库和波形脚本切到
+      Incisive/IMC 语义。
 
 逐段解释：
 

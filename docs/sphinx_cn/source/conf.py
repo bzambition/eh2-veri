@@ -10,7 +10,9 @@
 import sys
 from pathlib import Path
 
+SOURCE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+sys.path.insert(0, str(SOURCE_DIR / "_ext"))
 
 project = "EH2 UVM 验证平台"
 copyright = "2026, EH2 验证团队"
@@ -37,6 +39,13 @@ for ext in ["sphinx_copybutton", "myst_parser"]:
         extensions.append(ext)
     except ImportError:
         pass
+
+# sphinx-tabs 是 v2 手册的交互式分流入口；本地旧环境未安装时使用兼容 fallback。
+try:
+    __import__("sphinx_tabs.tabs")
+    extensions.append("sphinx_tabs.tabs")
+except ImportError:
+    extensions.append("eh2_tabs_fallback")
 
 if _requested_builder() == "rinoh":
     try:

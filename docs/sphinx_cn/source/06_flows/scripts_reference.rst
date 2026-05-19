@@ -763,8 +763,10 @@ per-test dependency graph。
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``get_fcov.py`` 仍保留 Ibex-style staged flow 的 coverage 入口，但当前 sign-off
-coverage 的权威路径是 ``merge_cov.py``。后者只合并 VCS ``.vdb``，调用 URG 原生
-dashboard；NC/Incisive 和 Xcelium 不进入 sign-off coverage。
+coverage 的权威路径是 ``merge_cov.py``。它在 VCS 路径上保持 Ibex-style URG
+wrapper，在 NC/Incisive 路径上扫描 ``cov_work`` 并调用 IMC 生成兼容
+``dashboard.txt``。默认 release 参考仍是 VCS/URG；NC/IMC 输出必须标注 branch/block
+口径差异。
 
 关键代码（``dv/uvm/core_eh2/scripts/merge_cov.py:L1-L18``）：
 
@@ -776,19 +778,49 @@ dashboard；NC/Incisive 和 Xcelium 不进入 sign-off coverage。
    Merges VCS coverage databases using urg. Modeled after lowRISC Ibex's
    dv/uvm/core_ibex/scripts/merge_cov.py.
    
-   NC/Incisive does NOT participate in sign-off coverage. NC is reserved for
-   single-test waveform debugging only (`make smoke|regress SIMULATOR=nc
-   WAVES=1`). Coverage instrumentation, merge, and report generation all run
-   on the VCS path exclusively.
+   Two invocation modes:
+     1. Metadata-driven (legacy ibex-compatible):
+          merge_cov.py --dir-metadata <path>
+     2. Standalone (signoff.py integration):
+          merge_cov.py --dirs DIR1 DIR2 ... --output OUT_DIR
    """
 
 逐段解释：
 
-* 第 L5-L7 行：脚本明确对齐 lowRISC Ibex 的 ``merge_cov.py``。
-* 第 L12-L17 行：NC/Incisive 只保留单测波形调试用途；coverage instrumentation、
-  merge 和 report 都固定在 VCS path。
-* 这段注释是当前流程层判断 coverage 真实性的关键边界，优先级高于旧
-  ``get_fcov.py`` 中的 Xcelium 提示。
+* 第 L5-L7 行：脚本明确对齐 lowRISC Ibex 的 ``merge_cov.py``，VCS 分支仍调用
+  URG 原生 dashboard。
+* 第 L9-L14 行：脚本支持 metadata-driven legacy mode 与 standalone sign-off mode；
+  后者由 ``signoff.py`` 传入各 stage 输出目录。
+* 当前脚本还包含 ``find_nc_run_dirs()``、``merge_cov_nc()`` 和 IMC dashboard 生成逻辑。
+  因此文档必须把 VCS/URG 默认 release 参考与 NC/IMC 备选 coverage 分开说明，而不是把
+  NC 写成只能波形调试。
+
+.. tabs::
+
+   .. tab:: VCS merge_cov 路径
+
+      .. code-block:: bash
+
+         python3 dv/uvm/core_eh2/scripts/merge_cov.py \
+           --dirs build/signoff/runs/smoke build/signoff/runs/directed \
+           --output build/signoff/cov_merged
+
+      该路径递归查找 ``test.vdb`` 或 ``*.vdb``，随后调用 ``urg -full64 -format both``
+      生成 ``report/dashboard.txt``，并镜像到 ``cov_merged/dashboard.txt`` 供
+      sign-off parser 读取。
+
+   .. tab:: NC merge_cov 路径
+
+      .. code-block:: bash
+
+         python3 dv/uvm/core_eh2/scripts/merge_cov.py \
+           --dirs build/signoff_nc/runs/smoke build/signoff_nc/runs/directed \
+           --output build/signoff_nc/cov_merged
+
+      该路径递归查找 ``*.ucd`` 所在 run 目录，通过 IMC 生成 block、toggle、
+      state、transition、assertion 和 covergroup 报告，再写出 URG-compatible
+      ``dashboard.txt``。BRANCH 不能从 NC 152 IMC 中独立拆出，应保持 ``n/a`` 或
+      明确标注 branch/block 合并语义。
 
 接口关系：
 

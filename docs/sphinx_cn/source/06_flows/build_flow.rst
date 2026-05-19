@@ -1558,15 +1558,49 @@ EH2 当前约定是：默认仿真器为 VCS，``make compile`` 输出到
 
 **动手练习**：
 
-1. 入门题：运行 ``make compile SIMULATOR=vcs COV=0``，打开
-   ``build/compile_vcs/compile.log``，找到最终 VCS 命令中的 ``-f`` filelist 参数。
-   参考答案位置：本章 §4.2 和 :ref:`appendix_f_scripts/makefiles`。
-2. 进阶题：运行 ``make compile SIMULATOR=vcs COV=1``，确认命令中同时出现
-   ``-cm_hier dv/uvm/core_eh2/cover.cfg`` 与 ``-cm_fsmcfg``。如果缺失，优先检查
-   顶层 ``Makefile`` 的 ``VCS_COV_OPTS``。
-3. 挑战题：分别运行 ``make compile SIMULATOR=vcs`` 与
-   ``make compile SIMULATOR=nc``，比较 ``build/compile_vcs/`` 与
-   ``build/compile_nc/`` 的产物差异，并说明为什么这种隔离允许两条编译同时存在。
+.. tabs::
+
+   .. tab:: 入门题：VCS 编译日志
+
+      运行默认 release 参考路径，打开 ``build/compile_vcs/compile.log``，找到最终
+      VCS 命令中的 ``-f`` filelist 参数。
+
+      .. code-block:: bash
+
+         make compile SIMULATOR=vcs COV=0
+         rg -n " -f |eh2_rtl.f|eh2_tb.f" build/compile_vcs/compile.log
+
+      参考答案位置：本章 §4.2 和 :ref:`appendix_f_scripts/makefiles`。你应该能
+      看到 RTL filelist、shared filelist、TB filelist 和 riscv-dv extension include
+      如何被传给 VCS。
+
+   .. tab:: 进阶题：VCS coverage instrumentation
+
+      运行带 coverage 的 VCS 编译，确认命令中同时出现
+      ``-cm_hier dv/uvm/core_eh2/cover.cfg``、``-cm_fsmcfg`` 和
+      ``-cm_fsmresetfilter``。
+
+      .. code-block:: bash
+
+         make compile SIMULATOR=vcs COV=1
+         rg -n "cm_hier|cm_fsmcfg|cm_fsmresetfilter|line\\+tgl\\+assert\\+fsm\\+branch" build/compile_vcs/compile.log
+
+      如果缺失，优先检查顶层 ``Makefile`` 的 ``VCS_COV_METRICS``、
+      ``VCS_COV_HIER``、``VCS_FSM_CFG`` 和 ``VCS_FSM_RESET_FILTER``。
+
+   .. tab:: 挑战题：VCS 与 NC 输出隔离
+
+      分别运行 VCS 与 NC 编译，比较 ``build/compile_vcs/`` 与
+      ``build/compile_nc/`` 的产物差异。
+
+      .. code-block:: bash
+
+         make compile SIMULATOR=vcs
+         make compile SIMULATOR=nc COV=1
+         find build/compile_vcs build/compile_nc -maxdepth 2 -type d | sort
+
+      重点回答两件事：为什么两条编译可以同时存在；为什么 VCS coverage 产物是
+      ``.vdb``/URG，而 NC coverage 产物是 ``cov_work``/IMC。
 
 读完本章，你应该能回答 5 个问题：
 
