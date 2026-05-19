@@ -3653,3 +3653,52 @@ schema、coverage 合并和共享工具函数。
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§12  v2-16 Python 包初始化与 HTML report 单测补齐
+--------------------------------------------------------------------------------
+
+本节补齐脚本目录中容易被忽略的 Python 辅助文件。它们代码很短，但对 import path、
+pytest 运行和 HTML report 解析契约很关键。
+
+§12.1  ``scripts/__init__.py`` 与 ``report_lib/__init__.py``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/__init__.py
+   :language: python
+   :lines: 1-1
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/__init__.py:L1-L1
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/report_lib/__init__.py
+   :language: python
+   :lines: 1-2
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/report_lib/__init__.py:L1-L2
+
+逐段精读：
+
+* ``scripts/__init__.py`` 为空文件，作用是把 ``dv/uvm/core_eh2/scripts`` 标记为
+  Python package。pytest 或外部 wrapper 通过 package import 脚本 helper 时依赖这个文件。
+* ``report_lib/__init__.py`` 只有 package docstring，作用是把 HTML/text/JUnit/SVG
+  report helper 聚合在同一 package 下。真实逻辑在 ``html.py``、``text.py`` 等文件。
+
+§12.2  ``test_gen_html_report.py`` — HTML report parser 回归测试
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/tests/test_gen_html_report.py
+   :language: python
+   :lines: 1-90
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/tests/test_gen_html_report.py:L1-L90
+
+逐段精读：
+
+* L1-L11：测试把 ``scripts`` 目录加入 ``sys.path`` 后导入 ``gen_html_report``。
+  这验证脚本既能作为命令行入口，也能被 pytest 直接 import。
+* L14-L37：第一个测试在临时目录构造 ``dashboard.txt``、``modlist.txt`` 和
+  ``groups.txt``，覆盖 coverage dashboard、module list 和 group list 的解析。
+* L39-L90：第二个测试构造 sign-off ``status`` 字典和相对 log 路径，验证 HTML report
+  汇总器能把 smoke/syn stage 结果、LEC module 数字和 log link 组织成前端可用数据。
+
+失败定位：若这个单测失败，优先检查 ``gen_html_report.parse_coverage_report`` 是否仍支持
+当前 VCS/URG dashboard 格式；不要把 coverage 维度改回旧的 cond 口径。

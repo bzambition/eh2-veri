@@ -1622,3 +1622,49 @@ review checklist。
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§11  v2-16 NC/Xcelium 辅助配置逐段补齐
+--------------------------------------------------------------------------------
+
+本节补齐 v2-15 审计中遗漏的 NC interactive wave 和 Xcelium coverage waiver 文件。
+这些文件不改变 VCS/URG 默认 release 参考，但它们支撑 NC/IMC 备选 simulator 的可调试性
+和 coverage cross-check。
+
+§11.1  ``nc_waves_interactive.tcl`` — 交互式 SimVision 入口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/nc_waves_interactive.tcl
+   :language: tcl
+   :lines: 1-43
+   :linenos:
+   :caption: dv/uvm/core_eh2/nc_waves_interactive.tcl:L1-L43
+
+逐段精读：
+
+* L1-L18：注释明确该脚本用于 ``make wave_nc TEST=<name>`` 的交互模式。它和 batch
+  ``nc_waves.tcl`` 的区别是“不 run、不 quit”，把控制权交还 ncsim/SimVision。
+* L20-L24：脚本优先读取 ``SIM_DIR`` 环境变量，否则使用当前目录。这样同一脚本可以服务
+  ``build/<target>_nc`` 的隔离输出目录。
+* L29-L34：``database -open`` 和 ``probe -create`` 打开 SHM 数据库并默认 probe
+  ``core_eh2_tb_top`` 全层级。调大/调小 probe 范围由用户在交互 shell 中完成。
+* L38-L43：最后只打印提示，不调用 ``run``。这保证用户可以先加波形、设断点，再推进仿真。
+
+§11.2  ``coverage_waivers_xlm.tcl`` — Xcelium coverage refinement
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/waivers/coverage_waivers_xlm.tcl
+   :language: tcl
+   :lines: 1-32
+   :linenos:
+   :caption: dv/uvm/core_eh2/waivers/coverage_waivers_xlm.tcl:L1-L32
+
+逐段精读：
+
+* L1-L7：说明该文件由 ``imc -load build/cov -exec ...`` 加载，用于 Xcelium/IMC
+  coverage refinement，不参与 VCS ``cover.cfg``。
+* L11-L16：排除 functional coverage interface 和 TB top 的 code coverage，保持
+  dut-only 思路，与 VCS ``+tree core_eh2_tb_top.dut`` 目标一致。
+* L20-L22：排除 DUT 顶层 hard-wired 输入 toggle，避免 hart id / boot addr 这类静态 strap
+  拉低 toggle 指标。
+* L26-L32：加载 ``unr.vRefine`` 和 ``aux_code.vRefine``。这些 refinement 应由人工审查
+  unreachable/auxiliary code 后生成，不能用来掩盖真实 DUT 行为缺口。

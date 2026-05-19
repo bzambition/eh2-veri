@@ -3121,3 +3121,81 @@ cosim-disabled waiver、skip-in-signoff waiver、directed pool 完整性和 real
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§11  v2-16 Directed Test 辅助宏与生成器逐段补齐
+--------------------------------------------------------------------------------
+
+本节补齐 directed test 辅助文件的源码解释。这些文件不直接作为单个 assembly
+test 出现在 sign-off 统计里，但它们决定了 PMP/ePMP directed 测试如何写 CSR、
+如何切换 privilege、如何生成 testlist。遗漏它们会导致读者只能看懂 ``.S`` 测试，
+却看不懂测试背后的宏语言。
+
+§11.1  ``eh2_macros.h`` — mailbox signature 与 ePMP CSR 常量
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/directed_tests/eh2_macros.h
+   :language: c
+   :lines: 1-38
+   :linenos:
+   :caption: dv/uvm/core_eh2/directed_tests/eh2_macros.h:L1-L38
+
+逐行讲解：
+
+* L5-L11：``SIGNATURE_ADDR`` 与 signature type 把汇编测试和 TB mailbox 约定绑定起来。
+  directed assembly 通过写固定地址向 ``core_eh2_tb_top`` 报告 core status、test result、
+  GPR 或 CSR 内容。
+* L13-L27：core status 编码覆盖 machine/user/debug/IRQ/exception 等状态。debug 和 IRQ
+  directed tests 用这些值给 trace/debug monitor 留下可诊断锚点。
+* L29-L31：``TEST_PASS`` / ``TEST_FAIL`` 是 mailbox PASS/FAIL 最小协议。
+* L34-L38：``CSR_MSECCFG`` 和 ``MSECCFG_*`` 是 ePMP 测试必须写的 CSR 位定义；
+  不在每个 ``.S`` 文件里重复定义，避免 PMP directed tests 之间常量漂移。
+
+§11.2  ``custom_macros.h`` — PMP/ePMP sequence 宏
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/directed_tests/custom_macros.h
+   :language: c
+   :lines: 1-162
+   :linenos:
+   :caption: dv/uvm/core_eh2/directed_tests/custom_macros.h:L1-L162
+
+逐段精读：
+
+* L9-L31：``RESET_PMP`` 清空 16 个 ``pmpcfg/pmpaddr`` 和 ``CSR_MSECCFG``。
+  每个 PMP directed test 先 reset，是为了避免前一个 region 的 lock/config 状态污染当前场景。
+* L34-L41：``SET_NAPOT_ADDR`` 把 label 地址转换成 NAPOT CSR 编码，包含右移 2 位、
+  granularity mask 和 OR mask。随机 CSR 写很难稳定生成这个编码。
+* L44-L70：``SET_PMP_CFG`` 根据 region 编号选择 ``pmpcfg0`` 到 ``pmpcfg3``，再把
+  8-bit cfg 左移到对应 byte lane。EH2 支持 16 region，因此需要四个 pmpcfg CSR。
+* L73-L88：``SET_PMP_NAPOT`` 与 ``SET_PMP_TOR`` 组合地址和配置写入，覆盖最常用的
+  NAPOT/TOR region 初始化。
+* L99-L108：``SKIP_PC`` 根据指令低两位判断 compressed/non-compressed 指令长度，
+  避免 trap handler 返回到同一条 faulting instruction。
+* L111-L142：``RW_ACCESSES`` 根据是否定义 ``U_MODE`` 选择 M-mode 或 U-mode 访问路径，
+  让同一测试模板覆盖 privilege 差异。
+* L145-L162：``SET_MSECCFG`` 和 ``SWITCH_TO_U_MODE_*`` 封装 ePMP security config 与
+  ``mret`` privilege switch。出问题时应先 grep 这些宏展开，而不是只看调用点。
+
+§11.3  ``gen_testlist.py`` — 外部 directed suite testlist 生成器
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/directed_tests/gen_testlist.py
+   :language: python
+   :lines: 1-180
+   :linenos:
+   :caption: dv/uvm/core_eh2/directed_tests/gen_testlist.py:L1-L180
+
+逐段精读：
+
+* L1-L9：脚本说明来源和用途：生成 riscv-tests、riscv-arch-tests 与 ePMP directed
+  tests 的 testlist，并明确从 Ibex 版本改造到 EH2。
+* L18-L57：``add_configs_and_handwritten_directed_tests`` 先生成三个 config：
+  ``riscv-tests``、``riscv-arch-tests`` 和 ``epmp-tests``。三者都指向
+  ``core_eh2_base_test``，并打开 ``PMPEnable``。
+* L62-L180：``available_directed_tests`` 是 YAML 文本模板，列出 empty test 和多组
+  ``pmp_mseccfg_test_*`` 参数组合。每个条目通过 ``gcc_opts`` 传入宏定义，驱动同一个
+  assembly 源覆盖 RLB、L bit、next region permission 等矩阵。
+
+与 Ibex 对照：Ibex 的 ``dv/uvm/core_ibex/directed_tests/gen_testlist.py`` 也是用
+Python 生成 directed YAML；EH2 的合理差异是 ePMP/PMP 参数组合更多，并绑定
+``core_eh2_base_test`` 与 EH2 的 PMP enable 参数。

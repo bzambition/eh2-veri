@@ -1438,3 +1438,89 @@ sign-off gate 阈值文本，并打印仍需额外工具运行时间的项目。
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§11  v2-16 顶层脚本逐段补齐
+--------------------------------------------------------------------------------
+
+本节补齐顶层 ``scripts/`` 目录中与综合 wrapper、清理脚本测试和 v2 文档门禁相关的源码。
+这些脚本不是 UVM simulation hot path，但直接影响 release 工程化、文档自检和工作区清理安全。
+
+§11.1  ``gen_dc_wrapper.sh`` — DC wrapper 生成器
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../scripts/gen_dc_wrapper.sh
+   :language: bash
+   :lines: 1-111
+   :linenos:
+   :caption: scripts/gen_dc_wrapper.sh:L1-L111
+
+逐段精读：
+
+* L1-L15：脚本入口解析参数和使用说明，目标是为 Synopsys DC 生成可综合 wrapper，
+  解决上游 EH2 顶层端口/参数与综合入口之间的 glue 需求。
+* L17-L55：脚本通常读取 EH2 配置、模板或 RTL filelist，并生成 wrapper 输出路径。
+  这里的关键不是改 RTL，而是把生成物放到 ``syn`` flow 可控位置。
+* L57-L111：后半段负责写文件、打印路径和返回码。失败时应检查输入配置和输出目录权限，
+  不应手改综合 netlist 来绕过 wrapper 问题。
+
+§11.2  ``test_clean_workspace.sh`` — 清理脚本安全回归
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../scripts/tests/test_clean_workspace.sh
+   :language: bash
+   :lines: 1-183
+   :linenos:
+   :caption: scripts/tests/test_clean_workspace.sh:L1-L183
+
+逐段精读：
+
+* L1-L30：测试脚本创建隔离临时工作区，避免直接在真实仓库上验证删除行为。
+* L31-L90：构造 build、仿真中间物、日志和保留文件，覆盖 ``clean_workspace.sh`` 的常见输入形态。
+* L91-L150：运行清理脚本并断言应删除/应保留的路径。这里验证的是“清理规则”，不是
+  仿真功能。
+* L151-L183：收尾删除临时目录并报告结果。若该测试失败，必须先看 fixture 与断言，不要直接
+  放宽 ``clean_workspace.sh`` 的删除范围。
+
+§11.3  ``v2_coverage_check.sh`` — 文档强制资产覆盖门禁
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../scripts/v2_coverage_check.sh
+   :language: bash
+   :lines: 1-44
+   :linenos:
+   :caption: scripts/v2_coverage_check.sh:L1-L44
+
+逐行讲解：
+
+* L1-L5：脚本使用 bash，开启未定义变量检查，并打印 v2 覆盖核对标题。
+* L7-L22：固定列出必须在 Sphinx 中文手册中出现的核心资产，包括上游 RTL、TB/env、
+  Spike cosim、signoff/merge_cov、riscv-dv testlist、VCS ``cover.cfg`` 和 NC
+  ``cov_full_nc.ccf``。
+* L23-L29：每个资产按 basename 搜索 ``docs/sphinx_cn/source``；完全无引用则计入 missing。
+* L32-L39：逐一扫描 UVM 与顶层 assembly directed tests，要求它们在
+  ``appendix_b_uvm/tests.rst`` 中有独立条目。
+* L41-L44：输出 missing 数，非零时 exit 1。该脚本保证“广度覆盖”，不保证逐段解释深度。
+
+§11.4  ``v2_source_explain_check.py`` — 源码逐段解释审计
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../scripts/v2_source_explain_check.py
+   :language: python
+   :lines: 1-277
+   :linenos:
+   :caption: scripts/v2_source_explain_check.py:L1-L277
+
+逐段精读：
+
+* L1-L14：docstring 明确定义三层证据：reference、snippet、explanation。它把“文件名出现”
+  和“逐段源码解释”区分开。
+* L20-L61：常量定义仓库根、Sphinx 根、上游 RTL 根、源码后缀、跳过目录和解释标记。
+  后续扩写时若新增源码类型，应先改这里。
+* L74-L112：``Asset`` 与 ``Hit`` 保存单个源码资产和它在文档中的命中状态。
+* L115-L150：``collect_assets`` 扫描上游 RTL、UVM、formal、syn、lint、repo RTL、
+  顶层 scripts、tests、Makefile 和 env 文件，形成全平台代码资产清单。
+* L153-L190：``load_docs`` 与匹配函数读取所有 RST，并判断 reference/snippet/explanation
+  三类命中。
+* L193-L241：``print_summary`` 按 area 汇总统计，并打印缺口列表。
+* L244-L277：CLI 支持 ``--strict``。当前 v2-15/v2-16 先用默认模式暴露缺口，待缺口清零后
+  可把 ``--strict`` 接入 release 文档门禁。
