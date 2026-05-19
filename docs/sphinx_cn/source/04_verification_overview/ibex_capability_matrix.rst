@@ -5,24 +5,23 @@
 ===========================
 
 :status: draft
-:source: README.md; CONTEXT.md; docs/PROJECT_STATUS.md; docs/release-notes-v1.1.md; docs/adr/INDEX.md; dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/uvm/core_eh2/env/core_eh2_env.sv; dv/uvm/core_eh2/common/trace_agent/eh2_trace_intf.sv; dv/uvm/core_eh2/common/trace_agent/eh2_trace_monitor.sv; dv/uvm/core_eh2/common/trace_agent/eh2_dut_probe_monitor.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_csr_preregister.svh; dv/cosim/spike_cosim.cc; dv/uvm/core_eh2/common/axi4_agent/axi4_driver.sv; dv/uvm/core_eh2/common/irq_agent/eh2_irq_intf.sv; dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_driver.sv; dv/uvm/core_eh2/riscv_dv_extension/riscv_core_setting.sv; dv/uvm/core_eh2/riscv_dv_extension/testlist.yaml; dv/uvm/core_eh2/fcov/eh2_fcov_if.sv
+:source: README.md; CONTEXT.md; docs/PROJECT_STATUS.md; docs/adr/INDEX.md; dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/uvm/core_eh2/env/core_eh2_env.sv; dv/uvm/core_eh2/common/trace_agent/eh2_trace_intf.sv; dv/uvm/core_eh2/common/trace_agent/eh2_trace_monitor.sv; dv/uvm/core_eh2/common/trace_agent/eh2_dut_probe_monitor.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_csr_preregister.svh; dv/cosim/spike_cosim.cc; dv/uvm/core_eh2/common/axi4_agent/axi4_driver.sv; dv/uvm/core_eh2/common/irq_agent/eh2_irq_intf.sv; dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_driver.sv; dv/uvm/core_eh2/riscv_dv_extension/riscv_core_setting.sv; dv/uvm/core_eh2/riscv_dv_extension/testlist.yaml; dv/uvm/core_eh2/fcov/eh2_fcov_if.sv
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: bddb61be0a5bc43140245c8f5617c25925eacf3d
 
 §1  本章边界
 -------------
 
-本章只比较当前 EH2-Veri v1.1 仓库与本机 Ibex 参考验证平台在验证能力上的可回溯差异。
+本章只比较当前 EH2-Veri 主线仓库与本机 Ibex 参考验证平台在验证能力上的可回溯差异。
 比较依据分为三类：
 
-* EH2 当前 release/status 文档，用于固定 v1.1 sign-off 数字。
+* EH2 当前 status 文档，用于固定当前 sign-off 数字。
 * EH2 UVM、cosim、riscv-dv、coverage 源码，用于说明能力来自哪些实现。
 * `/home/host/ibex/dv/uvm/core_ibex/` 下的 Ibex 参考文件，用于说明本章中提到的
   Ibex 侧接口形态。
 
-本章不从历史审计结论推导当前状态；如果旧审计和 v1.1 status 冲突，以
-`docs/PROJECT_STATUS.md`、`docs/release-notes-v1.1.md` 和当前源码为准。
+本章不从历史审计结论推导当前状态；如果旧审计和当前 status 冲突，以
+`docs/PROJECT_STATUS.md` 和当前源码为准。
 
 关键代码（`README.md:L1-L18`）：
 
@@ -54,15 +53,15 @@
 * 第 L6-L10 行：当前仓库的 sign-off 不是单个 smoke 流程，而是把 RTL 仿真、
   Spike lockstep、directed assembly、riscv-dv、coverage、CSR、compliance、
   lint、formal 和 block-level LEC 收敛到同一份 sign-off record。
-* 第 L12-L18 行：本章保留 v1.1、46/46 和 31635/31635 三个 release-facing 数字，
-  不使用旧审计中已经被 v1.1 状态更新取代的数值。
+* 第 L12-L18 行：本章保留 46/46 和 31635/31635 等签核可见数字，
+  不使用旧审计中已经被当前状态更新取代的数值。
 
 接口关系：
 
 * 被调用：本章被验证概览、架构评审和迁移评估使用。
 * 调用：:ref:`goals_scope`、:ref:`quickstart`、
   :ref:`cosim_scoreboard`、:ref:`functional_coverage`。
-* 共享状态：release status、ADR 索引、EH2 UVM 源码、本机 Ibex 参考源码。
+* 共享状态：status、ADR 索引、EH2 UVM 源码、本机 Ibex 参考源码。
 
 §2  DUT 与验证对象差异
 -----------------------
@@ -1424,10 +1423,10 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 * 调用：coverpoint 和 cross bins。
 * 共享状态：dual_issue、interrupt/debug、stall、branch、exception。
 
-§9.3  release coverage 数字
+§9.3  签核 coverage 数字
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-职责：把 coverage 模型和 2026-05-19 VCS 主线 release-facing coverage result 分开记录。
+职责：把 coverage 模型和 2026-05-19 VCS 主线签核可见 coverage result 分开记录。
 
 实测覆盖率摘要：
 
@@ -1445,7 +1444,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 逐段解释：
 
 * 第 1 行：覆盖率统计限定在 `core_eh2_tb_top.dut` 子树，报告由 Synopsys URG 原生生成。
-* 第 2-8 行：当前 release-facing 数字包括 line、branch、toggle、assert、fsm、
+* 第 2-8 行：当前签核可见数字包括 line、branch、toggle、assert、fsm、
   group 和 overall；不再使用旧 NC/IMC 迁移阶段的条件覆盖维度。
 
 接口关系：
@@ -1457,7 +1456,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 §10  sign-off 能力矩阵
 ----------------------
 
-本节把 EH2 v1.1 的 release result 与能力矩阵绑定。所有数字来自
+本节把 EH2 当前 release result 与能力矩阵绑定。所有数字来自
 2026-05-19 01:02 VCS 主线 demo，并保持跨章节字面一致。
 
 .. list-table::
@@ -1465,7 +1464,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
    :widths: 24 28 28 20
 
    * - 维度
-     - EH2 v1.1 证据
+     - EH2 2026-05-19 证据
      - Ibex 参考点
      - 本章结论
    * - UVM env
@@ -1483,7 +1482,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
    * - Directed
      - 40/40
      - Ibex 有 directed testlist
-     - EH2 v1.1 release gate PASS
+     - EH2 2026-05-19 release gate PASS
    * - Cosim
      - 7/7
      - Ibex RVFI cosim
@@ -1511,7 +1510,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
    * - Coverage
      - line 95.05%、branch 84.97%、group 69.42%、overall 65.17%
      - Ibex coverage infrastructure
-     - EH2 release coverage gate PASS
+     - EH2 coverage gate PASS
 
 实测 sign-off 摘要：
 
@@ -1532,7 +1531,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 * 第 1-4 行：EH2 在当前 demo 中完成 9/9 stage PASS，LEC compare point 为
   31635/31635。
 * 第 6-9 行：riscv-dv、compliance、directed 和 formal 是与 Ibex 能力矩阵最直接
-  对照的 release-facing 数字。
+  对照的签核可见数字。
 
 接口关系：
 
@@ -1543,14 +1542,14 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 §11  formal 与 LEC 对比边界
 ----------------------------
 
-本章只记录 EH2 v1.1 当前 formal/LEC sign-off 状态，不扩展 Ibex formal stack 的细节。
+本章只记录 EH2 当前 formal/LEC sign-off 状态，不扩展 Ibex formal stack 的细节。
 原因是本章目标是 EH2-Veri 与 Ibex DV 平台能力对比，而 formal/LEC 的工具栈、版本和
 证据路径由 EH2 release/status 文档定义。
 
 §11.1  IFV formal 46/46
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-职责：说明 v1.1 的 formal 结果来自 IFV log 和 top-level sign-off JSON。
+职责：说明当前 formal 结果来自 IFV log 和 top-level sign-off JSON。
 
 关键代码（`docs/PROJECT_STATUS.md:L110-L148`）：
 
@@ -1591,7 +1590,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 §11.2  Block-level LEC 31635/31635
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-职责：说明 v1.1 的 LEC closure 是 block-level Formality 结果。
+职责：说明当前 LEC closure 是 block-level Formality 结果。
 
 关键代码（`docs/PROJECT_STATUS.md:L85-L108`）：
 
@@ -1601,7 +1600,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
    
    LEC source: `syn/build/lec_summary.txt`
    
-   LEC stage in v1.1: `31635/31635 PASS`
+   LEC stage in current demo: `31635/31635 PASS`
    
    All 9 modules are closed:
    
@@ -1617,7 +1616,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 
 逐段解释：
 
-* 第 L85-L90 行：LEC source 是 `syn/build/lec_summary.txt`，v1.1 stage 为
+* 第 L85-L90 行：LEC source 是 `syn/build/lec_summary.txt`，当前 stage 为
   31635/31635 PASS。
 * 第 L91-L104 行：status 文档列出 9 个 closed module；摘录中显示 dec、EXU
   三个子块、LSU、PIC、DMA 等模块均为 0 failing、0 unverified。
@@ -1633,7 +1632,7 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 §12  waiver 与能力边界
 -----------------------
 
-能力矩阵必须同时列出通过项和边界项。EH2 v1.1 当前 cosim-disabled count 为 6；
+能力矩阵必须同时列出通过项和边界项。EH2 当前 cosim-disabled count 为 6；
 这些项通过 waiver 文件审查，不使用 inline `cosim_reason` 作为豁免入口。
 
 关键代码（`docs/PROJECT_STATUS.md:L150-L173`）：
@@ -1755,14 +1754,14 @@ interrupt/debug、dual-issue 和 compressed/dual-issue cross。
 §14  结论
 ----------
 
-EH2-Veri v1.1 与 Ibex 参考平台的关系可以概括为：目录组织和 UVM/cosim/riscv-dv
+EH2-Veri 当前主线与 Ibex 参考平台的关系可以概括为：目录组织和 UVM/cosim/riscv-dv
 方法论对齐，但 EH2 的 DUT surface 需要不同的数据通路和更多 EH2-specific agent。
 
 * Ibex 参考 cosim 路径以 RVFI item 为中心；EH2 当前路径以 trace pkt、RVFI-equivalent
   writeback fields、async probe hint 和 AXI4 D-side notification 组合为中心。
 * Ibex 参考 env 以 memory response、IRQ、cosim 和 RVFI monitor 组织；EH2 env 增加
   AXI4、JTAG、halt/run、trace、probe 和 double-fault detection scoreboard。
-* EH2 v1.1 release 数字是 formal 46/46、LEC 31635/31635、compliance 85/88、
+* EH2 2026-05-19 签核数字是 formal 46/46、LEC 31635/31635、compliance 85/88、
   riscv-dv 370/395、directed 40/40、实跑覆盖率 102/104、line 95.05%、
   branch 84.97%、group 69.42%、overall 65.17%。
 * EH2 的 cosim-disabled 边界是 6 个 waiver-reviewed 测试，主要来自 EH2 custom CSR
@@ -1773,7 +1772,7 @@ EH2-Veri v1.1 与 Ibex 参考平台的关系可以概括为：目录组织和 UV
 
 关联章节：
 
-* :ref:`goals_scope` — v1.1 验证目标、范围和 sign-off 数字。
+* :ref:`goals_scope` — 当前验证目标、范围和 sign-off 数字。
 * :ref:`quickstart` — 当前 smoke/regress/signoff 命令入口。
 * :ref:`cosim_scoreboard` — EH2 cosim scoreboard 数据路和 Spike 通知顺序。
 * :ref:`functional_coverage` — EH2 functional coverage 结构。
@@ -1794,7 +1793,6 @@ EH2-Veri v1.1 与 Ibex 参考平台的关系可以概括为：目录组织和 UV
 * `/home/host/eh2-veri/README.md`
 * `/home/host/eh2-veri/CONTEXT.md`
 * `/home/host/eh2-veri/docs/PROJECT_STATUS.md`
-* `/home/host/eh2-veri/docs/release-notes-v1.1.md`
 * `/home/host/eh2-veri/docs/adr/INDEX.md`
 * `/home/host/eh2-veri/dv/uvm/core_eh2/tb/core_eh2_tb_top.sv`
 * `/home/host/eh2-veri/dv/uvm/core_eh2/env/core_eh2_env.sv`

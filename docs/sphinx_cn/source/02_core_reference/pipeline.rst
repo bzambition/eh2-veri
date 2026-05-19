@@ -810,7 +810,7 @@ DEC 暂停新的外部 Load 发射（``lsu_load_stall_any`` ）。
 
 **场景 A：修改双发射规则（允许新的指令组合同发）**
 1. 在 :file:`eh2_dec_decode_ctl.sv` 中修改 i1 发射条件
-2. 运行 ``make signoff SIGNOFF_PROFILE=cosim`` 确认无 cosim mismatch
+2. 运行 ``make signoff PROFILE=cosim`` 确认无 cosim mismatch
 3. 更新功能覆盖率模型（如果新增了 coverpoint）
 
 **场景 B：增加流水线级数**
@@ -1241,7 +1241,7 @@ coverage 维度和 DUT-only scope 不应改变。
    Status: PASS
    Stage smoke     PASS
    Stage directed  PASS
-   Stage cosim     PASS / PASS_WITH_WAIVERS（取决于 waiver gate）
+   Stage cosim     PASS（waiver gate 由 signoff.py 单独记录）
    Stage riscvdv   threshold met, fail rate <= 25%
    Coverage metrics parsed from URG dashboard:
      line=95.05 branch=84.97 toggle=53.52 assert=33.33 fsm=54.74

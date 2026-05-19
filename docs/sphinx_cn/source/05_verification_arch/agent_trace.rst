@@ -8,7 +8,6 @@ Trace Agent — 架构参考
 :source: dv/uvm/core_eh2/common/trace_agent/eh2_trace_monitor.sv
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  本章边界
 ------------

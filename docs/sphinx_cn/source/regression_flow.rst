@@ -1,12 +1,14 @@
+:orphan:
+
 回归流程
-========
+==========================================================================================
 
 ``dv/uvm/core_eh2/scripts/run_regress.py`` 是 EH2 平台的统一回归入口。它把
 riscv-dv 生成、汇编编译、RTL 仿真、log 检查和报告生成串成一个流程，
 同时兼容 directed testlist 与 riscv-dv testlist。
 
 流程总览
---------
+------------------------------------------------------------------------------------------
 
 .. code-block:: text
 
@@ -29,11 +31,11 @@ riscv-dv 生成、汇编编译、RTL 仿真、log 检查和报告生成串成一
       ▼
    regr.log / regr_junit.xml / report.json
 
-``run_regress.py`` 支持 ``--parallel``，通过 ``ProcessPoolExecutor`` 并发
+``run_regress.py`` 支持 ``--parallel`` ，通过 ``ProcessPoolExecutor`` 并发
 执行多个 test/seed。每个测试有独立工作目录。
 
 输入模式
---------
+------------------------------------------------------------------------------------------
 
 单测模式：
 
@@ -58,7 +60,7 @@ directed testlist 模式会识别 ``config`` entry，并用
 ``directed_test_schema.py`` 展开为普通 test entry。
 
 工作目录
---------
+------------------------------------------------------------------------------------------
 
 每个 test/seed 的输出目录形如：
 
@@ -75,34 +77,34 @@ directed testlist 模式会识别 ``config`` entry，并用
 
 回归根目录还会生成：
 
-* ``regr.log``：人类可读摘要。
-* ``regr_junit.xml``：CI 可消费。
-* ``report.json``：signoff.py 读取的结构化结果。
+* ``regr.log`` ：人类可读摘要。
+* ``regr_junit.xml`` ：CI 可消费。
+* ``report.json`` ：signoff.py 读取的结构化结果。
 
 Cosim 策略
-----------
+------------------------------------------------------------------------------------------
 
-``build_sim_opts`` 会合并 testlist 的 ``sim_opts`` 与 CLI ``--sim-opts``，
+``build_sim_opts`` 会合并 testlist 的 ``sim_opts`` 与 CLI ``--sim-opts`` ，
 并按 ``cosim`` 字段自动添加 plusarg：
 
 * ``cosim: disabled`` → ``+disable_cosim=1``
 * 其它或缺省 → ``+enable_cosim=1``
 
-如果用户已经显式提供 ``+enable_cosim`` 或 ``+disable_cosim``，脚本不会再
+如果用户已经显式提供 ``+enable_cosim`` 或 ``+disable_cosim`` ，脚本不会再
 追加。这样单测调试可以临时覆盖 testlist 的策略。
 
 Sign-off Skip
--------------
+------------------------------------------------------------------------------------------
 
 ``signoff.py`` 在运行 stage command 前设置环境变量
-``EH2_SIGNOFF_MODE=1``。``run_regress.py`` 检测到该变量后会跳过 testlist
+``EH2_SIGNOFF_MODE=1`` 。``run_regress.py`` 检测到该变量后会跳过 testlist
 中 ``skip_in_signoff: true`` 的 entry，并打印跳过清单。
 
 注意：``skip_in_signoff`` 只影响 sign-off 模式；普通 regression 或单测
 仍可手动运行这些测试。
 
 失败分类
---------
+------------------------------------------------------------------------------------------
 
 ``TestRunResult.failure_mode`` 用于区分失败阶段：
 
@@ -123,23 +125,23 @@ Sign-off Skip
    * - ``UVM_ERROR`` / ``UVM_FATAL`` / ``MISMATCH``
      - ``check_logs.py`` 从仿真 log 判定失败。
 
-排查时先看 ``failure_mode``，再打开对应阶段 log。
+排查时先看 ``failure_mode`` ，再打开对应阶段 log。
 
 报告消费
---------
+------------------------------------------------------------------------------------------
 
 ``collect_results.py`` 可以从已有 result pickle/yaml 重新汇总结果；
-``signoff.py`` 优先读取 stage 的 ``report.json``。这使得 gate-only 模式可以
+``signoff.py`` 优先读取 stage 的 ``report.json`` 。这使得 gate-only 模式可以
 在不重跑仿真的情况下评估已有结果：
 
 .. code-block:: bash
 
-   make signoff_gate SIGNOFF_PROFILE=full SIGNOFF_OUT=build/sf_full
+   make signoff_gate PROFILE=full SIGNOFF_OUT=build/sf_full
 
 回归维护准则
-------------
+------------------------------------------------------------------------------------------
 
-* testlist entry 必须包含 ``test``、``description``、``rtl_test``。
+* testlist entry 必须包含 ``test``、``description``、``rtl_test`` 。
 * 新增 ``cosim: disabled`` 必须有风险登记或 issue 说明。
 * 大幅增加 ``iterations`` 前先确认单 seed 稳定。
 * ``--fail-on-warnings`` 是 sign-off 行为；日常调试可先不用。

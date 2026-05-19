@@ -8,7 +8,6 @@
 :source: syn/include/eh2_param.vh; rtl/design/eh2_pic_ctrl.sv; rtl/design/eh2_veer.sv; rtl/design/lsu/eh2_lsu.sv; rtl/design/lsu/eh2_lsu_dccm_ctl.sv; rtl/design/lib/beh_lib.sv; dv/uvm/core_eh2/eh2_rtl.f; dv/uvm/core_eh2/tb/core_eh2_dut_signals.svh; dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/uvm/core_eh2/common/irq_agent/eh2_irq_intf.sv; dv/uvm/core_eh2/common/irq_agent/eh2_irq_seq_item.sv; dv/uvm/core_eh2/common/irq_agent/eh2_irq_driver.sv; dv/uvm/core_eh2/tests/core_eh2_test_lib.sv; dv/uvm/core_eh2/directed_tests/directed_testlist.yaml; dv/uvm/core_eh2/tests/asm/directed_pic_state_walk.S; dv/uvm/core_eh2/tests/asm/directed_irq_basic.S; dv/uvm/core_eh2/tests/asm/directed_nested_irq.S; dv/formal/properties/eh2_pic_assert.sv; dv/formal/eh2_formal_bind.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_csr_preregister.svh; dv/cosim/spike_cosim.cc; docs/adr/0007-interrupt-cosim.md
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界与当前结论
 --------------------------------------------------------------------------------

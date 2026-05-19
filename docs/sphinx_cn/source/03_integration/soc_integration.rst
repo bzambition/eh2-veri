@@ -8,7 +8,6 @@ SoC 集成指南
 :source: dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/uvm/core_eh2/tb/core_eh2_dut_signals.svh; shared/rtl/axi4_intf.sv; shared/rtl/axi4_slave_mem.sv; rtl/eh2_veer_wrapper_rvfi.sv; /home/host/Cores-VeeR-EH2/design/eh2_veer_wrapper.sv; /home/host/Cores-VeeR-EH2/snapshots/default/common_defines.vh; /home/host/Cores-VeeR-EH2/snapshots/default/eh2_pdef.vh
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  本章边界
 -------------

@@ -8,7 +8,6 @@
 :source: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_seq_item.sv; dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_seq.sv; dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_driver.sv; dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_intf.sv; dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_intf.sv; dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_driver.sv; dv/uvm/core_eh2/tests/core_eh2_seq_lib.sv; dv/uvm/core_eh2/tests/core_eh2_test_lib.sv; dv/uvm/core_eh2/tests/asm/directed_debug_basic.S; dv/formal/properties/eh2_dbg_assert.sv; dv/formal/properties/eh2_dec_assert.sv; dv/formal/eh2_veer_sva.sv
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界
 --------------------------------------------------------------------------------

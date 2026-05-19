@@ -8,7 +8,6 @@
 :source: README.md; env.sh; docs/requirements-docs.txt; Makefile; lint/Makefile; dv/formal/Makefile; syn/Makefile; dv/uvm/core_eh2/scripts/signoff.py
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  本章边界
 -------------
@@ -71,7 +70,7 @@ Makefile recipe 的实际检查。
    - Synopsys VCS for SystemVerilog simulation;
    - Synopsys Design Compiler for synthesis inputs used by the LEC flow;
    - Synopsys Formality for block-level LEC;
-   - Cadence IFV 15.20 for the v1.1 formal proof evidence;
+   - Cadence IFV 15.20 for the current formal proof evidence;
    - Spike built with the EH2 cosim DPI integration;
    - `riscv32-unknown-elf-gcc`;
    - `riscv32-unknown-elf-objcopy`;

@@ -8,7 +8,6 @@
 :source: syn/include/eh2_param.vh; rtl/design/eh2_mem.sv; rtl/design/ifu/eh2_ifu.sv; rtl/design/ifu/eh2_ifu_mem_ctl.sv; rtl/design/ifu/eh2_ifu_ic_mem.sv; dv/formal/properties/eh2_ifu_assert.sv; dv/uvm/core_eh2/fcov/eh2_fcov_if.sv; dv/uvm/core_eh2/tests/core_eh2_intg_test_lib.sv; docs/adr/0017-integrity-cosim-waiver.md
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界与当前结论
 --------------------------------------------------------------------------------

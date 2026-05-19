@@ -1,12 +1,14 @@
+:orphan:
+
 构建流程
-========
+==========================================================================================
 
 EH2 平台的构建流程由顶层 ``Makefile`` 统一调度，核心目标包括 cosim 共享库、
 RTL testbench、单测运行、riscv-dv 指令生成、coverage 与 sign-off。VCS 是
 主线仿真器，Xcelium / Questa 保留在脚本和 YAML 配置中。
 
 顶层 Makefile
--------------
+------------------------------------------------------------------------------------------
 
 常用目标：
 
@@ -17,9 +19,9 @@ RTL testbench、单测运行、riscv-dv 指令生成、coverage 与 sign-off。V
    * - 目标
      - 作用
    * - ``make cosim``
-     - 构建 ``build/libcosim.so``。
+     - 构建 ``build/libcosim.so`` 。
    * - ``make compile``
-     - 编译 RTL testbench，默认 ``SIMULATOR=vcs``。
+     - 编译 RTL testbench，默认 ``SIMULATOR=vcs`` 。
    * - ``make run``
      - 编译后运行一个 binary。
    * - ``make gen``
@@ -29,7 +31,7 @@ RTL testbench、单测运行、riscv-dv 指令生成、coverage 与 sign-off。V
    * - ``make nightly`` / ``make weekly``
      - 按 testlist 执行较大回归。
    * - ``make regress``
-     - 直接调用 ``run_regress.py``。
+     - 直接调用 ``run_regress.py`` 。
    * - ``make signoff``
      - 调用 ``signoff.py`` 评估签发 gate。
    * - ``make ci_unit``
@@ -38,9 +40,9 @@ RTL testbench、单测运行、riscv-dv 指令生成、coverage 与 sign-off。V
      - 尝试构建中文 Sphinx rinoh PDF。
 
 Cosim 共享库
-------------
+------------------------------------------------------------------------------------------
 
-``make cosim`` 构建 ``build/libcosim.so``。输入文件：
+``make cosim`` 构建 ``build/libcosim.so`` 。输入文件：
 
 * ``dv/cosim/spike_cosim.cc``
 * ``dv/cosim/cosim_dpi.cc``
@@ -53,16 +55,16 @@ Cosim 共享库
 * ``SPIKE_INSTALL=$(SPIKE_DIR)/install``
 * ``SPIKE_CXX=/home/Xilinx/Vivado/2019.1/tps/lnx64/gcc-6.2.0/bin/g++``
 
-VCS 编译默认 **硬依赖** ``build/libcosim.so``。如果不需要 cosim，可显式：
+VCS 编译默认 **硬依赖** ``build/libcosim.so`` 。如果不需要 cosim，可显式：
 
 .. code-block:: bash
 
    make compile NO_COSIM=1
 
-这会跳过 ``.so`` prereq 和链接，但仿真必须带 ``+disable_cosim=1``。
+这会跳过 ``.so`` prereq 和链接，但仿真必须带 ``+disable_cosim=1`` 。
 
 VCS 编译
---------
+------------------------------------------------------------------------------------------
 
 ``compile_vcs`` 使用：
 
@@ -71,13 +73,13 @@ VCS 编译
 * ``+define+GTLSIM``
 * ``eh2_rtl.f``、``eh2_shared.f``、``eh2_tb.f``
 * ``-top core_eh2_tb_top``
-* ``build/libcosim.so``（除非 ``NO_COSIM=1``）
+* ``build/libcosim.so`` （除非 ``NO_COSIM=1`` ）
 
-``WAVES=1`` 时添加 ``-debug_access+all -kdb``；``COV=1`` 时添加
-``-cm line+cond+fsm+tgl+assert``。
+``WAVES=1`` 时添加 ``-debug_access+all -kdb`` ；``COV=1`` 时添加
+``-cm line+tgl+assert+fsm+branch`` 。
 
 单测运行
---------
+------------------------------------------------------------------------------------------
 
 直接 Make 路径：
 
@@ -85,7 +87,7 @@ VCS 编译
 
    make run TEST=my_test BINARY=path/to/test.hex SEED=1 SIM_OPTS="+enable_cosim=1"
 
-``run`` 会先依赖 ``compile``，然后执行 ``build/simv``：
+``run`` 会先依赖 ``compile`` ，然后执行 ``build/simv`` ：
 
 .. code-block:: text
 
@@ -96,10 +98,10 @@ VCS 编译
    +UVM_VERBOSITY=$(VERBOSITY)
    $(SIM_OPTS)
 
-输出 log 默认在 ``build/<TEST>_<SEED>/sim.log``。
+输出 log 默认在 ``build/<TEST>_<SEED>/sim.log`` 。
 
 Ibex-style GOAL 路径
----------------------
+------------------------------------------------------------------------------------------
 
 当命令带 ``GOAL`` 时，顶层 Makefile 切换到 Ibex-style staged flow：
 
@@ -108,18 +110,18 @@ Ibex-style GOAL 路径
    make run GOAL=rtl_sim TEST=riscv_arithmetic_basic_test OUT=out/arith
 
 该模式先调用 ``metadata.py --op create_metadata`` 生成 metadata，再委托
-``dv/uvm/core_eh2/wrapper.mk``。它适合需要复用 Ibex 脚本结构的工作流，
-但日常单测更常用 ``run_regress.py``。
+``dv/uvm/core_eh2/wrapper.mk`` 。它适合需要复用 Ibex 脚本结构的工作流，
+但日常单测更常用 ``run_regress.py`` 。
 
 Filelist
---------
+------------------------------------------------------------------------------------------
 
 ``dv/uvm/core_eh2`` 下的 filelist：
 
-* ``eh2_rtl.f``：EH2 RTL 与 snapshot defines。
-* ``eh2_shared.f``：共享 AXI4 interface、slave memory、参数包。
-* ``eh2_tb.f``：UVM package、agent、env、test、fcov、TB top。
-* ``eh2_dv_cosim_dpi.f``：cosim DPI 相关 include。
+* ``eh2_rtl.f`` ：EH2 RTL 与 snapshot defines。
+* ``eh2_shared.f`` ：共享 AXI4 interface、slave memory、参数包。
+* ``eh2_tb.f`` ：UVM package、agent、env、test、fcov、TB top。
+* ``eh2_dv_cosim_dpi.f`` ：cosim DPI 相关 include。
 
 新增 SV 文件时优先放入对应 package 的 include 链；只有无法通过 package
 覆盖时再改 filelist。
@@ -127,5 +129,5 @@ Filelist
 清理
 ----
 
-``make clean`` 删除顶层 ``build``。``out``、``csrc``、Sphinx build 输出
+``make clean`` 删除顶层 ``build`` 。``out``、``csrc``、Sphinx build 输出
 也可按需删除重建。不要手工删除源码目录下的 filelist、testlist、waiver。

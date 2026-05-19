@@ -821,7 +821,7 @@ pipeline 或 interrupt controller。第三，任何放宽都必须通过 cfg、w
 
 scoreboard 的生命周期由 ``init_cosim``、``cleanup_cosim``、``report_phase`` 和
 ``final_phase`` 收尾。理解这几个函数可以解释为什么 reset 后可以恢复、为什么 pending
-trace 不一定立即视为失败，以及为什么 mismatch 总数是 release-facing 判据。
+trace 不一定立即视为失败，以及为什么 mismatch 总数是 签核可见判据。
 
 关键代码（初始化、统计和清理）：
 
@@ -878,7 +878,7 @@ buffer timing 下可能以 note 形式出现；但 mismatch 非零时必须报 F
      - 为 0 时不能宣称 cosim pass
    * - ``Mismatches``
      - per-thread mismatch 计数
-     - release-facing 失败判据
+     - 签核可见失败判据
 
 §31  多线程顺序模型
 -------------------

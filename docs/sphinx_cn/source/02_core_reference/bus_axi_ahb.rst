@@ -8,7 +8,6 @@ AXI4 / AHB-Lite 总线接口
 :source: shared/rtl/axi4_pkg.sv; shared/rtl/axi4_intf.sv; shared/rtl/axi4_slave_mem.sv; dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/uvm/core_eh2/common/axi4_agent/axi4_seq_item.sv; dv/uvm/core_eh2/common/axi4_agent/axi4_monitor.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv; rtl/lec_shim/eh2_veer_lec_pack.sv
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界
 --------------------------------------------------------------------------------

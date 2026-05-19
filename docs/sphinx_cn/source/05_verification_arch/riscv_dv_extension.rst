@@ -7,7 +7,6 @@ riscv-dv 扩展 — 架构桥接说明
 :source: dv/uvm/core_eh2/riscv_dv_extension/
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  架构边界
 --------------------------------------------------------------------------------

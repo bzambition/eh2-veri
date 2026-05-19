@@ -1,5 +1,7 @@
+:orphan:
+
 UVM Environment
-===============
+==========================================================================================
 
 ``core_eh2_env`` 是平台的 UVM 组合层。它负责创建 agent、scoreboard、
 virtual sequencer，并在 connect phase 中完成 analysis port 连接。
@@ -7,7 +9,7 @@ virtual sequencer，并在 connect phase 中完成 analysis port 连接。
 monitor。
 
 组件树
-------
+------------------------------------------------------------------------------------------
 
 当前 env 组件树如下：
 
@@ -31,7 +33,7 @@ monitor。
 会在 cfg 构造阶段覆盖该值，从而完全跳过 cosim agent。
 
 env_cfg
--------
+------------------------------------------------------------------------------------------
 
 ``core_eh2_env_cfg`` 通过 plusarg 管理测试控制面。常用字段如下：
 
@@ -80,7 +82,7 @@ env_cfg
      - binary 加载基地址。
 
 connect phase 数据通路
-----------------------
+------------------------------------------------------------------------------------------
 
 env 负责把 monitor 输出接到 scoreboard：
 
@@ -96,7 +98,7 @@ env 负责把 monitor 输出接到 scoreboard：
 Spike 无关。
 
 Virtual Sequencer
------------------
+------------------------------------------------------------------------------------------
 
 ``core_eh2_vseqr`` 持有子 sequencer 句柄：
 
@@ -109,7 +111,7 @@ IRQ、debug、halt/run、fetch toggle 等激励。这避免每个 test 单独管
 多 agent 调度。
 
 Double-fault Scoreboard
------------------------
+------------------------------------------------------------------------------------------
 
 ``core_eh2_scoreboard`` 是 env 级轻量检查器，不等同于 cosim scoreboard。
 它订阅 trace item，统计异常 / 中断相关模式，并可通过以下 plusarg 控制：
@@ -123,12 +125,12 @@ Double-fault Scoreboard
 ``eh2_cosim_scoreboard`` 负责。
 
 维护准则
---------
+------------------------------------------------------------------------------------------
 
 新增组件时遵循以下边界：
 
 * 需要连接多个 agent 的逻辑放在 env。
 * 单个协议的 driver / monitor / sequencer 留在对应 agent 目录。
-* 与 Spike 参考模型直接交互的逻辑留在 ``common/cosim_agent``。
+* 与 Spike 参考模型直接交互的逻辑留在 ``common/cosim_agent`` 。
 * 测试策略、开关解析和 sequence 调度优先放在 test / vseq 层。
 

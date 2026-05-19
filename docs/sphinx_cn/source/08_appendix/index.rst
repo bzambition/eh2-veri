@@ -26,7 +26,7 @@ dashboard。NC/Incisive 只作为单测波形调试路径出现。
 
 附录页有 4 个约束。第一，所有路径必须能在当前工作区找到；第二，所有数字必须与
 当前 sign-off 口径一致；第三，所有命令必须是当前 Makefile 或脚本实际支持的入口；
-第四，术语解释要服务排障和阅读，不做无边界扩展。若 README、历史 release notes
+第四，术语解释要服务排障和阅读，不做无边界扩展。若 README、历史发布记录
 或旧 status 文件中的数字与当前 sign-off 口径冲突，本附录优先采用
 :ref:`signoff_flow`、:ref:`coverage_plan` 和 :ref:`known_limitations` 中的当前事实。
 

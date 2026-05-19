@@ -7,7 +7,6 @@ RVFI / Trace 接口
 :source: rtl/design/include/eh2_def.sv; rtl/design/dec/eh2_dec.sv; rtl/design/eh2_veer.sv; rtl/eh2_veer_wrapper_rvfi.sv; dv/uvm/core_eh2/common/trace_agent/
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界与数据流
 ---------------------

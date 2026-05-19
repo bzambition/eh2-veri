@@ -5,10 +5,9 @@ Mailbox 地址与测试结果判定
 ================================================================================
 
 :status: draft
-:source: dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/uvm/core_eh2/common/core_eh2_tb_intf.sv; dv/uvm/core_eh2/env/core_eh2_env_cfg.sv; dv/uvm/core_eh2/tests/core_eh2_base_test.sv; dv/uvm/core_eh2/tests/core_eh2_test_lib.sv; dv/uvm/core_eh2/tests/core_eh2_report_server.sv; dv/uvm/core_eh2/scripts/check_logs.py; dv/uvm/core_eh2/scripts/run_rtl.py; Makefile; dv/uvm/core_eh2/scripts/metadata.py; dv/uvm/core_eh2/scripts/riscvdv.mk; dv/uvm/core_eh2/scripts/run_instr_gen.py; dv/uvm/core_eh2/scripts/build_instr_gen.py; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_cfg.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv; dv/uvm/core_eh2/tests/asm/cosim_smoke.S; dv/uvm/core_eh2/tests/asm/cosim_alu.S; dv/uvm/core_eh2/tests/asm/directed_nb_load_chain.S; tests/asm/smoke.S; CONTEXT.md; docs/release-notes-v1.1.md
+:source: dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/uvm/core_eh2/common/core_eh2_tb_intf.sv; dv/uvm/core_eh2/env/core_eh2_env_cfg.sv; dv/uvm/core_eh2/tests/core_eh2_base_test.sv; dv/uvm/core_eh2/tests/core_eh2_test_lib.sv; dv/uvm/core_eh2/tests/core_eh2_report_server.sv; dv/uvm/core_eh2/scripts/check_logs.py; dv/uvm/core_eh2/scripts/run_rtl.py; Makefile; dv/uvm/core_eh2/scripts/metadata.py; dv/uvm/core_eh2/scripts/riscvdv.mk; dv/uvm/core_eh2/scripts/run_instr_gen.py; dv/uvm/core_eh2/scripts/build_instr_gen.py; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_cfg.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv; dv/uvm/core_eh2/tests/asm/cosim_smoke.S; dv/uvm/core_eh2/tests/asm/cosim_alu.S; dv/uvm/core_eh2/tests/asm/directed_nb_load_chain.S; tests/asm/smoke.S; CONTEXT.md; docs/PROJECT_STATUS.md
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界与结论
 --------------------------------------------------------------------------------
@@ -1512,7 +1511,7 @@ smoke 路径，不替代源码级实现解释。
 * **调用** ：无。
 * **共享状态** ：术语定义与 TB top monitor 保持一致。
 
-**关键代码** （``docs/release-notes-v1.1.md:L48``）：
+**关键代码** （``docs/PROJECT_STATUS.md`` 摘要）：
 
 .. code-block:: bash
 
@@ -1520,9 +1519,9 @@ smoke 路径，不替代源码级实现解释。
 
 **逐段解释** ：
 
-* 第 L48 行：v1.1 release note 记录 ``smoke`` 为 PASS，run 数和 pass 数均为 1，
+* 当前 project status 记录 ``smoke`` 为 PASS，run 数和 pass 数均为 1，
   备注为 ``RTL-only mailbox smoke path``。
-* 该行只证明 release note 中存在 smoke mailbox 路径记录；具体 pass/fail 判定仍以
+* 该行只证明 status 中存在 smoke mailbox 路径记录；具体 pass/fail 判定仍以
   TB top 和日志检查脚本为准。
 
 **接口关系** ：
@@ -1588,4 +1587,4 @@ smoke 路径，不替代源码级实现解释。
 * :file:`/home/host/eh2-veri/dv/uvm/core_eh2/tests/asm/directed_nb_load_chain.S`
 * :file:`/home/host/eh2-veri/tests/asm/smoke.S`
 * :file:`/home/host/eh2-veri/CONTEXT.md`
-* :file:`/home/host/eh2-veri/docs/release-notes-v1.1.md`
+* :file:`/home/host/eh2-veri/docs/PROJECT_STATUS.md`

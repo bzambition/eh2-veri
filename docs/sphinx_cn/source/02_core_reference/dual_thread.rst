@@ -8,7 +8,6 @@
 :source: syn/include/eh2_param.vh; rtl/design/dec/eh2_dec.sv; rtl/design/dec/eh2_dec_ib_ctl.sv; rtl/design/dec/eh2_dec_decode_ctl.sv; rtl/design/dec/eh2_dec_tlu_top.sv; rtl/design/lib/beh_lib.sv; dv/uvm/core_eh2/common/trace_agent/eh2_trace_intf.sv; dv/uvm/core_eh2/common/trace_agent/eh2_trace_monitor.sv; dv/uvm/core_eh2/common/trace_agent/eh2_trace_seq_item.sv; dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv; dv/cosim/cosim.h; dv/cosim/cosim_dpi.svh; dv/cosim/cosim_dpi.cc; dv/cosim/spike_cosim.h; dv/cosim/spike_cosim.cc; rtl/lec_shim/eh2_veer_lec_pack.sv; docs/adr/0016-multi-hart-cosim.md
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界与当前结论
 --------------------------------------------------------------------------------

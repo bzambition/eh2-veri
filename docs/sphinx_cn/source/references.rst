@@ -1,10 +1,12 @@
+:orphan:
+
 参考资料
-========
+==========================================================================================
 
 本附录列出 EH2 UVM 平台相关的内部文档、外部参考平台与关键源码入口。
 
 内部文档
---------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -30,7 +32,7 @@
      - 2026-05-07 full PASS 证据。
 
 外部 / 相邻项目
----------------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -50,7 +52,7 @@
      - EH2 RTL 源仓库，``RV_ROOT`` 默认指向此处。
 
 关键源码入口
-------------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -76,14 +78,14 @@
      - regression runner。
 
 文档构建参考
-------------
+------------------------------------------------------------------------------------------
 
-本手册的 Sphinx 结构参考 ``/home/host/eh2-verification/docs/sphinx_en``：
+本手册的 Sphinx 结构参考 ``/home/host/eh2-verification/docs/sphinx_en`` ：
 
-* ``docs/sphinx_en/source/conf.py``：Sphinx + rinoh 配置。
-* ``docs/build_reference_pdf.sh``：生成 catalog/status 后调用
-  ``sphinx-build -b rinoh``。
+* ``docs/sphinx_en/source/conf.py`` ：Sphinx + rinoh 配置。
+* ``docs/build_reference_pdf.sh`` ：生成 catalog/status 后调用
+  ``sphinx-build -b rinoh`` 。
 
-eh2-veri 当前提供 ``docs/build_manual_pdf.sh`` 与 ``make manual``。受限于
+eh2-veri 当前提供 ``docs/build_manual_pdf.sh`` 与 ``make manual`` 。受限于
 当前 Python 3.6 + rinohtype 兼容性，本次交付不要求现场生成 PDF。
 

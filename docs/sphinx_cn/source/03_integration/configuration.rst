@@ -8,7 +8,6 @@
 :source: Makefile; eh2_configs.yaml; dv/uvm/core_eh2/wrapper.mk; dv/uvm/core_eh2/scripts/metadata.py; dv/uvm/core_eh2/scripts/render_config_template.py
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  集成者需要区分的三类配置
 -----------------------------

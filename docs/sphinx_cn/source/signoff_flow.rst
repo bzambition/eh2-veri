@@ -1,5 +1,7 @@
+:orphan:
+
 Sign-off 流程
-=============
+==========================================================================================
 
 ``dv/uvm/core_eh2/scripts/signoff.py`` 是 EH2 UVM 平台的签发 gate。它既可以
 启动各 stage 回归，也可以在 ``--gate-only`` 模式下评估已有结果目录。
@@ -7,10 +9,10 @@ Sign-off 流程
 
 .. code-block:: bash
 
-   make signoff SIGNOFF_PROFILE=full PARALLEL=4
+   make signoff PROFILE=full PARALLEL=4
 
 Profile
--------
+------------------------------------------------------------------------------------------
 
 当前 profile 与 stage 映射：
 
@@ -32,7 +34,7 @@ Profile
 也可以通过 ``--stages smoke,cosim`` 覆盖 stage 清单。
 
 Stage 内容
-----------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -43,7 +45,7 @@ Stage 内容
      - 说明
    * - ``smoke``
      - ``tests/asm/smoke.hex``
-     - 单个 mailbox smoke，带 ``+disable_cosim=1``。
+     - 单个 mailbox smoke，带 ``+disable_cosim=1`` 。
    * - ``directed``
      - ``directed_tests/directed_testlist.yaml``
      - 3 个 deterministic directed test。
@@ -55,7 +57,7 @@ Stage 内容
      - 随机 testlist；sign-off 模式跳过 ``skip_in_signoff`` 项。
 
 Precheck
---------
+------------------------------------------------------------------------------------------
 
 默认 sign-off 先执行 precheck：
 
@@ -64,21 +66,21 @@ Precheck
 * simulator 或 ``build/simv`` 可用。
 * ``riscv32-unknown-elf-gcc`` / ``objcopy`` 可用。
 * riscv-dv ``run.py`` 存在。
-* cosim stage 需要 ``build/libcosim.so``。
-* default profile 是 ``NUM_THREADS=1``。
+* cosim stage 需要 ``build/libcosim.so`` 。
+* default profile 是 ``NUM_THREADS=1`` 。
 
-precheck 失败会阻塞最终状态，除非使用 ``--skip-precheck``。
+precheck 失败会阻塞最终状态，除非使用 ``--skip-precheck`` 。
 
 Gate 条件
----------
+------------------------------------------------------------------------------------------
 
 默认 gate 条件：
 
 * 所有 stage 状态必须 PASS。
-* 每个 stage pass rate 不低于 ``--min-pass-rate``，默认 100%。
-* 若启用 ``--require-coverage``，必须找到并解析 coverage report。
-* 若启用 ``--require-cosim-all-tests``，任何 ``cosim: disabled`` 都会阻塞。
-* 未加 ``--allow-warnings`` 时，stage command 使用 ``--fail-on-warnings``。
+* 每个 stage pass rate 不低于 ``--min-pass-rate`` ，默认 100%。
+* 若启用 ``--require-coverage`` ，必须找到并解析 coverage report。
+* 若启用 ``--require-cosim-all-tests`` ，任何 ``cosim: disabled`` 都会阻塞。
+* 未加 ``--allow-warnings`` 时，stage command 使用 ``--fail-on-warnings`` 。
 
 Coverage gate 支持：
 
@@ -89,12 +91,12 @@ Coverage gate 支持：
 * ``--min-toggle-coverage``
 * ``--min-functional-coverage``
 
-当前 full PASS 报告 coverage 状态是 ``SKIP``，说明 coverage 尚不是默认门限。
+当前 full PASS 报告 coverage 状态是 ``SKIP`` ，说明 coverage 尚不是默认门限。
 
 输出
 ----
 
-sign-off 输出目录默认 ``build/signoff``，可用 ``SIGNOFF_OUT`` 覆盖。关键文件：
+sign-off 输出目录默认 ``build/signoff`` ，可用 ``SIGNOFF_OUT`` 覆盖。关键文件：
 
 .. code-block:: text
 
@@ -108,7 +110,7 @@ sign-off 输出目录默认 ``build/signoff``，可用 ``SIGNOFF_OUT`` 覆盖。
 后续脚本消费。
 
 当前基线
---------
+------------------------------------------------------------------------------------------
 
 ``build/sf_full2/signoff_report.md`` 显示 2026-05-07 的 full profile PASS，
 ``build/sf_baseline2/`` 二次验证结果完全一致：
@@ -148,15 +150,15 @@ sign-off 输出目录默认 ``build/signoff``，可用 ``SIGNOFF_OUT`` 覆盖。
 
 .. note::
 
-   重跑 sign-off 时必须使用 ``SIGNOFF_ITERATIONS=1``（或在 Makefile 中指定），
+   重跑 sign-off 时必须使用 ``SIGNOFF_ITERATIONS=1`` （或在 Makefile 中指定），
    否则 testlist.yaml 中各 test 的 ``iterations`` 字段会全部展开（如 10 / 20 次），
    导致多 seed 随机测试出现预期外的超时/hang（非 cosim 问题），总 test 数
    会从 32 涨到 185。
 
 cosim:disabled 测试清单（34 项）
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-以下 riscv-dv 测试因 cosim 已知限制被标 ``cosim: disabled``，
+以下 riscv-dv 测试因 cosim 已知限制被标 ``cosim: disabled`` ，
 对应 issue 11/12/13/14：
 
 * ``riscv_random_instr_test`` — 中断/异常路径（RISK-9, issue 11）
@@ -179,7 +181,7 @@ cosim:disabled 测试清单（34 项）
 * ``riscv_dret_test`` / ``riscv_debug_ebreakmu_test`` / ``riscv_single_debug_pulse_test`` — 调试返回（issue 11）
 
 常用命令
---------
+------------------------------------------------------------------------------------------
 
 .. code-block:: bash
 
@@ -187,11 +189,11 @@ cosim:disabled 测试清单（34 项）
    make signoff_quick PARALLEL=4
 
    # 完整 gate
-   make signoff SIGNOFF_PROFILE=full PARALLEL=4 SIGNOFF_OUT=build/sf_full
+   make signoff PROFILE=full PARALLEL=4 SIGNOFF_OUT=build/sf_full
 
    # 只评估已有结果
-   make signoff_gate SIGNOFF_PROFILE=full SIGNOFF_OUT=build/sf_full
+   make signoff_gate PROFILE=full SIGNOFF_OUT=build/sf_full
 
    # 带 coverage 门限
-   make signoff SIGNOFF_PROFILE=full COV=1 SIGNOFF_OPTS="--require-coverage --min-line-coverage 80"
+   make signoff PROFILE=full COV=1 SIGNOFF_OPTS="--require-coverage --min-line-coverage 80"
 

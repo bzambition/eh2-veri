@@ -8,7 +8,6 @@ DCCM / ICCM 紧耦合存储接口
 :source: syn/include/eh2_param.vh; rtl/lec_shim/eh2_veer_lec_pack.sv; dv/uvm/core_eh2/tb/core_eh2_tb_top.sv; dv/formal/eh2_veer_sva.sv; dv/formal/properties/eh2_lsu_assert.sv; dv/formal/properties/eh2_pmp_assert.sv; dv/uvm/core_eh2/tests/asm/directed_toggle_dccm_walk.S; dv/uvm/core_eh2/tests/asm/directed_iccm_eccerror.S
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  源码边界
 --------------------------------------------------------------------------------

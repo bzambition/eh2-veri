@@ -25,7 +25,7 @@ EH2 的功能覆盖率模型通过 SystemVerilog covergroup 定义了
 * 交叉覆盖率（cross）的组合维度和覆盖率空洞分析方法
 * PMP 覆盖率模型的独立设计
 * 覆盖率收集流程：simulation → URG merge → dashboard → signoff gate
-* 当前 v1.1 的覆盖率状态与 v1.2 的提升目标
+* 当前覆盖率状态与 v1.2 的提升目标
 
 §2  覆盖率架构
 ---------------
@@ -270,7 +270,7 @@ EH2 的功能覆盖率模型通过 SystemVerilog covergroup 定义了
 .. note::
 
    文档中看到 ``SIGNOFF_MIN_FUNCTIONAL_COV`` 时，应理解为历史兼容参数名。当前
-   URG dashboard 的 release-facing 名称是 ``GROUP``，signoff parser 会把 group /
+   URG dashboard 的签核可见名称是 ``GROUP``，signoff parser 会把 group /
    covergroup 映射到 functional 兼容键。
 
 §7  Covergroup 架构
@@ -733,7 +733,7 @@ Coverage closure 不是“把 OVERALL 拉高”这一件事。EH2 当前采用 V
 -----------------------------
 
 当前 release gate 不直接把每个 coverage 维度都设成硬门槛。LINE、GROUP 等指标用于
-release-facing 质量判断；BRANCH、TOGGLE、ASSERT、FSM 和 OVERALL 则提供结构性健康度。
+签核可见 质量判断；BRANCH、TOGGLE、ASSERT、FSM 和 OVERALL 则提供结构性健康度。
 这与 Ibex 的工业实践一致：门槛必须稳定、可解释，dashboard 则保留更多诊断维度。
 
 .. list-table:: Coverage 指标使用方式

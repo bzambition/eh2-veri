@@ -1,5 +1,7 @@
+:orphan:
+
 目录结构
-========
+==========================================================================================
 
 本附录描述 ``/home/host/eh2-veri/`` 仓库的目录布局。条目按 **访问频次**
 排序：日常修改频繁的 UVM 验证代码在前；自动生成或外部依赖的目录在后。
@@ -16,10 +18,10 @@
 
 
 顶层目录树
-----------
+------------------------------------------------------------------------------------------
 
 下列树由 ``find /home/host/eh2-veri -maxdepth 3 -type d`` 生成，
-排除生成产物（``build/``、``out/``、``csrc/``）和 ``.git/``：
+排除生成产物（``build/``、``out/``、``csrc/`` ）和 ``.git/`` ：
 
 .. code-block:: text
 
@@ -80,10 +82,10 @@
 
 
 ``dv/uvm/core_eh2/`` — UVM 验证主干
------------------------------------
+------------------------------------------------------------------------------------------
 
 这是平台 **最常修改** 的目录。所有 UVM testbench、env、agent、test、scripts
-都在这里。布局对标 ``/home/host/ibex/dv/uvm/core_ibex/``：
+都在这里。布局对标 ``/home/host/ibex/dv/uvm/core_ibex/`` ：
 
 .. code-block:: text
 
@@ -180,9 +182,9 @@
 
 
 ``dv/cosim/`` — Spike DPI 桥
-----------------------------
+------------------------------------------------------------------------------------------
 
-C++ 桥接代码，编译后产出 ``build/libcosim.so``：
+C++ 桥接代码，编译后产出 ``build/libcosim.so`` ：
 
 .. code-block:: text
 
@@ -200,25 +202,25 @@ C++ 桥接代码，编译后产出 ``build/libcosim.so``：
    make cosim                   # 单独构建 libcosim.so
    make NO_COSIM=1 ...          # 显式跳过 cosim（escape hatch）
 
-详见 :doc:`cosim_scoreboard` 与 ADR ``docs/adr/0001-cosim-via-trace-and-probe.md``。
+详见 :doc:`cosim_scoreboard` 与 ADR ``docs/adr/0001-cosim-via-trace-and-probe.md`` 。
 
 
 ``rtl/`` 与 ``shared/`` — RTL 来源
-----------------------------------
+------------------------------------------------------------------------------------------
 
 EH2 RTL 不直接放在 ``eh2-veri/`` 内，而是从外部仓库 ``$RV_ROOT``
-（``/home/host/Cores-VeeR-EH2``）同步：
+（``/home/host/Cores-VeeR-EH2`` ）同步：
 
-* ``rtl/design/``：当前激活的 EH2 RTL 拷贝
-* ``rtl/snapshots/``：按 ``eh2_configs.yaml`` profile 渲染后的快照
-* ``shared/rtl/``：验证侧自有的 SystemVerilog 资源
+* ``rtl/design/`` ：当前激活的 EH2 RTL 拷贝
+* ``rtl/snapshots/`` ：按 ``eh2_configs.yaml`` profile 渲染后的快照
+* ``shared/rtl/`` ：验证侧自有的 SystemVerilog 资源
   （AXI4 接口、参数、slave 内存模型）
 
-修改 RTL **不应** 在 ``rtl/`` 内进行——上游仍是 ``$RV_ROOT``。
+修改 RTL **不应** 在 ``rtl/`` 内进行——上游仍是 ``$RV_ROOT`` 。
 
 
 ``vendor/`` — 第三方子模块
---------------------------
+------------------------------------------------------------------------------------------
 
 .. code-block:: text
 
@@ -229,11 +231,11 @@ EH2 RTL 不直接放在 ``eh2-veri/`` 内，而是从外部仓库 ``$RV_ROOT``
 用 ``dist_control_mode`` + ``directed_instr_*`` 控制指令分布。
 EH2 自有 stream 在 ``dv/uvm/core_eh2/riscv_dv_extension/`` 下扩展，
 通过 ``post_randomize`` 钩子 → ``gen_instr`` 桥接（详见 ADR 与
-issue ``02-trace-monitor-sample-wb``）。
+issue ``02-trace-monitor-sample-wb`` ）。
 
 
 ``docs/`` — 文档主干
---------------------
+------------------------------------------------------------------------------------------
 
 .. code-block:: text
 
@@ -262,11 +264,11 @@ issue ``02-trace-monitor-sample-wb``）。
    │
    └── cosim-correctness-analysis.md       cosim 正确性分析（19 KB）
 
-老版 ``doc/`` 目录保留为只读，逐步迁移到 ``docs/``。
+老版 ``doc/`` 目录保留为只读，逐步迁移到 ``docs/`` 。
 
 
 ``.scratch/`` — feature / issue / 快照
---------------------------------------
+------------------------------------------------------------------------------------------
 
 按 :term:`feature-slug` 组织：
 
@@ -305,13 +307,13 @@ issue ``02-trace-monitor-sample-wb``）。
    │
    └── snapshots/                          各 Phase 完成快照 tar.gz
 
-详见 :doc:`issue_tracker`。
+详见 :doc:`issue_tracker` 。
 
 
 生成产物与可清空目录
---------------------
+------------------------------------------------------------------------------------------
 
-下列目录 **不入库** （``.gitignore``），任何时候都可以删除并重新生成：
+下列目录 **不入库** （``.gitignore`` ），任何时候都可以删除并重新生成：
 
 .. list-table::
    :header-rows: 1
@@ -335,15 +337,15 @@ issue ``02-trace-monitor-sample-wb``）。
 
 .. warning::
 
-   ``build/`` 在 Phase 1 之前曾累积 7.7 GB 残留。**当前已清理**，
+   ``build/`` 在 Phase 1 之前曾累积 7.7 GB 残留。**当前已清理** ，
    ``.gitignore`` 也已加上规则。如再发现 ``build/`` 进入 git 历史，
-   立即用 ``git rm --cached`` 清理，并补 ``.gitignore``。
+   立即用 ``git rm --cached`` 清理，并补 ``.gitignore`` 。
 
 
 外部依赖路径
-------------
+------------------------------------------------------------------------------------------
 
-下列路径在仓库 **之外**，但被 ``env.sh`` 引用：
+下列路径在仓库 **之外** ，但被 ``env.sh`` 引用：
 
 .. list-table::
    :header-rows: 1
@@ -367,11 +369,11 @@ issue ``02-trace-monitor-sample-wb``）。
 * ``/home/host/riscv-dv/`` — riscv-dv 上游
 * ``/home/host/eh2-verification/`` — 姐妹项目（指令级 + QEMU 协同）
 
-详见 :doc:`references`。
+详见 :doc:`references` 。
 
 
 访问频次速查
-------------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1

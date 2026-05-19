@@ -1,12 +1,14 @@
+:orphan:
+
 脚本参考
-========
+==========================================================================================
 
 本章列出 ``dv/uvm/core_eh2/scripts`` 下的主要脚本及其职责。脚本均通过
 ``setup_imports.py`` 或入口脚本自身处理 Python import path，运行时建议先
-``source env.sh``。
+``source env.sh`` 。
 
 核心脚本
---------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -19,20 +21,20 @@
    * - ``signoff.py``
      - 签发 gate：stage 编排、precheck、coverage gate、最终报告。
    * - ``run_instr_gen.py``
-     - 包装 riscv-dv ``run.py --steps gen``，生成汇编。
+     - 包装 riscv-dv ``run.py --steps gen`` ，生成汇编。
    * - ``compile_test.py``
-     - 用 RISC-V GCC 编译 ``.S``，输出 binary 和 VMA-addressed hex。
+     - 用 RISC-V GCC 编译 ``.S`` ，输出 binary 和 VMA-addressed hex。
    * - ``run_rtl.py``
      - 构造 simulator 命令，运行 ``simv`` 或其它仿真器。
    * - ``check_logs.py``
      - 解析仿真 log，识别 PASS/FAIL、UVM_ERROR/FATAL、cycle、instruction。
    * - ``collect_results.py``
-     - 收集 result pickle/yaml，生成 ``report.json``。
+     - 收集 result pickle/yaml，生成 ``report.json`` 。
    * - ``metadata.py``
      - Ibex-style metadata 生成、保存、打印字段。
 
 辅助脚本
---------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -64,7 +66,7 @@
      - HTML、text、JUnit、DVSIM JSON 报告输出库。
 
 run_regress.py 关键参数
------------------------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -96,7 +98,7 @@ run_regress.py 关键参数
      - 并发运行数量。
 
 signoff.py 关键参数
--------------------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -121,16 +123,16 @@ signoff.py 关键参数
    * - ``--min-pass-rate``
      - stage pass rate 门限，默认 100。
    * - ``--require-cosim-all-tests``
-     - 禁止任何 riscv-dv test 标 ``cosim: disabled``。
+     - 禁止任何 riscv-dv test 标 ``cosim: disabled`` 。
    * - ``--allow-warnings``
      - 不把 warnings 作为 stage 失败。
    * - ``--skip-precheck``
      - 跳过工具与输入文件预检查。
 
 Python 单元测试
----------------
+------------------------------------------------------------------------------------------
 
-脚本自测位于 ``scripts/tests/test_regression_framework.py``。本地运行：
+脚本自测位于 ``scripts/tests/test_regression_framework.py`` 。本地运行：
 
 .. code-block:: bash
 

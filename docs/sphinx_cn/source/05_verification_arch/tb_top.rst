@@ -648,7 +648,7 @@ interface、mailbox 和 DUT wrapper，但结果不应写成 release coverage 数
 
 * 不用 NC/IMC 数据替代 URG dashboard。
 * 不把 NC coverage 数字写入 sign-off 表。
-* 不把历史 NC 迁移 bug 当作当前平台默认行为。
+* 不把历史 NC 迁移 bug 当作当前平台主线行为。
 
 §21  TB top 变更后的最小回归
 -----------------------------

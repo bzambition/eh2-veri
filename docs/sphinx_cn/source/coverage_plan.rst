@@ -1,12 +1,14 @@
+:orphan:
+
 覆盖率计划
-==========
+==========================================================================================
 
 本章给出 EH2 UVM 平台的覆盖率闭环计划。当前 sign-off full profile 已经
 验证功能流程 PASS，但 coverage 仍处于 ``SKIP`` 状态；因此本章既记录已
 实现的 coverage infrastructure，也定义后续纳入 gate 的建议路径。
 
 覆盖目标
---------
+------------------------------------------------------------------------------------------
 
 覆盖目标按风险排序：
 
@@ -22,10 +24,10 @@
      - riscv-dv arithmetic/load_store/mul_div/amo/random。
    * - 双发射
      - i0/i1 类别组合、压缩/非压缩组合、stall / flush 交叉。
-     - ``dual_issue_cg``、``cosim_dual_issue.S``。
+     - ``dual_issue_cg``、``cosim_dual_issue.S`` 。
    * - 中断 / NMI
      - timer、software、external、NMI、debug 中断交叉。
-     - IRQ tests、``interrupt_cg``。
+     - IRQ tests、``interrupt_cg`` 。
    * - Debug
      - JTAG halt/resume、single step、debug CSR、WFI/debug 组合。
      - debug test 类、JTAG agent log。
@@ -40,7 +42,7 @@
      - cosim scoreboard counters 与 directed tests。
 
 测试映射
---------
+------------------------------------------------------------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -66,20 +68,20 @@
      - PMP/ePMP region、permission、mseccfg。
 
 收敛指标
---------
+------------------------------------------------------------------------------------------
 
 建议 gate 分阶段打开：
 
-1. **阶段 A：可解析性**。``--require-coverage`` 打开，要求报告存在且能解析。
-2. **阶段 B：代码覆盖率基线**。line / condition / FSM / toggle 设置保守门限。
-3. **阶段 C：functional coverage 基线**。对 ``eh2_fcov_if`` 主 covergroup
+1. **阶段 A：可解析性** 。``--require-coverage`` 打开，要求报告存在且能解析。
+2. **阶段 B：代码覆盖率基线** 。line / condition / FSM / toggle 设置保守门限。
+3. **阶段 C：functional coverage 基线** 。对 ``eh2_fcov_if`` 主 covergroup
    建立历史基线，不要求一次达到 100%。
-4. **阶段 D：waiver review**。所有未覆盖 bin 要么补测试，要么有 active waiver。
-5. **阶段 E：full gate**。coverage 与 functional evidence 成为 full profile
+4. **阶段 D：waiver review** 。所有未覆盖 bin 要么补测试，要么有 active waiver。
+5. **阶段 E：full gate** 。coverage 与 functional evidence 成为 full profile
    的硬门限。
 
 waiver 准则
------------
+------------------------------------------------------------------------------------------
 
 接受 waiver 需要满足至少一条：
 
@@ -88,11 +90,11 @@ waiver 准则
 * 该组合由其它等价证据覆盖，重复测试收益很低。
 * 工具链无法生成对应指令，但已有 hand-written asm 或人工分析证明。
 
-waiver 必须写入 ``fcov/cov_waivers``，并在评审中确认 ``reason`` 不是
+waiver 必须写入 ``fcov/cov_waivers`` ，并在评审中确认 ``reason`` 不是
 "暂时没时间写测试"。
 
 与风险登记的关系
-----------------
+------------------------------------------------------------------------------------------
 
 覆盖率空洞若对应已知功能风险，应在 :doc:`risk_register` 中保留风险条目。
 例如：

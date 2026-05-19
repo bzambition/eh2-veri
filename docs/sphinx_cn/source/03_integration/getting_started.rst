@@ -8,7 +8,6 @@
 :source: README.md; env.sh; env.mk; Makefile; dv/uvm/core_eh2/Makefile; dv/uvm/core_eh2/scripts/run_regress.py; dv/uvm/core_eh2/scripts/signoff.py
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  本章边界
 -------------
@@ -204,9 +203,9 @@ regress、sign-off 与 gate-only 复演。这里不重复解释每个 driver 的
 * 第 137-146 行：sign-off 使用 `PROFILE`，不是旧文档中的 sign-off profile 变量名。
   `PROFILE` 可传给 `signoff.py --profile`，`GATE_ONLY` 会展开为 `--gate-only`，
   `LEC_BLOCKLEVEL` 会展开为 `--lec-blocklevel --lec-summary-path`。
-* 第 148-151 行：v1.1 release 的默认门限在 Makefile 中写为 line 65、functional
-  40，并允许 warnings。这里是门限，不是 release 已达成覆盖率数字；release 数字仍以
-  :file:`docs/PROJECT_STATUS.md` 和 :file:`docs/release-notes-v1.1.md` 为准。
+* 第 148-151 行：当前默认门限在 Makefile 中写为 line 65、functional
+  40，并允许 warnings。这里是门限，不是已达成覆盖率数字；当前实测数字以
+  2026-05-19 VCS demo 和 :ref:`signoff_flow` 为准。
 
 接口关系：
 
@@ -604,13 +603,13 @@ profile 在 `signoff.py` 中只包含 `smoke` 和 `directed` 两个 stage。
 * 被调用：用户 shell、`make demo`、deprecated `make signoff_quick`。
 * 调用：`signoff.py`、间接 `run_regress.py`、`make lint`、`make formal`、
   `make syn` 等 stage 命令。
-* 共享状态：`build/signoff*` 输出目录、`build/r3b_final` replay 输入、
+* 共享状态：`build/signoff*` 输出目录、stage result replay 输入、
   `syn/build/lec_summary.txt`、coverage dashboard。
 
 §9  full sign-off 与 replay
 ----------------------------
 
-full sign-off 是 v1.1 release gate 的主路径。顶层 `make signoff` 可以启动 full
+full sign-off 是当前 release gate 的主路径。顶层 `make signoff` 可以启动 full
 profile，`make signoff_replay` 则从既有 stage 结果目录复演 gate，不重新跑测试。
 
 关键代码（`README.md:L153-L172`）：
@@ -620,13 +619,13 @@ profile，`make signoff_replay` 则从既有 stage 结果目录复演 gate，不
    python3 dv/uvm/core_eh2/scripts/signoff.py \
      --profile full \
      --gate-only \
-     --output build/r4a_final \
-     --stage-result smoke=build/r3b_final/runs/smoke \
+     --output build/signoff_replay \
+     --stage-result smoke=build/demo/runs/smoke \
 
 逐段解释：
 
-* 第 153-160 行：release replay 直接调用 `signoff.py --profile full --gate-only`，
-  输出目录是 `build/r4a_final`。
+* 第 153-160 行：replay 直接调用 `signoff.py --profile full --gate-only`，
+  输出目录建议使用 `build/signoff_replay`。
 * 第 161-172 行：每个 `--stage-result` 把 stage 名映射到既有结果目录；coverage
   门限用 `--min-line-coverage`、`--min-toggle-coverage` 和
   `--min-functional-coverage` 传入。
@@ -639,7 +638,7 @@ profile，`make signoff_replay` 则从既有 stage 结果目录复演 gate，不
    	@echo "=== [signoff_replay] 数据源=$(STAGE_DATA_DIR) ==="
    	@if [ ! -d "$(STAGE_DATA_DIR)/runs" ]; then \
    	  echo "ERROR: STAGE_DATA_DIR=$(STAGE_DATA_DIR) 不存在或缺 runs/ 子目录。"; \
-   	  echo "       先跑 'make demo' 攒数据，或从 .scratch/r5_build_archive_* 恢复历史 r3b_final。"; \
+    echo "       先跑 'make demo' 攒数据，或显式传入已有 stage 结果目录。"; \
    	  exit 1; \
    	fi
    	python3 $(SCRIPTS_DIR)/signoff.py \
@@ -650,7 +649,7 @@ profile，`make signoff_replay` 则从既有 stage 结果目录复演 gate，不
 逐段解释：
 
 * 第 626-632 行：`signoff_replay` 先检查 `$(STAGE_DATA_DIR)/runs` 是否存在；
-  不存在就退出并提示先跑 `make demo` 或恢复历史 `r3b_final`。
+  不存在就退出并提示先跑 `make demo` 或显式传入已有 stage 结果目录。
 * 第 633-641 行：recipe 固定使用 `--profile full --gate-only`，并逐个传入
   `smoke`、`directed`、`cosim`、`riscvdv`、`csr_unit`、`compliance` 的结果目录。
 * 第 642-646 行：LEC、known-limited、coverage 门限和 warning 策略也在 replay
@@ -665,7 +664,7 @@ profile，`make signoff_replay` 则从既有 stage 结果目录复演 gate，不
      LEC_BLOCKLEVEL=1 COV=1 SIGNOFF_OUT=build/signoff
 
    # 使用现有 stage 结果复演 full gate
-   make signoff_replay STAGE_DATA_DIR=build/r3b_final \
+   make signoff_replay STAGE_DATA_DIR=build/demo \
      SIGNOFF_REPLAY_OUT=build/signoff_replay
 
 逐段解释：
@@ -680,7 +679,7 @@ profile，`make signoff_replay` 则从既有 stage 结果目录复演 gate，不
 * 被调用：release replay、CI gate 重评估、演示流程。
 * 调用：`signoff.py --gate-only`、已有 stage result 目录、LEC summary、
   coverage dashboard。
-* 共享状态：`build/r3b_final/runs/*`、`build/signoff_replay/`、
+* 共享状态：`<stage-data>/runs/*`、`build/signoff_replay/`、
   `syn/build/lec_summary.txt`。
 
 §10  deprecated alias 与替代命令

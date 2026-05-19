@@ -8,7 +8,6 @@
 :source: dv/uvm/core_eh2/env/core_eh2_env.sv
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
-:commit: feeac23a7c15114f9f962beca1758834f83dbf88
 
 §1  本部分边界
 --------------
