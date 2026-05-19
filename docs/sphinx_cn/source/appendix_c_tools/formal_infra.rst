@@ -1226,3 +1226,64 @@ formal testbench，但 `ifv_filelist.f` 当前实际列入的是 `ifv_bootstrap.
 * :file:`/home/host/eh2-veri/dv/formal/scripts/ifv_cex_dump.tcl`
 * :file:`/home/host/eh2-veri/dv/formal/spec/sail_setup.sh`
 * :file:`/home/host/eh2-veri/dv/formal/spec/sail_trace_check.py`
+
+§10  v2-9 Formal 资产审计
+--------------------------------------------------------------------------------
+
+v2-9 对 ``dv/formal`` 做一次文件级审计，目的是把 IFV、Symbiyosys、Sail 辅助脚本和
+known-fails 证据放在同一页。当前 full sign-off 的 formal stage 仍以 IFV
+``46/46`` PASS 为准；``*.sby`` 是开源可移植证明入口，不能把 bounded depth 结果直接写成
+release gate。
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 30 42
+
+   * - 资产
+     - 入口
+     - 审计结论
+   * - ``properties/eh2_dbg_assert.sv`` 等 7 个 property 文件
+     - :ref:`appendix_c_tools/formal_properties`
+     - SVA 源码解释放在 property 字典；本章只解释它们如何被 filelist/Tcl 调度。
+   * - ``scripts/ifv_prove.tcl``
+     - §6.1
+     - 主证明脚本，负责 clock、assertion load、prove 和 summary。
+   * - ``scripts/ifv_cex_dump.tcl``
+     - §6.2
+     - 诊断脚本，负责逐 property 输出 verbose block。
+   * - ``scripts/sby_dbg.sby`` / ``sby_dec.sby`` / ``sby_pic.sby`` / ``sby_pmp.sby``
+     - 本节
+     - Symbiyosys bounded proof 入口，服务 portability/debug，不替代 IFV sign-off。
+   * - ``known_fails.md``
+     - 本节
+     - 保存历史 CEX 分类、修复路径和 IFV 15.20 工具限制边界。
+
+关键代码（``dv/formal/scripts/sby_pmp.sby:L1-L18``）：
+
+.. literalinclude:: ../../../../dv/formal/scripts/sby_pmp.sby
+   :language: text
+   :lines: 1-18
+   :caption: /home/host/eh2-veri/dv/formal/scripts/sby_pmp.sby:L1-L18
+
+逐段解释：
+
+* 第 L1-L4 行：文件头说明这是 PMP/LSU address check 的 Symbiyosys 配置，运行命令为
+  ``sby -f scripts/sby_pmp.sby``。
+* 第 L6-L13 行：只定义 ``prove`` task，mode 为 ``prove``，depth 为 25，engine 是
+  ``smtbmc z3``。
+* 第 L15-L18 行：script 阶段先定义 ``FORMAL``，再读取 EH2 include/lib 和
+  ``eh2_lsu_addrcheck.sv``。
+
+关键代码（``dv/formal/known_fails.md:L1-L12``）：
+
+.. literalinclude:: ../../../../dv/formal/known_fails.md
+   :language: text
+   :lines: 1-12
+   :caption: /home/host/eh2-veri/dv/formal/known_fails.md:L1-L12
+
+逐段解释：
+
+* 第 L1-L4 行：记录 RC5 formal diagnostic 的 baseline 和当前修复后状态，说明历史失败数
+  与当前 sign-off pass 数不是同一口径。
+* 第 L5-L12 行：第一个条目把 ``a_core_rst_active_low`` 的 CEX 归类为 property bug，
+  并指出修复方式是用 ``!scan_mode`` gate functional reset。

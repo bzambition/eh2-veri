@@ -1237,3 +1237,78 @@ NC coverage 字段时，应分别解释 ``cover.cfg``/URG 与 ``cov_full_nc.ccf`
 * :file:`/home/host/eh2-veri/dv/uvm/core_eh2/yaml/rtl_simulation.yaml`
 * :file:`/home/host/eh2-veri/dv/uvm/core_eh2/scripts/signoff.py`
 * :file:`/home/host/eh2-veri/syn/include/eh2_param.vh`
+
+§25  v2-9 覆盖率配置审计
+-------------------------
+
+v2-9 对 coverage 配置做文件级审计。结论是：VCS/URG 是默认 release 参考；
+NC/Incisive 是完整备选 simulator，使用 ``cov_full_nc.ccf`` 和 IMC-compatible
+dashboard 做 cross-check。两条路径的 metric 名称不能混写：VCS 主线启用
+``line+tgl+assert+fsm+branch`` 五维 structural coverage，加上 functional GROUP；
+NC CCF 内部存在 block/expr/toggle/fsm/covergroup 选择规则，文档中只在 NC 章节解释。
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 28 44
+
+   * - 文件
+     - 归属
+     - 审计结论
+   * - ``cover.cfg``
+     - VCS compile coverage
+     - DUT-only hierarchy：``+tree core_eh2_tb_top.dut``；toggle 子树排除内部递归。
+   * - ``cov_fsm.cfg``
+     - VCS FSM extraction
+     - 明确 debug、DMA、LSU、IFU 等 FSM 的 current/next/states/transitions。
+   * - ``cov_fsm_reset_filter.cfg``
+     - VCS FSM reset filter
+     - 过滤 active-low reset transition，避免 reset 拖低 FSM coverage。
+   * - ``cov_full_nc.ccf``
+     - NC/Incisive coverage
+     - 选择 DUT、fcov interface、memory model 和 covergroup，并排除 TB bridge stub。
+   * - ``fcov/cov_waivers/*.yaml``
+     - functional coverage waiver
+     - 当前 2 条 active waiver：dual-issue presync stall、NMI during debug。
+
+关键代码（``dv/uvm/core_eh2/cov_full_nc.ccf:L1-L24``）：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/cov_full_nc.ccf
+   :language: text
+   :lines: 1-24
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/cov_full_nc.ccf:L1-L24
+
+逐段解释：
+
+* 第 L1-L8 行：文件头声明这是 NC/Incisive coverage CCF，并说明它移植 OpenTitan/Xcelium
+  的工业基线思想。
+* 第 L10-L19 行：注释列出 NC 默认 disabled、但 sign-off/cross-check 需要显式启用的评分项，
+  包括 assignment、branch、statement、toggle port-only 和 expression coverable 设置。
+* 第 L22-L24 行：先 ``deselect_coverage -all`` 和 ``deselect_coverage -covergroup``，
+  后续再按 DUT/interface/memory/covergroup 精确选择。
+
+关键代码（``dv/uvm/core_eh2/cov_fsm_reset_filter.cfg:L1-L5``）：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/cov_fsm_reset_filter.cfg
+   :language: text
+   :lines: 1-5
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/cov_fsm_reset_filter.cfg:L1-L5
+
+逐段解释：
+
+* 第 L1-L3 行：注释说明 VCS O-2018.09 的 reset filter 使用 ``signal=<reset> case=...``。
+* 第 L4-L5 行：``rst_l`` 和 ``dbg_rst_l`` 均为 active-low reset，因此 case 为 ``FALSE`` 时
+  过滤 reset-driven transitions；文件后续还包含 ``dbg_dm_rst_l``。
+
+关键代码（``dv/uvm/core_eh2/fcov/cov_waivers/nmi_during_debug_cross_waiver.yaml:L1-L16``）：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/fcov/cov_waivers/nmi_during_debug_cross_waiver.yaml
+   :language: yaml
+   :lines: 1-16
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/fcov/cov_waivers/nmi_during_debug_cross_waiver.yaml:L1-L16
+
+逐段解释：
+
+* 第 L1-L5 行：文件头标明 waiver 对象是 ``interrupt_cg.cp_int_in_debug`` 的 ``nmi x in_debug``
+  cross。
+* 第 L7-L16 行：YAML 根键为 ``waiver``，原因说明 RISC-V debug 规范要求 debug mode 中不接收
+  NMI，EH2 TLU 会 gate ``take_nmi``，因此该 cross 是架构不可达组合。

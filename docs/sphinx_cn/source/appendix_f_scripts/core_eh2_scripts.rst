@@ -3555,3 +3555,72 @@ schema、coverage 合并和共享工具函数。
   ``--lec-known-limited``。
 * :ref:`adr-0020` — Block-level LEC；`signoff.py` 暴露 ``--lec-blocklevel`` 和
   ``--lec-summary-path``。
+
+§14 v2-9 Python 脚本覆盖清单
+--------------------------------------------------------------------------------
+
+本节给出 ``dv/uvm/core_eh2/scripts`` 的文件级覆盖清单，作为后续逐函数精读的入口。
+本章前文已经深入解释核心调度类脚本；v2-9 先把边缘工具、report library 和单元测试纳入同一
+审计表，避免遗漏。
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 28 44
+
+   * - 文件
+     - 类型
+     - 当前文档入口
+   * - ``build_instr_gen.py``、``compile_test.py``、``run_instr_gen.py``
+     - riscv-dv generation/build
+     - §3、§4、§5、§6 和 §12。
+   * - ``run_regress.py``、``run_rtl.py``、``compile_tb.py``
+     - regression/RTL/TB 调度
+     - §4、§5、§6、§12。
+   * - ``check_logs.py``、``collect_results.py``、``test_run_result.py``
+     - result 判定与汇总
+     - §8、§9、§11、§12。
+   * - ``signoff.py``、``merge_cov.py``、``gen_html_report.py``
+     - release evidence
+     - §10、§12 和 :ref:`signoff_flow`。
+   * - ``metadata.py``、``scripts_lib.py``、``eh2_cmd.py``
+     - metadata/命令/配置公共层
+     - §2、§7 和 :ref:`appendix_f_scripts/yaml_configs`。
+   * - ``directed_test_schema.py``、``test_entry.py``、``setup_imports.py``
+     - schema / entry / import helper
+     - §7、§11、§12。
+   * - ``report_lib/*.py``
+     - 报告输出库
+     - 本节新增入口。
+   * - ``scripts/tests/test_*.py``
+     - 单元测试
+     - 本节新增入口。
+
+关键代码（``dv/uvm/core_eh2/scripts/report_lib/html.py:L1-L18``）：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/report_lib/html.py
+   :language: python
+   :lines: 1-18
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/scripts/report_lib/html.py:L1-L18
+
+逐段解释：
+
+* 第 L1-L8 行：文件头说明该模块生成 EH2 HTML regression report，使用 Mako template，
+  并说明它来自 Ibex report library 风格。
+* 第 L10-L14 行：导入 typing、datetime、os 和 report library 公共 helper；report lib
+  本身不调用 simulator。
+* 第 L17-L18 行：``pct_str()`` 是第一个格式化 helper，用于把浮点比例渲染成百分比字符串。
+
+关键代码（``dv/uvm/core_eh2/scripts/tests/test_regression_framework.py:L1-L18``）：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/tests/test_regression_framework.py
+   :language: python
+   :lines: 1-18
+   :caption: /home/host/eh2-veri/dv/uvm/core_eh2/scripts/tests/test_regression_framework.py:L1-L18
+
+逐段解释：
+
+* 第 L1-L2 行：脚本入口和 SPDX 许可证头。
+* 第 L4-L10 行：测试引入 ``os``、``sys``、``tempfile``、``unittest``、``json``、
+  ``yaml``、``Path`` 和 ``mock``。
+* 第 L12-L18 行：把脚本目录加入 ``sys.path``，随后导入 regression、RTL run、instr gen、
+  template rendering 和 log checking 模块，后续测试用临时 workspace 验证这些模块的组合行为。

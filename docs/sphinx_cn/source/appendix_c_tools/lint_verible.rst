@@ -477,3 +477,35 @@ waiver 均以注释形式存在，不会实际屏蔽规则。
 * :file:`/home/host/eh2-veri/lint/verible/verible.rules`
 * :file:`/home/host/eh2-veri/lint/verible/waivers.vbl`
 * :file:`/home/host/eh2-veri/lint/README.md`
+
+§10  v2-9 Verible/CI 审计
+------------------------------------------------------------------------------------------------------------------------
+
+本地 Verible gate 和 GitHub Actions gate 不是同一个入口：本地 ``lint/Makefile`` 会遍历
+RTL 与 DV ``.sv`` 文件，并加载 :file:`lint/verible/verible.rules`；
+CI workflow 当前只对 :file:`dv/uvm/core_eh2` 下的 ``.sv/.svh`` 做 Verible lint。
+review 时必须分清这两个范围，不能把 CI 的 DV-only 检查误写成完整 RTL+DV lint。
+
+关键代码（``.github/workflows/lint.yml:L19-L36``）：
+
+.. literalinclude:: ../../../../.github/workflows/lint.yml
+   :language: yaml
+   :lines: 19-36
+   :caption: /home/host/eh2-veri/.github/workflows/lint.yml:L19-L36
+
+逐段解释：
+
+* 第 L19-L25 行：CI 用 ``find dv/uvm/core_eh2 -name '*.sv' -o -name '*.svh'`` 收集 DV
+  文件，然后通过 ``xargs verible-verilog-lint`` 运行。
+* 第 L25-L26 行：CI 传入 ``--rules=-line-length,-no-trailing-spaces`` 和
+  ``--waiver_files=dv/uvm/core_eh2/fcov/cov_waivers/*.yaml``；这是 CI 特定配置，
+  与本地 ``lint/verible/waivers.vbl`` 不同。
+* 第 L28-L36 行：CI gate 只要 ``lint_report.txt`` 出现 ``E`` 或 ``FATAL`` 开头行就失败。
+
+审计结论：
+
+* 本地 full lint 章节继续以 :file:`lint/Makefile` 为主，覆盖 ``ALL_SV``。
+* CI 章节应引用 :file:`.github/workflows/lint.yml`，说明它是 pull request 上的快速
+  DV lint gate。
+* :file:`dv/uvm/core_eh2/fcov/cov_waivers/*.yaml` 是 coverage waiver YAML，不是
+  Verible 原生 ``waivers.vbl``；CI 当前把它传给 Verible 是源码事实，后续若改动需同步本文。

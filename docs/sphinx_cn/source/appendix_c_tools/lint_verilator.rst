@@ -365,3 +365,28 @@ Verible target 使用 ``ALL_SV``，即 RTL 和 DV 全部 ``.sv`` 文件；Verila
 * :file:`/home/host/eh2-veri/lint/verilator/verilator-config.vlt`
 * :file:`/home/host/eh2-veri/lint/verilator/verilator_waiver.vlt`
 * :file:`/home/host/eh2-veri/lint/README.md`
+
+§9  v2-9 Verilator waiver 审计
+------------------------------------------------------------------------------------------------------------------------
+
+v2-9 审计确认：当前 Verilator waiver 文件只有 policy skeleton，没有 active ``lint_off``。
+因此 full lint 的 Verilator 结果主要由命令行 ``-Wno-fatal``、``-Wno-UNOPTFLAT``、
+``-Wno-UNUSED`` 和 ``verilator-config.vlt`` 的 ``lint_on`` 决定。若后续新增 active
+waiver，必须在本章增加逐条原因。
+
+关键代码（``lint/verilator/verilator_waiver.vlt:L13-L27``）：
+
+.. literalinclude:: ../../../../lint/verilator/verilator_waiver.vlt
+   :language: text
+   :lines: 13-27
+   :caption: /home/host/eh2-veri/lint/verilator/verilator_waiver.vlt:L13-L27
+
+逐段解释：
+
+* 第 L13-L17 行：RTL waiver 示例被注释保留，说明 ``UNUSED`` 可能因单线程配置保留信号而
+  需要 style waiver。
+* 第 L19-L22 行：DV waiver 示例同样被注释；当前 Verilator target 实际只输入 ``RTL_SV``，
+  不会用它放行 UVM class 代码。
+* 第 L24-L27 行：third-party waiver 示例要求标注 ``VENDOR``，但当前也未生效。
+
+审计结论：当前文件没有 active waiver；``%Error`` 仍是 blocking gate。

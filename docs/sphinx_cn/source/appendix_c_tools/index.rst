@@ -351,3 +351,63 @@ testlist 配置。
 * :ref:`appendix_c_tools/lint_verible`
 * :ref:`appendix_c_tools/lint_verilator`
 * :ref:`appendix_c_tools/asm_tests`
+
+§11  v2-9 强制资产审计
+----------------------
+
+本节是 v2-9 的工具附录审计入口，用来确认 Formal、Synthesis/LEC、Lint 与 CI
+资产已经有可追溯章节承接。它不替代各深度页面的源码精读；它给后续 reviewer 一个
+统一入口，避免在 ``dv/formal``、``syn``、``lint`` 和 ``.github`` 之间手工查找。
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
+
+   * - 资产组
+     - 当前归属章节
+     - v2-9 审计结论
+   * - ``dv/formal/properties/eh2_*_assert.sv``
+     - :ref:`appendix_c_tools/formal_properties`
+     - 7 个 property 文件均已列入 formal properties 字典；Formal gate 证据仍以 IFV
+       ``46/46`` 为准。
+   * - ``dv/formal/scripts/*.tcl`` / ``*.sby``
+     - :ref:`appendix_c_tools/formal_infra`
+     - IFV 主证明、CEX dump 和 Symbiyosys 入口由基础设施章节承接。
+   * - ``syn/scripts/*.tcl`` / ``lec_blocklevel/*.tcl``
+     - :ref:`appendix_c_tools/syn_lec`、:ref:`appendix_c_tools/syn_nangate`
+     - DC synthesis、Formality block LEC 和 legacy diagnostic Tcl 均属于 syn 工具章节。
+   * - ``lint/verible`` / ``lint/verilator``
+     - :ref:`appendix_c_tools/lint_verible`、:ref:`appendix_c_tools/lint_verilator`
+     - rule、waiver skeleton、blocking gate 和 CI 触发条件分开解释。
+   * - ``.github/workflows/lint.yml``
+     - :ref:`ci_pipeline`、:ref:`appendix_c_tools/lint_verible`
+     - CI 只跑 Verible DV lint；本地 full lint 仍由 ``lint/Makefile`` 跑双引擎。
+
+关键代码（``.github/workflows/lint.yml:L1-L18``）：
+
+.. literalinclude:: ../../../../.github/workflows/lint.yml
+   :language: yaml
+   :lines: 1-18
+   :caption: /home/host/eh2-veri/.github/workflows/lint.yml:L1-L18
+
+逐段解释：
+
+* 第 L1-L5 行：workflow 名称和注释说明这是 blocking CI gate；waiver 文件位置也在注释中给出。
+* 第 L7 行：触发条件是 ``push`` 和 ``pull_request``。
+* 第 L10-L18 行：job 在 Ubuntu 上运行，先 checkout，再下载固定版本 Verible。
+
+关键代码（``syn/scripts/lec_blocklevel/lec_common.tcl:L1-L20``）：
+
+.. literalinclude:: ../../../../syn/scripts/lec_blocklevel/lec_common.tcl
+   :language: tcl
+   :lines: 1-20
+   :caption: /home/host/eh2-veri/syn/scripts/lec_blocklevel/lec_common.tcl:L1-L20
+
+逐段解释：
+
+* 第 L1-L4 行：注释说明该 common Tcl 服务 R3-C block-level Formality，复用 RC4
+  reference wrapper 和 synthesized netlist，不屏蔽 compare points。
+* 第 L6-L18 行：脚本设置 ``EH2_ROOT``、``BUILD_DIR``、``RPT_DIR`` 和 Formality
+  run directory；如果环境变量 ``R3C_FM_RUN_DIR`` 存在，则优先使用外部指定目录。
+* 第 L19-L20 行：切换到 run directory，并把 ``hdlin_temporary_dir`` 指向该目录。
+  31635/31635 PASS 的汇总由 :file:`syn/scripts/lec_summary.py` 读取各 block 报告后生成。
