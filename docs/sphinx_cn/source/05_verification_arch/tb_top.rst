@@ -1165,8 +1165,8 @@ TB top 或本章文档变更提交前，人工复核以下条目：
 * ``core_eh2_tb_top.sv`` literalinclude 片段能覆盖对应主题。
 * 所有 virtual interface 字段名与 driver/monitor ``get`` 字段一致。
 * mailbox 地址、PASS/FAIL 数据和最新 demo 数据未漂移。
-* NC 只被描述为单测波形调试通道。
-* coverage 口径仍是 VCS/URG、5 维度、DUT-only scope。
+* NC/Incisive 被描述为完整备选 simulator；VCS 仍是默认 release 参考。
+* coverage 口径仍是 VCS/URG 5 维度、DUT-only scope；NC 口径需标明 ``cov_full_nc.ccf`` / IMC。
 * Ibex 对照只比较方法论，不把 Ibex memory interface 写成 EH2 AXI4。
 * Sphinx build 无 warning。
 
@@ -1251,15 +1251,17 @@ registration 在 elaboration 阶段可见。
    EH2 UVM TB top instantiates eh2_veer_wrapper, three AXI4 slave memories
    (LSU/IFU/SB), IRQ/JTAG/Halt-Run/trace/probe/RVFI/fcov interfaces, mailbox
    PASS/FAIL detection at 0xD0580000, and UVM config_db publication. Dynamic
-   sign-off uses the VCS mainline; NC is limited to single-test waveform debug.
+   sign-off uses VCS as the default release reference; NC is a full alternate
+   simulator for cross-checks and SHM/SimVision waveform debug.
 
 中文报告中可写为：
 
 .. code-block:: text
 
    TB top 负责 EH2 DUT、三组 AXI4 memory、主动 stimulus interface、trace/probe/RVFI
-   sidecar、coverage interface 和 mailbox 结束条件。当前 release 数据来自 VCS/URG
-   主线；NC/Incisive 仅用于单测波形排查。
+   sidecar、coverage interface 和 mailbox 结束条件。当前默认 release 数据来自
+   VCS/URG；NC/Incisive 作为完整备选 simulator，可用于 cross-check 和 SHM/SimVision
+   波形排查。
 
 §41  本章完成标准
 --------------------------------------------------------------------------------

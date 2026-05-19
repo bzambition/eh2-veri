@@ -153,7 +153,8 @@ block-level LEC。
      - EH2 sign-off 检查 directed/riscv-dv/cosim 池，并对 disabled/skip 要求 waiver
    * - coverage
      - Ibex VCS 使用 URG，Xcelium 有独立商业覆盖率合并路径
-     - EH2 当前 release 只接受 VCS/URG；NC coverage 不进入风险闭环
+     - EH2 默认 release 参考是 VCS/URG；NC/Incisive 作为完整备选 simulator，
+       通过 IMC 生成兼容 dashboard，用于 cross-check 和备选签核证据
    * - ISS 不可比场景
      - Ibex 通过 testlist/waiver 标明不可比
      - EH2 对硬件完整性 fault injection 使用 ADR-0017 和 YAML waiver
@@ -179,8 +180,8 @@ block-level LEC。
    * - R-01
      - closed
      - sign-off 默认 simulator 口径漂移
-     - ``Makefile`` 默认 VCS，``signoff`` 拒绝非 VCS
-     - 保持 NC 只用于波形调试
+     - ``Makefile`` 默认 VCS，``signoff`` 接受 ``vcs``/``nc`` 并提示 VCS 是默认
+     - 文档统一写成 VCS 默认主线、NC 完整备选 simulator
    * - R-02
      - closed
      - coverage scope 包含 TB stub 导致数字失真
@@ -249,8 +250,9 @@ block-level LEC。
    * - R-15
      - controlled
      - NC 迁移历史产生覆盖率真实性 bug
-     - 当前 sign-off 强制 VCS，NC coverage 不扫描
-     - NC 文档仅保留波形调试入口
+     - 当前 release 参考仍以 VCS/URG demo 数据为准；NC 走 ``cov_full_nc.ccf`` + IMC
+       独立 dashboard，不复用早期错误数据
+     - 保留 NC cross-check、sign-off/demo 和 wave_debug 入口，同时标明 branch 口径差异
    * - R-16
      - watch
      - 双线程场景仍需要更多 per-hart stress
@@ -311,7 +313,8 @@ PASS、waiver schema PASS、formal 46/46、LEC 31635/31635。
      - 分类失败模式，增加 directed repro 或修复生成约束
    * - NC 调试结果被误用为 release coverage
      - coverage 真实性受损
-     - 删除该证据链，重新生成 VCS/URG dashboard
+     - 区分 VCS/URG release 参考与 NC/IMC 备选 dashboard；需要 release 参考时重新生成
+       VCS/URG dashboard
 
 参考资料
 --------

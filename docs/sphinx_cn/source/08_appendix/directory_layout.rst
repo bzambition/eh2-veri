@@ -219,7 +219,7 @@ Ibex 的 `dv/uvm/core_ibex` 目录把 testbench、scripts、yaml、coverage 和 
      esac
    done < dv/uvm/core_eh2/eh2_tb.f
 
-   # 确认 sign-off 入口仍强制 VCS 主线
+   # 确认 sign-off 入口默认 VCS，并允许 NC 备选 simulator
    rg -n "signoff:|demo:|SIMULATOR" Makefile
 
    # 确认 Sphinx 附录在总目录中

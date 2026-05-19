@@ -114,7 +114,8 @@ URG merge 失败先看 `merge_cov.py` 的工具调用和错误码：
      - 处理建议
    * - ``signoff`` 拒绝 simulator
      - :file:`Makefile` 的 ``signoff`` target
-     - sign-off 必须使用 VCS；NC 只用于波形调试
+     - 当前只接受 ``SIMULATOR=vcs`` 或 ``SIMULATOR=nc``；VCS 是默认 release 参考，
+       NC 是完整备选 simulator
    * - VCS compile 找不到 RTL
      - :file:`dv/uvm/core_eh2/eh2_rtl.f`
      - 检查上游 RTL clone、filelist 路径和环境变量

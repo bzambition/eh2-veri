@@ -13,17 +13,19 @@
 
 读懂本章前，请先确认：
 
-* :ref:`glossary_pretest` — 能解释 LINE、BRANCH、TOGGLE、ASSERT、FSM、GROUP 和 OVERALL；
+* :ref:`glossary_pretest` — 能解释 :term:`LINE`、:term:`BRANCH`、:term:`TOGGLE`、
+  :term:`ASSERT`、:term:`FSM`、:term:`GROUP` 和 :term:`OVERALL`；
 * :ref:`functional_coverage` — 知道 covergroup 与 code coverage 的区别；
 * :ref:`signoff_flow` — 知道 coverage gate 如何进入最终 PASS/FAIL；
-* :ref:`build_flow` — 知道 VCS 使用 ``cover.cfg``，NC 使用 ``cov_full_nc.ccf``；
+* :ref:`build_flow` — 知道 :term:`VCS` 使用 :term:`cover.cfg`，:term:`NC/Incisive`
+  使用 :term:`cov_full_nc.ccf`；
 * 基础 coverage closure 概念：coverage hole、bin、waiver、unreachable。
 
 学完本章你应该能够：
 
 1. 说明为什么当前 VCS 维度是 ``line+tgl+assert+fsm+branch``，不把 ``cond`` 写成主线维度。
 2. 解释为什么 LINE gate 是 65、GROUP/functional gate 是 40，而不是机械追求 80/60。
-3. 区分 VCS URG dashboard 和 NC IMC 统一 dashboard 的口径差异。
+3. 区分 :term:`VCS` URG dashboard 和 :term:`NC/Incisive` :term:`IMC` 统一 dashboard 的口径差异。
 4. 把一个 coverage hole 分流到 directed test、riscv-dv constraint、SVA bind 或 waiver。
 5. 在 review 中阻止“扩大 scope、关采样、改 dashboard”这类虚假提升。
 
@@ -31,16 +33,17 @@
 --------
 
 EH2 覆盖率规划的核心原则是「先保证真实，再追求更高」。当前平台默认 simulator 是
-VCS，主线 release 口径采用 Synopsys VCS/URG 路径，对齐 lowRISC Ibex 工业实现；NC
-作为完整备选 simulator 也可收 coverage，并通过 IMC 合并生成与 URG 兼容的
-``dashboard.txt``。VCS code coverage 维度固定为
+:term:`VCS`，主线 release 口径采用 Synopsys VCS/URG 路径，对齐 lowRISC Ibex 工业实现；
+:term:`NC/Incisive` 作为完整备选 simulator 也可收 :term:`coverage`，并通过
+:term:`IMC` 合并生成与 URG 兼容的 ``dashboard.txt``。:term:`VCS` code coverage 维度固定为
 ``line+tgl+assert+fsm+branch``，功能覆盖以 SystemVerilog covergroup 在 URG
-dashboard 中显示为 ``GROUP``，总体分显示为 ``OVERALL``。本章不把 ``cond`` 作为
+dashboard 中显示为 :term:`GROUP`，总体分显示为 :term:`OVERALL`。本章不把 ``cond`` 作为
 当前 VCS sign-off 维度。
 
-2026-05-19 01:02 demo 的 coverage 证据为：LINE 95.05%、BRANCH 84.97%、TOGGLE
-53.52%、ASSERT 33.33%、FSM 54.74%、GROUP 69.42%、OVERALL 65.17%。这些数字来自
-DUT subtree 的 URG 原生 dashboard，scope 由 ``cover.cfg`` 编译期限定到
+2026-05-19 01:02 demo 的 coverage 证据为：:term:`LINE` 95.05%、:term:`BRANCH`
+84.97%、:term:`TOGGLE` 53.52%、:term:`ASSERT` 33.33%、:term:`FSM` 54.74%、
+:term:`GROUP` 69.42%、:term:`OVERALL` 65.17%。这些数字来自
+DUT subtree 的 URG 原生 dashboard，scope 由 :term:`cover.cfg` 编译期限定到
 ``core_eh2_tb_top.dut``。同一 demo 的实跑覆盖率字段为 102/104 (98.1%)，它表示
 sign-off 报告中实际运行项目占计划项目的比例，不等同于 URG coverage 百分比。
 
@@ -48,7 +51,8 @@ sign-off 报告中实际运行项目占计划项目的比例，不等同于 URG 
 ------------------
 
 coverage plan 有 5 个目标。第一，所有 sign-off coverage 必须来自真实 simulator
-coverage database：VCS 使用 ``.vdb`` 和 URG，NC 使用 ``cov_work`` 和 IMC，不允许通过
+coverage database：:term:`VCS` 使用 ``.vdb`` 和 URG，:term:`NC/Incisive` 使用
+``cov_work`` 和 :term:`IMC`，不允许通过
 脚本凭空合成看似漂亮的 dashboard。第二，scope 必须是 DUT-only，
 防止 testbench interface、stub 或未驱动信号污染结果。第三，gate 只使用当前
 Makefile 和 ``signoff.py`` 真正执行的阈值。第四，低覆盖项要被记录为改进方向，

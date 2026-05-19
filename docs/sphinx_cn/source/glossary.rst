@@ -18,8 +18,12 @@
 
    ADR
      Architecture Decision Record。架构决策记录。仓库内位于 ``docs/adr/`` ，
-     5 篇决策（cosim 路径、AXI4 被动监控、NUM_THREADS 范围、RVFI 等价 trace、
-     Spike store 宽度对齐）。每个决策一个 markdown 文件。
+     当前包含 0001-0020 共 20 篇主要决策，覆盖 cosim、AXI4、RVFI、CSR、
+     compliance、formal、synthesis、LEC 和 waiver。索引见 ``docs/adr/INDEX.md``。
+
+   agent
+     UVM agent。封装某一类接口或抽象通道的 driver、monitor、sequencer 和配置对象。
+     EH2 主环境中包含 AXI4、IRQ、JTAG、halt/run、trace 和 cosim agent。
 
    AXI4
      ARM AMBA AXI4 总线协议。EH2 在 AXI4 配置下暴露四个 master port：IFU、
@@ -65,6 +69,24 @@
      ``random_instr_test`` （中断 cosim 未实现）、bitmanip 高 illegal-instr
      率、atomic SC.W 分歧三类用例。
 
+   cover.cfg
+     VCS coverage hierarchy 配置文件，路径为
+     ``dv/uvm/core_eh2/cover.cfg``。核心职责是在编译期用
+     ``+tree core_eh2_tb_top.dut`` 锁定 DUT-only scope，避免 testbench stub
+     污染 LINE、BRANCH、TOGGLE 等 code coverage 数字。
+
+   coverage
+     覆盖率。EH2 文档中同时包含 code coverage（LINE、BRANCH、TOGGLE、
+     ASSERT、FSM）和 functional coverage（GROUP/covergroup）。所有 sign-off
+     coverage 必须来自真实 simulator database：VCS 走 ``.vdb`` + URG，NC 走
+     ``cov_work`` + IMC。
+
+   cov_full_nc.ccf
+     NC/Incisive coverage 配置文件，路径为
+     ``dv/uvm/core_eh2/cov_full_nc.ccf``。它是 VCS ``cover.cfg`` 的 NC 等价物，
+     选择 DUT-only instance、打开 statement/branch/toggle/fsm/covergroup 相关采样，
+     并约束 IMC dashboard 的统计口径。
+
    DCCM
      Data Closely Coupled Memory。EH2 数据紧耦合存储。配置 64 KB（默认 profile）。
 
@@ -83,7 +105,7 @@
 
    DUT
      Device Under Test。本平台中即 VeeR EH2 核
-     （``rtl/design/`` ）。在 testbench 中以 ``dut`` 实例化，通过
+     （上游 clone 位于 ``/home/host/Cores-VeeR-EH2/design/`` ）。在 testbench 中以 ``dut`` 实例化，通过
      ``eh2_veer_wrapper`` 包装。
 
    eh2_configs.yaml
@@ -94,6 +116,11 @@
      Sign-off 模式编译宏。打开后 ``base_test`` 启用更严格的检查
      （cycle timeout、UVM 报告等级）。
 
+   env
+     Verification environment。UVM 验证环境，通常继承 ``uvm_env``。EH2 的
+     ``core_eh2_env`` 在 build/connect 阶段创建并连接各 agent、scoreboard、
+     coverage 和配置对象。
+
    env.sh
      仓库根目录的 shell 环境脚本。``source env.sh`` 后导出
      ``$EH2_VERIF_ROOT`` / ``$RV_ROOT`` / ``$GCC_PREFIX`` / ``$QEMU_BIN``
@@ -102,6 +129,26 @@
    fcov
      Functional Coverage。功能覆盖率。主入口 ``dv/uvm/core_eh2/fcov/eh2_fcov_if.sv``
      共 797 行，通过 ``eh2_fcov_bind.sv`` bind 到 DUT。
+
+   ASSERT
+     Assertion coverage。断言覆盖率。2026-05-19 demo 中 VCS/URG dashboard 的
+     ASSERT 为 33.33%。它不等同于 formal property pass 数，后者在 formal stage
+     中统计为 46/46 PASS。
+
+   BRANCH
+     Branch coverage。分支覆盖率。2026-05-19 demo 中 VCS/URG dashboard 的
+     BRANCH 为 84.97%。VCS 能单独报告该维度；NC/IMC 路径会在 dashboard 中说明
+     branch 与 block/LINE 的工具口径差异。
+
+   FSM
+     Finite-State Machine coverage。状态机覆盖率。2026-05-19 demo 中 VCS/URG
+     dashboard 的 FSM 为 54.74%，后续 closure 依赖 ``cov_fsm.cfg``、
+     ``cov_fsm_reset_filter.cfg`` 和定向状态机测试。
+
+   GROUP
+     SystemVerilog covergroup coverage。URG dashboard 中的功能覆盖率列，
+     2026-05-19 demo 为 69.42%。``signoff.py`` 内部历史键名为
+     ``functional``，文档展示统一写 GROUP。
 
    feature-slug
      ``.scratch/<feature-slug>/`` 的命名约定，每个 feature 一个目录，
@@ -133,6 +180,20 @@
      ``dv/cosim/`` 编译产物，VCS / Xcelium 在 elaboration 时通过 ``-sv_lib``
      链入。**缺失时报 :term:`DPI-DIFNF`** 。
 
+   IMC
+     Cadence coverage merge/report 工具。NC/Incisive 覆盖率从 ``cov_work`` 中的
+     ``.ucd`` / ``.ucm`` 数据库进入 IMC，``merge_cov.py`` 将其汇总为与 URG 文本列
+     兼容的 ``dashboard.txt``。
+
+   LEC
+     Logic Equivalence Checking。逻辑等价检查。EH2 syn stage 使用 Synopsys
+     Formality block-level LEC；2026-05-19 demo 结果为 31635/31635 compare
+     points PASS。
+
+   LINE
+     Line coverage。行覆盖率。2026-05-19 demo 中 VCS/URG dashboard 的 LINE 为
+     95.05%，当前 hard gate 为 ``SIGNOFF_MIN_LINE_COV=65``。
+
    LSU
      Load/Store Unit。EH2 访存单元。AXI4 master port 之一，是 :term:`NB-load`
      与 :term:`BE` 语义的源头。
@@ -149,6 +210,11 @@
    mhpm
      Machine Hardware Performance Monitor 一组 CSR（``mhpmcounter*`` /
      ``mhpmevent*`` ）。EH2 实现需 fixup 才能与 Spike 对齐。
+
+   monitor
+     UVM monitor。被动采样接口或 DUT 内部 probe 信号并发布 transaction，不主动
+     驱动 DUT。EH2 中典型 monitor 包括 AXI4 monitor、trace monitor 和
+     ``eh2_dut_probe_monitor``。
 
    meipt / meivt / meicidpl
      EH2 自定义中断 CSR。``meivt`` = External Interrupt Vector Table，
@@ -177,6 +243,11 @@
      Make 变量。``make NO_COSIM=1 ...`` 显式跳过 cosim 链接，用于
      ``libcosim.so`` 暂时不可用时的 escape hatch。
 
+   NC/Incisive
+     Cadence Incisive/NC simulator。本平台把它作为 VCS 的完整备选 simulator：
+     支持 compile、smoke、regress、sign-off、demo、coverage 和 SHM/SimVision
+     波形调试。默认 release 参考仍是 VCS。
+
    NUM_THREADS
      EH2 硬件线程数（1 或 2）。**当前 cosim 仅支持 NUM_THREADS=1**
      （ADR 0003 + issue 41）。
@@ -184,6 +255,10 @@
    pending_trace_q
      scoreboard 内 :term:`trace pkt` 等待队列。在写回事件先到达时，
      trace_pkt 进队等候匹配。
+
+   OVERALL
+     URG 综合 score。2026-05-19 demo 中 OVERALL 为 65.17%。它用于趋势观察，
+     不替代 LINE 与 GROUP 的分项 gate。
 
    PIC
      Programmable Interrupt Controller。EH2 自有的可编程中断控制器，
@@ -235,9 +310,15 @@
      DPI 函数。从 Spike 取最近一次 cosim 比对的错误描述字符串，便于
      UVM 端打印。
 
+   scoreboard
+     UVM scoreboard。负责把 DUT 观测结果与参考模型或协议期望比对。EH2 的核心
+     scoreboard 是 ``eh2_cosim_scoreboard``，消费 trace/probe/Spike DPI 事件并报告
+     PC、写回、异常、中断和内存访问 mismatch。
+
    sign-off gate
-     ``dv/uvm/core_eh2/scripts/signoff.py`` 。4 个 stage：smoke /
-     directed / cosim / riscvdv，全过才算签发。当前状态：full PASS。
+     ``dv/uvm/core_eh2/scripts/signoff.py`` 。full profile 包含 9 个 stage：
+     smoke、directed、cosim、riscv-dv、lint、csr_unit、compliance、formal 和 syn。
+     2026-05-19 demo 为 9/9 stages PASS。
 
    skip_in_signoff
      testlist 字段。值为 ``true`` 时该 test 不计入 sign-off 统计
@@ -278,6 +359,11 @@
      DUT 输出的 "已退役指令" 包，含 PC + insn + exception + interrupt
      + tval。**RTL 层 i0 与 i1 同周期同时给出** （program order：i0 在前）。
 
+   TB
+     Testbench。包住 DUT 的验证顶层和 UVM 世界。EH2 的 TB top 是
+     ``dv/uvm/core_eh2/tb/core_eh2_tb_top.sv``，负责实例化 DUT、memory model、
+     interface、coverage bind 和 ``run_test``。
+
    triage
      issue 分诊。本仓库定义 5 个角色：:term:`needs-triage` /
      :term:`needs-info` / :term:`ready-for-agent` / :term:`ready-for-human`
@@ -287,6 +373,11 @@
      Synopsys VCS Unified Report Generator。覆盖率合并工具。
      在 ``COV=1`` 时由 ``merge_cov.py`` 调用。
 
+   TOGGLE
+     Toggle coverage。信号翻转覆盖率。2026-05-19 demo 中 VCS/URG dashboard 的
+     TOGGLE 为 53.52%；VCS 主线使用 ``-cm_tgl portsonly``，NC 路径用
+     ``set_toggle_portsonly`` 对齐。
+
    UVM 1.2
      Universal Verification Methodology 标准版本。本平台沿用 Synopsys
      VCS 自带的 UVM 1.2 实现。
@@ -295,6 +386,10 @@
      UVM 严重错误等级。:term:`check_logs` 把任何 ``UVM_FATAL`` 视为
      测试失败。Phase 1 修复了被 banner overlap 误判的情况
      （commit b245f7c）。
+
+   VCS
+     Synopsys VCS simulator。当前默认 simulator 和 release 参考路径。VCS coverage
+     使用 ``-cm line+tgl+assert+fsm+branch``、``cover.cfg`` 和 URG 原生 dashboard。
 
    vseqr
      virtual sequencer。``core_eh2_vseqr.sv`` 。聚合各 agent sequencer，

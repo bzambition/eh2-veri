@@ -215,13 +215,15 @@ EH2-Veri 当前同时保留两类脚本入口：
 .. code-block:: bash
 
    signoff:
-   	@if [ "$(SIMULATOR)" != "vcs" ]; then \
-   	  echo "ERROR: signoff 仅支持 SIMULATOR=vcs (当前为 $(SIMULATOR))。"; \
-   	  echo "       NC 仅用于 'make smoke|regress SIMULATOR=nc WAVES=1' 单测波形调试。"; \
-   	  exit 1; \
-   	fi
-   	@$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory asm)
-   	@$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(SIGNOFF_OUT) COV=$(COV))
+     @if [ "$(SIMULATOR)" != "vcs" ] && [ "$(SIMULATOR)" != "nc" ]; then \
+       echo "ERROR: signoff 仅支持 SIMULATOR=vcs (默认) 或 SIMULATOR=nc。"; \
+       exit 1; \
+     fi
+     @if [ "$(SIMULATOR)" = "nc" ]; then \
+       echo "[signoff] 注意：当前用 NC simulator (备选)。VCS 是 sign-off 默认。"; \
+     fi
+     @$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory asm)
+     @$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(SIGNOFF_OUT) COV=$(COV))
    	python3 $(SCRIPTS_DIR)/signoff.py \
    	  --profile $(PROFILE) \
    	  --simulator $(SIMULATOR) \

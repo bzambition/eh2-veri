@@ -50,8 +50,8 @@ cosim waiver 到期复审、compliance 差异分析和工具版本升级。
      - 当前事实
      - 文档处理方式
    * - simulator
-     - 顶层 ``Makefile`` 默认 ``SIMULATOR ?= vcs``，``signoff`` 显式拒绝非 VCS
-     - 所有 release/sign-off 命令使用 VCS；NC 只出现在波形调试说明中
+     - 顶层 ``Makefile`` 默认 ``SIMULATOR ?= vcs``，``signoff`` 接受 ``vcs``/``nc``
+     - release 参考默认 VCS；NC/Incisive 作为完整备选 simulator 与 cross-check 路径
    * - coverage
      - ``VCS_COV_METRICS := line+tgl+assert+fsm+branch``
      - 不把 ``cond`` 作为当前 sign-off 维度或未来必须 gate
@@ -208,10 +208,12 @@ PIC、DMA、DMI/JTAG 和 block-level LEC。
      - EH2 当前实现
    * - coverage merge
      - :file:`/home/host/ibex/dv/uvm/core_ibex/scripts/merge_cov.py` 使用 URG 合并 VCS ``test.vdb``
-     - :file:`dv/uvm/core_eh2/scripts/merge_cov.py` 保留 Ibex 风格 URG 路径，并明确 NC 不参与 sign-off coverage
+     - :file:`dv/uvm/core_eh2/scripts/merge_cov.py` 保留 Ibex 风格 URG 路径；standalone
+       入口也支持 NC ``cov_work`` 走 IMC 生成兼容 dashboard
    * - simulator yaml
      - :file:`/home/host/ibex/dv/uvm/core_ibex/yaml/rtl_simulation.yaml`
-     - EH2 的 :file:`dv/uvm/core_eh2/yaml/rtl_simulation.yaml` 保留多 simulator 模板，但主线签核强制 VCS
+     - EH2 的 :file:`dv/uvm/core_eh2/yaml/rtl_simulation.yaml` 保留多 simulator 模板；
+       Makefile 当前默认 VCS，同时允许 NC 备选签核
    * - RVFI/cosim
      - Ibex design 原生 RVFI，scoreboard 直接消费 retire 信息
      - EH2 通过 trace/probe/RVFI adapter 组合形成等价 retire 视图，相关决策见 ADR-0001、ADR-0004、ADR-0015、ADR-0018

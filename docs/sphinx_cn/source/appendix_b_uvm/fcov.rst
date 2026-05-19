@@ -2013,8 +2013,9 @@ block-level LEC 为 31635/31635 PASS。
 .. warning::
 
    本章不再引用历史迁移期间的临时 coverage 数字。当前权威口径是
-   VCS ``simv.vdb`` 加 URG 原生报告，NC 仅用于 ``SIMULATOR=nc WAVES=1``
-   单测波形调试。
+   默认 VCS ``simv.vdb`` 加 URG 原生报告；NC/Incisive 作为完整备选 simulator
+   使用 ``cov_full_nc.ccf``、``cov_work`` 和 IMC 生成兼容 dashboard。比较两条路径时
+   必须标明 NC 152 branch/block 口径差异。
 
 §14 参考资料
 --------------------------------------------------------------------------------

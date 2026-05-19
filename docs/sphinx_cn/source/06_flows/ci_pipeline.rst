@@ -1037,8 +1037,8 @@ PDF 输出文档。
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **职责**：说明当前 replay 使用已有 stage result、block-level LEC summary
-和 coverage path，而不是重新运行所有 stage。replay 仍强制 VCS 口径；NC 产物不作为
-coverage 或 sign-off evidence。
+和 coverage path，而不是重新运行所有 stage。默认 replay 读取 VCS/URG 口径；如果
+显式传入 NC/IMC dashboard，报告必须标明它是完整备选 simulator 的 cross-check 或备选证据。
 
 **关键命令**：
 

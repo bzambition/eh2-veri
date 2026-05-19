@@ -218,10 +218,11 @@ EH2 的功能覆盖率模型通过 SystemVerilog covergroup 定义了
 §5  覆盖率收集流程
 -------------------
 
-当前主线覆盖率流完全对齐 Ibex/VCS/URG 方式：编译时使用
+当前默认覆盖率流对齐 Ibex/VCS/URG 方式：编译时使用
 ``-cm line+tgl+assert+fsm+branch``，用 ``cover.cfg`` 限定 ``core_eh2_tb_top.dut``
-子树，回归结束后用 ``urg`` 合并/出报表。NC/IMC 不参与 sign-off 覆盖率；NC 只用于
-单测波形调试。
+子树，回归结束后用 ``urg`` 合并/出报表。NC/Incisive 是完整备选 simulator，使用
+``cov_full_nc.ccf`` 生成 ``cov_work``，再由 IMC 路径合并为兼容 dashboard；VCS 仍是
+默认 release 参考。
 
 .. code-block:: bash
 
@@ -382,7 +383,7 @@ PMP/ePMP scaffold 和 RVFI adapter sidecar。
      - EH2
    * - 仿真器
      - VCS 主线
-     - VCS 主线，NC 只用于波形单测
+     - 默认 VCS，NC/Incisive 作为完整备选 simulator 与 cross-check 路径
    * - 覆盖率维度
      - ``line+tgl+assert+fsm+branch``
      - 同一 5 维度，不使用 condition 作为 sign-off 维度

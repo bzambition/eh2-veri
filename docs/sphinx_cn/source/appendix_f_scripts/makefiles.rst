@@ -725,7 +725,7 @@ directed testlist。
 .. code-block:: makefile
 
    signoff:
-      @# VCS 是 sign-off 主线；NC 仅保留调试和 cross-check 入口。
+      @# VCS 是 sign-off 默认；NC 也可作完整备选 simulator / cross-check 入口。
               python3 $(SCRIPTS_DIR)/signoff.py \
                 --profile $(PROFILE) \
                 --simulator $(SIMULATOR) \

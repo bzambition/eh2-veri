@@ -1215,9 +1215,10 @@ covergroup，也不影响 :file:`eh2_fcov_if.sv` 内部的 covergroup 采样。
    make smoke SIMULATOR=nc WAVES=1
    make regress SIMULATOR=nc TEST=<name> WAVES=1
 
-NC 不参与 :command:`make signoff`、:command:`make demo` 或覆盖率 sign-off。
-如果某段配置同时给出 VCS 和 NC coverage 字段，应以 VCS 字段作为签核口径，
-NC 字段只视为 legacy/debug 模板。
+NC/Incisive 当前参与 :command:`make signoff`、:command:`make demo` 和覆盖率
+cross-check/备选签核。默认 release 参考仍是 VCS/URG；当配置同时给出 VCS 和
+NC coverage 字段时，应分别解释 ``cover.cfg``/URG 与 ``cov_full_nc.ccf``/IMC 的口径，
+不能把 NC branch/block 限制误写成 VCS 数字。
 
 §24  参考资料
 --------------
