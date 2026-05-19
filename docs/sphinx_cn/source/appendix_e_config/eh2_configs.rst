@@ -1313,6 +1313,24 @@ NC CCF 内部存在 block/expr/toggle/fsm/covergroup 选择规则，文档中只
 * 第 L7-L16 行：YAML 根键为 ``waiver``，原因说明 RISC-V debug 规范要求 debug mode 中不接收
   NMI，EH2 TLU 会 gate ``take_nmi``，因此该 cross 是架构不可达组合。
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：从脚本、Makefile 或配置文件中找到本页讲到的真实入口。
+
+.. code-block:: bash
+
+   rg -n "def main|argparse|subprocess|class |target:" dv/uvm/core_eh2/scripts scripts Makefile | head -80
+   rg -n "cover.cfg|cov_full_nc.ccf|rtl_simulation.yaml|eh2_configs.yaml" docs/sphinx_cn/source/appendix_e_config docs/sphinx_cn/source/appendix_f_scripts
+
+**进阶题**：检查工具职责是否按 VCS/NC/Formal/Syn/Lint 分开，而不是混成一个流程。
+
+.. code-block:: bash
+
+   rg -n "urg|imc|vcs|irun|xrun|dc_shell|fm_shell|verilator|verible" docs/sphinx_cn/source/appendix_c_tools docs/sphinx_cn/source/appendix_f_scripts | head -100
+
 §10  自检 5 问
 ------------------------
 

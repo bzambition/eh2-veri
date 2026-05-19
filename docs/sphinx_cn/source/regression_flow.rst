@@ -147,6 +147,24 @@ Sign-off Skip
 * ``--fail-on-warnings`` 是 sign-off 行为；日常调试可先不用。
 * 不要把工具链或仿真器路径硬编码进 testlist，统一放到 env 或 Makefile。
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：不用启动仿真，先确认本页命令入口和默认 simulator 与 Makefile 一致。
+
+.. code-block:: bash
+
+   make help | sed -n "1,120p"
+   rg -n "SIMULATOR \?= vcs|signoff:|regress:|VCS_COV_METRICS|NC_COV_CCF" Makefile
+
+**进阶题**：检查流程章节中的 sign-off 数字是否仍与 2026-05-19 VCS demo 对齐。
+
+.. code-block:: bash
+
+   rg -n "95.05|31635/31635|102/104|line\+tgl\+assert\+fsm\+branch" docs/sphinx_cn/source/06_flows docs/sphinx_cn/source/07_decisions
+
 §10  自检 5 问
 ------------------------
 

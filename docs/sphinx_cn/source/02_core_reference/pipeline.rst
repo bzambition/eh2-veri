@@ -1521,6 +1521,24 @@ coverage closure 时需要注意 3 个边界：
    自检八问：全部通过。本文件 ~600+ 行，九段完整，含 4 张时序波形、3 类写回、
    4 种 stall、6 条双发射规则、flush 优先级表、时钟门控策略、trace 格式详解。
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：核对本页关联的 RTL 名称是否能在上游 design 目录和中文手册代码引用中同时找到。
+
+.. code-block:: bash
+
+   rg -n "module |input |output |parameter" /home/host/Cores-VeeR-EH2/design | head -40
+   rg -n "literalinclude::|code-block:: verilog" docs/sphinx_cn/source/02_core_reference docs/sphinx_cn/source/appendix_a_rtl | head -40
+
+**进阶题**：确认该 RTL 主题没有脱离当前 VCS/URG coverage 和 LEC 证据口径。
+
+.. code-block:: bash
+
+   rg -n "core_eh2_tb_top.dut|cover.cfg|31635/31635|95.05" docs/sphinx_cn/source/02_core_reference docs/sphinx_cn/source/appendix_a_rtl
+
 §10  自检 5 问
 ------------------------
 

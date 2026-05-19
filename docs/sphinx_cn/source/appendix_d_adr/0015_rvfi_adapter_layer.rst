@@ -122,6 +122,24 @@ RVFI adapter 位于项目 rtl/ 目录，作为验证层和 LEC shim 的一部分
 * :ref:`appendix_b_uvm/index`
 * :ref:`appendix_c_tools/index`
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：确认本页 ADR 编号、标题和 Sphinx 页面都能在索引中找到。
+
+.. code-block:: bash
+
+   sed -n "1,160p" docs/adr/INDEX.md
+   ls docs/sphinx_cn/source/appendix_d_adr
+
+**进阶题**：检查 ADR 是否说明状态、决策后果，以及后续修订时应新增 superseding ADR。
+
+.. code-block:: bash
+
+   rg -n "Status:|Date:|Decision|Consequences|supersed" docs/adr docs/sphinx_cn/source/appendix_d_adr | head -100
+
 §10  自检 5 问
 ------------------------
 

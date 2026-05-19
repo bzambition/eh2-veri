@@ -324,6 +324,24 @@ release note 已引用后改文件名。ADR 正文可以记录当时的上下文
 * :ref:`known_limitations` - ADR 后仍保留的限制。
 * :ref:`appendix_d_adr_index` - ADR 全文附录。
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：把本页决策、风险或 coverage 计划追溯到 ADR 索引和 Sphinx 决策页。
+
+.. code-block:: bash
+
+   sed -n "1,120p" docs/adr/INDEX.md
+   rg -n "ADR|waiver|LEC|coverage|cosim" docs/sphinx_cn/source/07_decisions docs/sphinx_cn/source/appendix_d_adr | head -80
+
+**进阶题**：确认决策页没有回到旧 coverage 维度或旧 NC 口径。
+
+.. code-block:: bash
+
+   rg -n "line\+tgl\+assert\+fsm\+branch|31635/31635|95.05|NC/Incisive" docs/sphinx_cn/source/07_decisions docs/sphinx_cn/source/appendix_d_adr
+
 §10  自检 5 问
 ------------------------
 

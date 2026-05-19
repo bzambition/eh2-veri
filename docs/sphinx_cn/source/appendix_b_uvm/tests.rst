@@ -3093,6 +3093,24 @@ cosim-disabled waiver、skip-in-signoff waiver、directed pool 完整性和 real
 * 源文件：:file:`/home/host/eh2-veri/dv/uvm/core_eh2/tests/core_eh2_rvfi_smoke_test.sv`
 * 源文件：:file:`/home/host/eh2-veri/dv/uvm/core_eh2/tests/test_signoff_gates.py`
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：从真实 UVM 源码中找出本页组件所属 class、interface 或 covergroup。
+
+.. code-block:: bash
+
+   rg -n "class .*extends|uvm_component_utils|uvm_object_utils|phase" dv/uvm/core_eh2 | head -60
+   rg -n "interface|analysis_port|scoreboard|covergroup" dv/uvm/core_eh2 | head -60
+
+**进阶题**：检查本页是否把 EH2 和 Ibex 的一致点、差异点分开描述。
+
+.. code-block:: bash
+
+   rg -n "core_ibex|Ibex|与 Ibex" docs/sphinx_cn/source/05_verification_arch docs/sphinx_cn/source/appendix_b_uvm | head -80
+
 §10  自检 5 问
 ------------------------
 

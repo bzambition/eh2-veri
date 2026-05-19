@@ -609,6 +609,25 @@ compile define；若需要 RTL 参数变化，必须先确认具体 compile/file
 * :file:`/home/host/eh2-veri/dv/uvm/core_eh2/riscv_dv_extension/riscv_core_setting.tpl.sv`
 * :file:`/home/host/eh2-veri/syn/include/eh2_param.vh`
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：确认本页提到的环境变量和 Make 变量都来自当前工作区真实文件。
+
+.. code-block:: bash
+
+   pwd
+   sed -n "1,40p" env.sh
+   rg -n "SIMULATOR|PROFILE|CONFIG|WAVES|COV" Makefile env.mk
+
+**进阶题**：对比 VCS 默认 release 路径和 NC/Incisive 备选路径是否被清楚分流。
+
+.. code-block:: bash
+
+   rg -n "NC/Incisive|VCS/URG|cov_full_nc|cover.cfg" docs/sphinx_cn/source/03_integration docs/sphinx_cn/source/06_flows
+
 §10  自检 5 问
 ------------------------
 

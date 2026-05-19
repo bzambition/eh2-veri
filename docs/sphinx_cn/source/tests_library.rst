@@ -132,6 +132,24 @@ riscv-dv 扩展
 5. 若加入 sign-off，确认不需要 ``skip_in_signoff`` ；若必须 skip，创建
    本地 issue 并写清解锁条件。
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：确认索引、术语、附录或兼容旧入口不会破坏整本手册构建。
+
+.. code-block:: bash
+
+   sphinx-build -W --keep-going -b html docs/sphinx_cn/source /tmp/eh2-doc-practice-check
+   rg -n "自检 5 问|动手练习" docs/sphinx_cn/source | head -80
+
+**进阶题**：抽查参考页是否使用当前统一平台口径。
+
+.. code-block:: bash
+
+   rg -n "95.05|31635/31635|line\+tgl\+assert\+fsm\+branch|NC/Incisive" docs/sphinx_cn/source | head -100
+
 §10  自检 5 问
 ------------------------
 

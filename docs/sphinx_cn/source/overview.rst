@@ -236,6 +236,24 @@ EH2 是 Western Digital 开源的中端 RISC-V 处理器，关键参数如下：
    * :doc:`quickstart` — 5 分钟跑通 smoke + cosim 的最小步骤。
    * :doc:`architecture_decisions` — 5 条 ADR 的完整文本。
 
+§9  动手练习
+------------------------
+
+下面练习优先使用只读审计命令；需要商业 EDA license 的仿真、综合或形式化命令，请在对应工具环境就绪后再运行。
+
+**入门题**：确认索引、术语、附录或兼容旧入口不会破坏整本手册构建。
+
+.. code-block:: bash
+
+   sphinx-build -W --keep-going -b html docs/sphinx_cn/source /tmp/eh2-doc-practice-check
+   rg -n "自检 5 问|动手练习" docs/sphinx_cn/source | head -80
+
+**进阶题**：抽查参考页是否使用当前统一平台口径。
+
+.. code-block:: bash
+
+   rg -n "95.05|31635/31635|line\+tgl\+assert\+fsm\+branch|NC/Incisive" docs/sphinx_cn/source | head -100
+
 §10  自检 5 问
 ------------------------
 
