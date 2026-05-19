@@ -9,6 +9,40 @@ Cosim Scoreboard — 详细参考
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+----------------
+
+读懂本章前，建议先补齐以下基础：
+
+* :doc:`/05_verification_arch/agent_cosim` — 先看 cosim agent 如何把三路 analysis
+  数据送进 scoreboard。
+* :doc:`/05_verification_arch/agent_trace` — 理解 ``eh2_trace_seq_item`` 中的 PC、
+  instruction、写回寄存器、CSR、异常和中断字段。
+* :doc:`/05_verification_arch/agent_axi4` — 知道 LSU AXI4 transaction 怎样表示
+  store、AMO 和外部内存访问。
+* :doc:`/02_core_reference/dual_thread` — EH2 是双线程 core，scoreboard 中的
+  ``thread_id``、per-hart 队列和 Spike hart 路由都以此为前提。
+* 基础 SystemVerilog queue / struct / task 语法，以及 UVM ``fork`` 并发任务模型。
+
+本章是 Tier 2 中最重要的调试章节。你不需要先会写 scoreboard，但必须能看懂
+``trace_fifo.get()``、``dut_probe_fifo.get()``、``lsu_axi_fifo.get()`` 三条线程为什么
+不能合并成一条顺序流程：EH2 的 retire、异步写回和 AXI4 store 时序并不总在同一个
+cycle 对齐。
+
+学完本章你应该能够：
+
+1. 用一张图说明 retire trace、probe hint 和 LSU AXI4 transaction 进入 scoreboard 后
+   分别由哪个 ``run_cosim_*`` task 消费。
+2. 解释一条普通 ALU 指令从 ``trace_fifo.get()`` 到
+   ``riscv_cosim_step()`` 再到 ``compare_instruction()`` 的完整顺序。
+3. 解释为什么 store/AMO 必须先用 ``riscv_cosim_notify_dside_access()`` 通知 Spike，
+   再让 Spike step。
+4. 解释 ``pending_wb_q`` / ``async_wb_q`` 与 ``wb_tag`` 严格匹配策略如何避免
+   non-blocking load 或 DIV 写回乱序导致的假 mismatch。
+5. 遇到 ``PC mismatch``、``GPR mismatch``、``memory access mismatch`` 或
+   ``Cosim observed zero instructions`` 时，能根据 §45 的 checklist 选择第一条 grep
+   命令。
+
 §1  本章导读
 -------------
 

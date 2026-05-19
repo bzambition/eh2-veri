@@ -9,6 +9,37 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+----------------
+
+读懂本章前，请先确认：
+
+* :doc:`/04_verification_overview/goals_scope` — 知道本平台 sign-off 为什么同时看
+  directed、riscv-dv、compliance、formal、lint、synthesis 和 LEC。
+* :doc:`/06_flows/build_flow` — 知道 VCS 覆盖率编译选项来自 ``-cm line+tgl+assert+fsm+branch``
+  与 ``cover.cfg``，NC 对应 ``cov_full_nc.ccf``。
+* :doc:`/06_flows/signoff_flow` — 知道最新 demo 的覆盖率口径：LINE 95.05%、
+  TOGGLE 53.52%、FSM 54.74%、BRANCH 84.97%、ASSERT 33.33%、GROUP 69.42%。
+* 基础 SystemVerilog coverage：``covergroup``、``coverpoint``、``bins``、``cross`` 和
+  ``sample()``。
+* 基础 UVM regression 概念：一组测试不只看 pass/fail，还要看是否触达风险点。
+
+本章讨论的是功能覆盖率（functional coverage），不是代码覆盖率（code coverage）。
+代码覆盖率回答"RTL 行/分支/FSM 是否被执行过"，功能覆盖率回答"设计意图中的场景是否
+被打到"。EH2 的 ``eh2_fcov_if.sv`` 和 ``eh2_pmp_fcov_if.sv`` 通过 ``bind`` 接到 DUT
+内部信号上，因此读本章时要同时关注信号来源、采样条件和 bin 的语义。
+
+学完本章你应该能够：
+
+1. 解释 ``eh2_fcov_bind.sv`` 为什么用 SystemVerilog ``bind``，而不是改 DUT RTL。
+2. 在 ``eh2_fcov_if.sv`` 中找到指令分类、流水线 stall、interrupt/debug/CSR 等
+   coverpoint 的采样入口。
+3. 说明 PMP coverage 为什么拆成 ``eh2_pmp_fcov_if.sv``，而不是塞进主 fcov interface。
+4. 跑 ``make signoff COV=1`` 后，知道去 ``build/signoff_vcs/cov_merged/dashboard.txt``
+   查 GROUP 与 LINE/BRANCH/TOGGLE 的不同含义。
+5. 当某个 bin 长期 0% 时，能判断应该补 directed test、调 riscv-dv constraint，
+   还是把不可达场景写入 waiver。
+
 §1  本章导读
 -------------
 

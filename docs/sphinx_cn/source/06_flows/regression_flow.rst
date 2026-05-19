@@ -9,6 +9,40 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+--------------------------------------------------------------------------------
+
+读懂本章前，请先具备：
+
+* :doc:`/06_flows/build_flow` — 已理解编译产物如何按 ``build/<target>_<simulator>/``
+  隔离，知道 VCS 是默认 simulator，NC 是完整备选 simulator。
+* :doc:`/05_verification_arch/tests_library` — 知道 base test、integration test、
+  directed assembly 和 riscv-dv generated test 的区别。
+* :doc:`/05_verification_arch/riscv_dv_extension` — 知道 riscv-dv testlist 如何生成
+  assembly，再编译成 hex 给 RTL 跑。
+* :doc:`/05_verification_arch/agent_cosim` — 知道 ``+enable_cosim=1`` 时 regression
+  的 pass/fail 不只来自 UVM 退出，还来自 Spike lock-step diff。
+* 基础 Python：能读懂 ``argparse``、list/dict、``ProcessPoolExecutor`` 和返回码。
+
+本章关注"一次 regression 如何被拆成多次 test run"。direct regression path 由
+``run_regress.py`` 直接读取 testlist、生成 test matrix 并调用 ``run_single_test()``；
+Ibex-style staged path 则先写 metadata，再由 ``wrapper.mk`` 根据依赖图调度生成、
+编译、仿真、检查和结果收集。两条路径的输出形态不同，但最终都要形成可审计的
+``regr.log``、``report.json``、``result.yaml`` 或 JUnit 报告。
+
+学完本章你应该能够：
+
+1. 说明 ``make smoke``、``make regress``、``make run_regress`` 和
+   ``make run GOAL=...`` 分别走哪条路径。
+2. 在 ``run_regress.py`` 中找到 test matrix、seed 派生、parallel 调度和
+   ``run_single_test()`` 的调用顺序。
+3. 解释 ``check_logs.py`` 如何把 UVM fatal、``TEST PASSED``、simulator exit code 和
+   NC 特殊返回行为归一化成 pass/fail。
+4. 跑 ``make regress TESTLIST=dv/uvm/core_eh2/directed_tests/directed_testlist.yaml``
+   后，知道从 ``report.json`` 追到单个 ``result.yaml`` 与 ``sim_*.log``。
+5. 当 regression fail rate 接近 25% ceiling 时，能判断应该先看 testlist、
+   simulator 编译、cosim waiver，还是单测日志中的真实 RTL mismatch。
+
 §1  流程边界
 --------------------------------------------------------------------------------
 
@@ -1196,3 +1230,144 @@ JUnit XML 和 JSON。
   :file:`/home/host/eh2-veri/dv/uvm/core_eh2/scripts/check_logs.py`、
   :file:`/home/host/eh2-veri/dv/uvm/core_eh2/scripts/collect_results.py`、
   :file:`/home/host/eh2-veri/dv/uvm/core_eh2/scripts/test_entry.py`。
+
+§7  实测数据与门限
+--------------------------------------------------------------------------------
+
+回归流程最终服务 sign-off。最新 VCS 主线 demo 数据固定采用 2026-05-19 01:02
+的完整运行结果：``Status: PASS``、``9/9 Stages PASS``、实跑覆盖率
+``102/104 (98.1%)``、LEC ``31635/31635 PASS``。在回归相关 stage 中，directed 为
+``40/40 (100%)``，riscv-dv 为 ``370/395 (93.67%)``，compliance 为 ``85/88
+(96.59%)``。
+
+这些数字的工程含义如下：
+
+.. list-table:: Regression stage 数据口径
+   :header-rows: 1
+   :widths: 18 18 36 28
+
+   * - Stage
+     - 最新结果
+     - 由哪个流程产生
+     - 主要输出
+   * - smoke
+     - PASS
+     - 顶层 ``make smoke`` 调用 ``run_regress.py --test smoke``
+     - ``build/smoke_vcs/regr.log``、``report.json``
+   * - directed
+     - ``40/40``
+     - ``directed_testlist.yaml`` 展开为 40 个 directed assembly run
+     - 每个 ``<test>_s<seed>/result.yaml``
+   * - cosim
+     - PASS
+     - ``cosim_testlist.yaml`` 加 ``+enable_cosim=1`` 触发 Spike diff
+     - scoreboard mismatch 日志和 result pickle
+   * - riscvdv
+     - ``370/395``
+     - ``riscv_dv_extension/testlist.yaml`` 生成随机 assembly 后跑 RTL
+     - ``regr_junit.xml``、``report.json``
+   * - compliance
+     - ``85/88``
+     - RISC-V compliance 子环境生成 signature 并比对
+     - ISA 分组 ``report.json``
+
+Sign-off 层对回归失败的核心门限是 ``25%`` fail-rate ceiling。也就是说，一个 stage
+可以有少量已解释失败并通过 waiver 或 minimum-pass threshold 处理；但失败率超过
+``25%`` 时，无论 pass count 是否看起来不少，都不能视为工业可签收结果。
+
+§8  常见失败模式与排查
+--------------------------------------------------------------------------------
+
+.. list-table:: Regression 常见失败模式
+   :header-rows: 1
+   :widths: 24 30 30 16
+
+   * - 现象
+     - 根因
+     - 排查命令
+     - 修复路径
+   * - ``DIRECTED_ASM_MISSING``
+     - testlist 中的 ``asm`` 路径相对 ``dv/uvm/core_eh2`` 解析后不存在
+     - ``grep -n "asm:" dv/uvm/core_eh2/directed_tests/*.yaml``
+     - 修 testlist 路径，或把 `.S` 放回 tests/asm
+   * - ``GEN_NO_ASM``
+     - riscv-dv generator 运行完成但没有产出 assembly
+     - ``grep -n "Generated" build/*/gen.log``
+     - 查 ``run_instr_gen.py`` 参数和 riscv-dv test name
+   * - ``COMPILE_ERROR``
+     - assembly 编译失败，常见为 toolchain 或 linker script 路径错误
+     - ``grep -n "error:" build/*/*/compile.log``
+     - 查 ``compile_test.py``、``tests/asm/*.ld`` 和 RISC-V GCC
+   * - ``SIM_TIMEOUT``
+     - RTL 仿真未退出，可能是 test 未写 pass mailbox 或 trap 没到预期路径
+     - ``tail -80 build/*/*/sim_*.log``
+     - 查 directed test 退出协议与 ``check_logs.py`` 判定
+   * - ``PC mismatch`` / ``GPR mismatch``
+     - cosim 开启后 RTL retire 与 Spike 状态不同步
+     - ``grep -n "mismatch\\|cosim" build/*/*/sim_*.log``
+     - 先看 :ref:`cosim_scoreboard` §45，再查对应 instruction
+   * - fail rate 超过 ``25%``
+     - 不是单点失败，而是 stage 整体质量或基础设施异常
+     - ``python3 dv/uvm/core_eh2/scripts/signoff.py --help``
+     - 先收敛公共根因，再考虑 waiver
+
+§9  动手练习
+--------------------------------------------------------------------------------
+
+入门题（5 分钟）：
+
+运行一次最小 smoke 回归：
+
+.. code-block:: bash
+
+   make smoke SIMULATOR=vcs COV=0
+   python3 -m json.tool build/smoke_vcs/report.json | head -40
+
+你需要在 JSON 中找到 ``total``、``passed``、``failed`` 和第一条 test 的 ``seed``。
+参考答案位置：本章 §5.3 的 ``generate_report_json`` 字段说明。
+
+进阶题（30 分钟）：
+
+运行 directed testlist 的 dry-scale 回归，观察每个 test directory 的命名：
+
+.. code-block:: bash
+
+   make regress TESTLIST=dv/uvm/core_eh2/directed_tests/directed_testlist.yaml \
+     SIMULATOR=vcs COV=0 PARALLEL=1 OUT=build/regress_directed_vcs
+   find build/regress_directed_vcs -name result.yaml | head
+
+你需要解释 ``run_regress.py`` 如何把 test name、seed 和 output directory 组合成
+单测目录。参考答案位置：本章 §3.3 和 §3.4。
+
+挑战题（2 小时）：
+
+选择一个 riscv-dv test，在 ``riscv_dv_extension/testlist.yaml`` 中把迭代次数临时降到
+``1``，运行 ``make regress``，然后比较生成的 assembly、``sim_*.log`` 和
+``report.json``。完成后恢复修改。这个练习的目标是理解 generator、compiler、RTL run
+和 log checker 四段之间的契约。
+
+§10  自检 5 问
+--------------------------------------------------------------------------------
+
+读完本章后，你应该能回答：
+
+1. direct regression path 和 Ibex-style staged path 的入口、输出和适用场景分别是什么？
+2. ``run_single_test()`` 为什么必须按 generate、compile、simulate、check 的顺序短路？
+3. ``check_uvm_log()`` 处理 ``TEST PASSED``、UVM fatal、warning 和 simulator return code
+   的优先级是什么？
+4. 25% fail-rate ceiling 防止了哪一种"大量失败仍被 waiver 掩盖"的风险？
+5. 如果 riscv-dv stage 从 ``370/395`` 掉到 ``250/395``，你会先看 testlist、生成日志、
+   compile 日志、sim 日志还是 scoreboard 日志？为什么？
+
+§11  参考资料与下一步
+--------------------------------------------------------------------------------
+
+* 下一章建议阅读：:ref:`signoff_flow`。那里解释 9 stage 如何把本章的 regression
+  输出纳入最终 PASS/FAIL 判定。
+* 组件侧建议阅读：:ref:`cosim_scoreboard`。那里解释 cosim mismatch 为什么会让单个
+  regression test fail。
+* 脚本侧建议阅读：:ref:`scripts_reference` 和 :ref:`appendix_f_scripts/core_eh2_scripts`。
+  它们提供 ``run_regress.py``、``run_rtl.py``、``check_logs.py`` 的函数级解析。
+* Ibex 对照路径：``/home/host/ibex/dv/uvm/core_ibex/`` 的 staged metadata、testlist 和
+  regression scripts。EH2 保留 Ibex 风格的调度骨架，但增加双线程、Spike cosim、CSR
+  unit 和 compliance 子环境的结果汇总。

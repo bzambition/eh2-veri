@@ -9,6 +9,37 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+--------------------------------------------------------------------------------
+
+读懂本章前，建议先完成这些准备：
+
+* :doc:`/03_integration/system_requirements` — 已确认 VCS、NC/irun、RISC-V GCC、Python
+  依赖和环境变量可用。
+* :doc:`/03_integration/getting_started` — 已跑过 ``make smoke``，知道默认
+  ``SIMULATOR=vcs``，产物位于 ``build/smoke_vcs/``。
+* :doc:`/04_verification_overview/quickstart` — 理解 smoke、directed、regress 和
+  sign-off 的关系。
+* 基础 Make：变量覆盖（``make target VAR=value``）、target 依赖、递归 make。
+* 基础 shell：能读懂命令行参数、环境变量和输出目录。
+
+本章不要求你先会写 Makefile，但要求你能追踪"一个命令展开成哪些脚本调用"。EH2 的构建
+流程有 direct Make path 和 Ibex-style staged path 两套入口；前者服务本地快速运行，
+后者服务 metadata 驱动的工业 regression。不要把 ``make compile``、``make run`` 和
+``make run GOAL=...`` 混为一谈。
+
+学完本章你应该能够：
+
+1. 解释顶层 ``Makefile`` 为什么用 ``GOAL`` 区分 direct path 与 staged path。
+2. 说明 ``SIMULATOR=vcs``、``SIMULATOR=nc`` 和 ``SIMULATOR=xlm`` 对编译产物目录、
+   覆盖率数据库和波形格式的影响。
+3. 在 ``Makefile`` 中找到 ``compile_vcs``、``compile_nc``、``compile_xlm`` 的入口，
+   并知道 ``compile_tb.py`` 在 staged flow 中负责拼装什么命令。
+4. 跑 ``make compile SIMULATOR=vcs COV=1`` 后，知道检查 ``build/compile_vcs/compile.log``、
+   ``simv``、``simv.daidir`` 和 ``cov`` 是否生成。
+5. 当构建失败时，能区分是 env.mk 环境错误、filelist 路径错误、DPI cosim 链接错误，
+   还是 coverage option 与 simulator 不兼容。
+
 §1  流程边界
 --------------------------------------------------------------------------------
 
@@ -1482,3 +1513,63 @@ target 都转发到顶层 Makefile。
   :file:`/home/host/eh2-veri/dv/uvm/core_eh2/scripts/compile_test.py`、
   :file:`/home/host/eh2-veri/dv/uvm/core_eh2/scripts/eh2_cmd.py`、
   :file:`/home/host/eh2-veri/dv/uvm/core_eh2/scripts/scripts_lib.py`。
+
+§11  学习闭环与自检
+--------------------------------------------------------------------------------
+
+本章的学习目标不是背下 Makefile 的每一行，而是能把一次构建失败定位到正确层级。
+EH2 当前约定是：默认仿真器为 VCS，``make compile`` 输出到
+``build/compile_vcs/``；指定 ``SIMULATOR=nc`` 时输出到 ``build/compile_nc/``，
+两者互不覆盖。覆盖率编译时 VCS 使用 ``cover.cfg`` 和
+``-cm line+tgl+assert+fsm+branch``，NC 使用 ``cov_full_nc.ccf`` 作为等价 scope
+配置。
+
+.. list-table:: 构建流程自检清单
+   :header-rows: 1
+   :widths: 18 37 30 15
+
+   * - 检查点
+     - 你应该能说明
+     - 验证命令
+     - 期望结果
+   * - simulator 选择
+     - ``SIMULATOR`` 如何影响 ``compile_$(SIMULATOR)`` 和输出目录
+     - ``make compile SIMULATOR=vcs COV=0``
+     - ``build/compile_vcs/compile.log``
+   * - VCS coverage
+     - ``cover.cfg`` 为什么限定 ``core_eh2_tb_top.dut`` 子树
+     - ``make compile SIMULATOR=vcs COV=1``
+     - ``build/compile_vcs/cov``
+   * - NC coverage
+     - ``cov_full_nc.ccf`` 如何选择 DUT-only scope
+     - ``make compile SIMULATOR=nc COV=1``
+     - ``build/compile_nc/cov_work``
+   * - cosim 链接
+     - ``NO_COSIM`` 只影响链接依赖，运行期仍由 plusarg 决定
+     - ``make compile NO_COSIM=1``
+     - ``compile.log`` 无 DPI 链接步骤
+   * - staged flow
+     - ``GOAL`` 非空时为什么转到 ``wrapper.mk``
+     - ``make run GOAL=rtl_sim_run``
+     - metadata 目录被创建或报出缺参
+
+**动手练习**：
+
+1. 入门题：运行 ``make compile SIMULATOR=vcs COV=0``，打开
+   ``build/compile_vcs/compile.log``，找到最终 VCS 命令中的 ``-f`` filelist 参数。
+   参考答案位置：本章 §4.2 和 :ref:`appendix_f_scripts/makefiles`。
+2. 进阶题：运行 ``make compile SIMULATOR=vcs COV=1``，确认命令中同时出现
+   ``-cm_hier dv/uvm/core_eh2/cover.cfg`` 与 ``-cm_fsmcfg``。如果缺失，优先检查
+   顶层 ``Makefile`` 的 ``VCS_COV_OPTS``。
+3. 挑战题：分别运行 ``make compile SIMULATOR=vcs`` 与
+   ``make compile SIMULATOR=nc``，比较 ``build/compile_vcs/`` 与
+   ``build/compile_nc/`` 的产物差异，并说明为什么这种隔离允许两条编译同时存在。
+
+读完本章，你应该能回答 5 个问题：
+
+1. ``GOAL`` 为空与非空时，顶层 ``Makefile`` 的执行图有什么不同？
+2. 为什么 VCS 覆盖率必须在编译期使用 ``cover.cfg`` 限定 DUT scope？
+3. ``compile_tb.py`` 与顶层 ``compile_vcs`` target 的职责边界在哪里？
+4. ``libcosim.so`` 构建失败时，第一条应该看的日志是哪一个？
+5. 本章和 :ref:`regression_flow` 的关系是什么：哪个负责生成 ``simv``，哪个负责把
+   多个测试组织成回归？

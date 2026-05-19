@@ -9,6 +9,39 @@ AXI4 Agent — 架构参考
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+----------------
+
+读懂本章前，你需要先知道：
+
+* :doc:`/03_integration/soc_integration` — EH2 对外通过 IFU、LSU 和 system bus 等端口
+  访问外部 memory/peripheral。
+* :doc:`/05_verification_arch/env` — env 创建 ``lsu_agent``、``ifu_agent`` 和
+  ``sb_agent``，并决定它们是 passive 监视还是 active 驱动。
+* :doc:`/05_verification_arch/agent_cosim` — LSU AXI4 monitor 的事务会送入 cosim
+  scoreboard，用于 store/AMO memory notify。
+* AXI4 基本握手：``VALID`` 与 ``READY`` 同周期为 1 才算一次 beat；``AW``/``W``/``B``
+  是写通道，``AR``/``R`` 是读通道。
+* 基础 UVM：``uvm_sequence_item`` 表示一笔 transaction，monitor 通过
+  ``uvm_analysis_port`` 发布观测结果。
+
+如果你只熟悉 C 语言，可以先把 AXI4 理解成"五条带握手的结构体通道"：地址通道告诉
+对方要访问哪里，数据通道携带 payload，response 通道告诉访问是否成功。本章的重点
+不是完整 AXI4 规范，而是 EH2 平台如何把总线拍级信号整理成可被 scoreboard、coverage
+和 debug 日志消费的 transaction。
+
+学完本章你应该能够：
+
+1. 区分 ``axi4_agent`` 在 passive 模式和 active 模式下分别创建哪些子组件。
+2. 在 ``axi4_monitor.sv`` 中找到写事务与读事务的采样任务，并解释它们如何等待
+   ``VALID && READY``。
+3. 说明 ``axi4_seq_item`` 中 address、data、strb、id、resp 字段如何对应 AXI4
+   通道信号。
+4. 知道 ``lsu_agent.ap`` 为什么要连接到 ``cosim_agent.dmem_port``，以及 IFU/SB 端口
+   为什么不走同一条 memory notify 路径。
+5. 当日志出现 AXI4 timeout、store data mismatch 或 write strobe 异常时，能先定位
+   ``build/*/sim_*.log``、``axi4_monitor`` 打印和 scoreboard 的 dmem 统计。
+
 §1  本章边界
 ------------
 

@@ -9,6 +9,41 @@ Cosim Agent — 架构参考
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+----------------
+
+读懂本章前，建议先确认你已经掌握以下内容：
+
+* :doc:`/04_verification_overview/quickstart` — 已能跑通一次 ``make smoke``，知道
+  ``build/smoke_vcs/`` 下的 ``sim_*.log`` 和 ``result.yaml`` 分别记录什么。
+* :doc:`/05_verification_arch/tb_top` — 理解 ``core_eh2_tb_top`` 如何启动
+  ``run_test()``、如何把虚接口（virtual interface）交给 UVM。
+* :doc:`/05_verification_arch/env` — 知道 env 在 ``build_phase`` 创建 agent，并在
+  ``connect_phase`` 连接 analysis port。
+* :doc:`/05_verification_arch/agent_trace` — 知道 retire trace 与 DUT probe 是两条
+  不同的数据流。
+* 基础 UVM 1.2：``uvm_agent``、``uvm_analysis_port``、``uvm_tlm_analysis_fifo``、
+  ``build_phase``、``connect_phase`` 和 ``run_phase``。
+
+如果你还不熟悉 Spike DPI（DPI-C, direct programming interface）是什么，可以先把
+本章当作"连线图"阅读：先看 ``eh2_cosim_agent`` 只负责封装和转发，再到
+:doc:`/05_verification_arch/cosim_scoreboard` 学真正的逐指令 diff。
+
+学完本章你应该能够：
+
+1. 解释 cosim agent、trace monitor、DUT probe monitor、AXI4 monitor 和
+   ``eh2_cosim_scoreboard`` 之间的连接关系。
+2. 在 ``dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_agent.sv`` 中指出
+   ``dmem_port.connect(scoreboard.lsu_axi_fifo.analysis_export)`` 为什么只连接 LSU
+   AXI4，而不直接连接 trace/probe。
+3. 说明 ``eh2_cosim_cfg`` 如何描述 EH2 的 memory map，以及这些 region 为什么必须在
+   Spike 初始化前注册。
+4. 跑 ``make smoke`` 后，在 ``build/smoke_vcs/smoke_s1/sim_*.log`` 中搜索
+   ``cosim``，判断当前 smoke 是否真的启用了 Spike lock-step，还是走了
+   ``+disable_cosim=1`` 的冒烟路径。
+5. 当 cosim 启动失败、DPI symbol 找不到或 binary loader 报错时，知道先检查
+   ``libcosim.so``、``+enable_cosim=1``、``+signature_addr`` 和 scoreboard 初始化日志。
+
 §1  本章边界
 ------------
 
