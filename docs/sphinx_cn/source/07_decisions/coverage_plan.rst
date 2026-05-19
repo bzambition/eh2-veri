@@ -1,0 +1,318 @@
+.. _coverage_plan:
+.. _07_decisions/coverage_plan:
+
+覆盖率规划
+==========
+
+:status: draft
+:last-reviewed: 2026-05-19
+:authors: GPT-doc-author
+
+概述
+----
+
+EH2 覆盖率规划的核心原则是「先保证真实，再追求更高」。当前平台已经回到 VCS
+主线，coverage instrumentation、database merge 和 dashboard 全部采用
+Synopsys VCS/URG 路径，对齐 lowRISC Ibex 工业实现。主线 code coverage 维度固定为
+``line+tgl+assert+fsm+branch``，功能覆盖以 SystemVerilog covergroup 在 URG
+dashboard 中显示为 ``GROUP``，总体分显示为 ``OVERALL``。本章不把 ``cond`` 作为
+当前 sign-off 维度，也不使用 NC 侧覆盖率结果作为 release coverage。
+
+2026-05-19 01:02 demo 的 coverage 证据为：LINE 95.05%、BRANCH 84.97%、TOGGLE
+53.52%、ASSERT 33.33%、FSM 54.74%、GROUP 69.42%、OVERALL 65.17%。这些数字来自
+DUT subtree 的 URG 原生 dashboard，scope 由 ``cover.cfg`` 编译期限定到
+``core_eh2_tb_top.dut``。同一 demo 的实跑覆盖率字段为 102/104 (98.1%)，它表示
+sign-off 报告中实际运行项目占计划项目的比例，不等同于 URG coverage 百分比。
+
+设计目标与约束
+--------------
+
+coverage plan 有 5 个目标。第一，所有 sign-off coverage 必须来自 VCS ``.vdb``
+和 URG，不允许通过脚本合成看似漂亮的 dashboard。第二，scope 必须是 DUT-only，
+防止 testbench interface、stub 或未驱动信号污染结果。第三，gate 只使用当前
+Makefile 和 ``signoff.py`` 真正执行的阈值。第四，低覆盖项要被记录为改进方向，
+但不能伪装成已关闭。第五，EH2 与 Ibex 的一致性要体现在工具路径和数据语义上，
+而不是复制 Ibex 数字。
+
+.. list-table:: 当前 coverage gate 与观测项
+   :header-rows: 1
+   :widths: 22 18 20 40
+
+   * - 指标
+     - demo 数字
+     - 当前 gate
+     - 说明
+   * - LINE
+     - 95.05%
+     - ``SIGNOFF_MIN_LINE_COV=65``
+     - sign-off 阻断项之一，当前裕量充足
+   * - BRANCH
+     - 84.97%
+     - 观测
+     - 反映分支路径激励质量，当前不单独设阈值
+   * - TOGGLE
+     - 53.52%
+     - 可选阈值
+     - 受 DUT 大量配置/低功耗/未用端口影响，当前用于趋势分析
+   * - ASSERT
+     - 33.33%
+     - 观测
+     - 需要增加 assertion bind 和触发场景
+   * - FSM
+     - 54.74%
+     - 可选阈值
+     - 需要结合 ``cov_fsm.cfg`` 和 reset filter 分析
+   * - GROUP
+     - 69.42%
+     - ``SIGNOFF_MIN_FUNCTIONAL_COV=40``
+     - URG dashboard 名称为 GROUP，脚本内部历史键名为 ``functional``
+   * - OVERALL
+     - 65.17%
+     - 可选阈值
+     - URG 综合分，不替代 LINE/GROUP 分项 gate
+
+架构与组成
+----------
+
+coverage 数据流从 VCS compile 开始，到 URG dashboard 结束。中间不经过 NC 覆盖率路径，
+也不使用自定义百分比合成层。
+
+::
+
+   make signoff COV=1
+      |
+      +-- make compile BUILD_SUBDIR=build/signoff COV=1
+      |     |
+      |     +-- vcs -cm line+tgl+assert+fsm+branch
+      |     +-- -cm_hier dv/uvm/core_eh2/cover.cfg
+      |     `-- simv + cov directory
+      |
+      +-- signoff.py --coverage
+      |     |
+      |     +-- smoke / directed / cosim / riscvdv collect .vdb
+      |     +-- auto_merge_stage_coverage()
+      |     `-- merge_cov.py --dirs ... --output cov_merged
+      |
+      +-- urg -full64 -format both
+      |     |
+      |     +-- cov_merged/merged.vdb
+      |     +-- cov_merged/report/dashboard.txt
+      |     `-- cov_merged/dashboard.txt
+      |
+      `-- evaluate_coverage()
+            |
+            +-- LINE >= 65
+            +-- GROUP(functional key) >= 40
+            `-- report.html coverage section
+
+实现细节
+--------
+
+Makefile 中的 coverage 主线配置是本章最重要的代码证据：
+
+.. literalinclude:: ../../../../Makefile
+   :language: makefile
+   :lines: 169-190
+   :caption: Makefile:169-190 - VCS 5 维 coverage 与 hierarchy scope
+
+``cover.cfg`` 的 DUT-only scope 很短，但它决定了 coverage 数字的真实性：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/cover.cfg
+   :language: text
+   :caption: dv/uvm/core_eh2/cover.cfg - coverage scope
+
+``merge_cov.py`` 是 188 行 Ibex 风格 URG wrapper。它只合并 VCS ``.vdb``，
+不走 NC 侧覆盖率路径：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/merge_cov.py
+   :language: python
+   :lines: 1-25
+   :caption: merge_cov.py:1-25 - VCS-only coverage merge 边界
+
+URG 调用保持原生输出，生成 ``merged.vdb``、``report`` 和根目录 dashboard 镜像：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/merge_cov.py
+   :language: python
+   :lines: 45-84
+   :caption: merge_cov.py:45-84 - urg -full64 合并命令
+
+``signoff.py`` 合并 stage coverage 时刻意不扫描 NC coverage layout：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/signoff.py
+   :language: python
+   :lines: 989-1028
+   :caption: signoff.py:989-1028 - 自动合并 VCS .vdb
+
+coverage gate 只检查当前实现中真正支持的 canonical 指标：
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/signoff.py
+   :language: python
+   :lines: 1046-1107
+   :caption: signoff.py:1046-1107 - coverage threshold evaluation
+
+配置与使用
+----------
+
+日常使用分 3 类：快速回归、完整签核、coverage 分析。
+
+.. code-block:: bash
+
+   # 快速 smoke，默认 VCS，默认 COV=1 由顶层 Makefile 控制
+   make smoke
+
+   # 完整 sign-off，VCS + coverage + URG dashboard
+   make signoff COV=1 PARALLEL=4
+
+   # 只复用已有 stage 数据重新 gate，适合 release review
+   make signoff_replay STAGE_DATA_DIR=build/demo
+
+   # 手动合并若干 coverage 目录，输出 URG dashboard
+   python3 dv/uvm/core_eh2/scripts/merge_cov.py \
+     --dirs build/signoff/runs/smoke build/signoff/runs/directed \
+     --output build/manual_cov
+
+   # 查看 dashboard 头部
+   sed -n '1,80p' build/signoff/cov_merged/dashboard.txt
+
+预期关键输出如下：
+
+.. code-block:: text
+
+   Coverage (dut subtree, urg native dashboard):
+     LINE     95.05%
+     BRANCH   84.97%
+     TOGGLE   53.52%
+     ASSERT   33.33%
+     FSM      54.74%
+     GROUP    69.42%
+     OVERALL  65.17%
+
+覆盖率闭门流程
+--------------
+
+coverage closure 不应从「提高 OVERALL 一个数字」出发，而应从具体未覆盖对象出发。
+推荐步骤如下：
+
+.. list-table:: 覆盖率闭门步骤
+   :header-rows: 1
+   :widths: 10 30 35 25
+
+   * - 步骤
+     - 输入
+     - 动作
+     - 退出条件
+   * - 1
+     - URG dashboard
+     - 确认 LINE/GROUP gate 是否满足
+     - release blocker 列表明确
+   * - 2
+     - URG group/detail report
+     - 找最低 covergroup、coverpoint 和 cross
+     - 形成可激励场景列表
+   * - 3
+     - riscv-dv testlist 与 directed tests
+     - 判断应通过随机约束、定向 ASM 还是 UVM sequence 覆盖
+     - 每个 hole 有 owner 和测试入口
+   * - 4
+     - fcov/pmp coverage 源码
+     - 检查 bin 是否真实可达，排除配置不可达或 reset-only bin
+     - 不可达项记录 waiver 或过滤策略
+   * - 5
+     - ``make signoff COV=1``
+     - 重新生成 VCS ``.vdb`` 和 URG dashboard
+     - 数字提升且没有引入新 fail
+
+.. tip::
+
+   ASSERT 和 FSM 当前是改进重点，但不要通过关闭采样、扩大 scope 或改写 dashboard
+   来制造提升。正确路径是增加可触发场景、补充 SVA bind、复核 FSM reset filter。
+
+与 Ibex 工业实现对照
+--------------------
+
+EH2 coverage 路径与 Ibex 的关键一致点是 VCS/URG 原生 merge。下面的 Ibex 代码片段
+显示同样的 ``urg -full64 -format both -dbname ... -report ... -dir`` 模式：
+
+.. literalinclude:: ../../../../../ibex/dv/uvm/core_ibex/scripts/merge_cov.py
+   :language: python
+   :lines: 31-47
+   :caption: Ibex merge_cov.py:31-47 - VCS URG merge
+
+.. list-table:: EH2 与 Ibex coverage 对照
+   :header-rows: 1
+   :widths: 22 36 42
+
+   * - 维度
+     - Ibex
+     - EH2
+   * - simulator 主线
+     - VCS/Xcelium 均有成熟路径，VCS 用 URG
+     - release 主线强制 VCS，NC 仅 waveform debug
+   * - merge 工具
+     - VCS coverage 由 URG 合并
+     - 完全采用 URG；``merge_cov.py`` 不做自定义 dashboard 合成
+   * - scope
+     - DUT hierarchy 由 metadata/config 控制
+     - ``cover.cfg`` 编译期限定 ``core_eh2_tb_top.dut``
+   * - code coverage 维度
+     - Ibex 工业配置强调 line/toggle/branch/assert/FSM 等主要维度
+     - EH2 当前固定 ``line+tgl+assert+fsm+branch``
+   * - functional coverage
+     - covergroup 汇入 simulator report
+     - EH2 dashboard 写 ``GROUP``，脚本内部兼容键为 ``functional``
+
+测试与验证
+----------
+
+coverage plan 的验证以 demo 数据和构建检查为准：
+
+.. list-table:: 2026-05-19 coverage 证据
+   :header-rows: 1
+   :widths: 20 20 20 40
+
+   * - 项目
+     - 数字
+     - 状态
+     - 解释
+   * - LINE
+     - 95.05%
+     - PASS
+     - 高于 65% gate
+   * - GROUP
+     - 69.42%
+     - PASS
+     - 高于 40% gate
+   * - OVERALL
+     - 65.17%
+     - 观测
+     - 用于趋势，不替代分项 gate
+   * - ASSERT
+     - 33.33%
+     - watch
+     - 后续补 assertion 触发
+   * - FSM
+     - 54.74%
+     - watch
+     - 后续补状态机场景
+   * - 实跑覆盖率
+     - 102/104 (98.1%)
+     - PASS
+     - sign-off 报告中的 test execution coverage
+
+已知限制与未来工作
+------------------
+
+短期 coverage 工作应按收益排序。第一优先级是 ASSERT/FSM：它们当前较低，且能通过
+定向场景、SVA bind 和 reset filter 复核持续提升。第二优先级是 GROUP 中的 PMP、
+CSR、异常、中断、debug cross。第三优先级是 toggle 空洞，需要区分真实低激励、
+配置不可达端口和 tie-off 逻辑。第四优先级是 compliance 剩余项目与 directed/riscv-dv
+失败分类联动，避免只提升覆盖率而忽略行为差异。
+
+参考资料
+--------
+
+* :ref:`functional_coverage` - EH2 functional coverage 模型。
+* :ref:`pmp_coverage` - PMP coverage 深入说明。
+* :ref:`signoff_flow` - coverage gate 与 sign-off 报告。
+* :ref:`scripts_reference` - ``merge_cov.py``、``gen_html_report.py`` 和 ``signoff.py``。
+* :ref:`risk_register` - coverage 相关风险登记。
