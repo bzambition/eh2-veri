@@ -1424,8 +1424,48 @@ IDLE、WR、RD、PEND。
 * `axi4_to_ahb`、`ahb_to_axi4`：`rtl/design/eh2_veer.sv:L1143-L1329` 在 AHB-Lite gasket
   中调用。
 
-§9  参考资料
-------------
+§9  Lib 常见失败模式与排查
+--------------------------
+
+library 模块是全设计复用最多的一层。问题常见于“症状在 DEC/LSU/EXU，根因在库单元
+参数或 clock/reset wrapper”。排查时先确认是行为库、FPGA wrapper、ECC/rangecheck，
+还是 AXI/AHB bridge。
+
+.. list-table:: lib 失败模式
+   :header-rows: 1
+   :widths: 24 32 28 16
+
+   * - 现象
+     - 可能根因
+     - 排查命令
+     - 阅读入口
+   * - compile 找不到 ``rvdffe`` 或 ``rvclkhdr``
+     - ``-v`` library mode 文件未进入 filelist，或编译顺序被改
+     - ``sed -n '1,25p' dv/uvm/core_eh2/eh2_rtl.f``
+     - 本章 §1 与 :ref:`appendix_a_rtl/index`
+   * - reset 后寄存器不是预期初值
+     - 使用了 ``rvdff`` / ``rvdffs`` / ``rvdffsc`` 中不同 reset/set wrapper
+     - ``rg -n "rvdff[s|sc]* #|rvdff.*rst_l" /home/host/Cores-VeeR-EH2/design``
+     - 本章 §2
+   * - DCCM/ICCM 地址范围判断错
+     - ``rvrangecheck`` 参数或 ``pt.*_SADR`` / size 配置漂移
+     - ``rg -n "rvrangecheck|DCCM_SADR|ICCM_SADR" /home/host/Cores-VeeR-EH2/design``
+     - 本章 §4 与 :ref:`appendix_a_rtl/lsu`
+   * - ECC 注入后 syndrome 与预期不同
+     - 32-bit/64-bit encode/decode 模块选错或 data/parity 位拼接错
+     - ``rg -n "rvecc_encode|rvecc_decode|ecc" /home/host/Cores-VeeR-EH2/design``
+     - 本章 §5 与 :ref:`appendix_a_rtl/mem`
+   * - AHB-Lite gasket 响应 error
+     - ``ahb_to_axi4`` 对 size/alignment/range 的 HRESP 条件命中
+     - ``rg -n "ahb_hresp|rvrangecheck" /home/host/Cores-VeeR-EH2/design/lib/ahb_to_axi4.sv``
+     - 本章 §7.8
+   * - AXI 到 AHB 读写卡住
+     - ``axi4_to_ahb`` 或 ``ahb_to_axi4`` command buffer valid/ready 未释放
+     - ``rg -n "buf_state|cmd|ready|valid" /home/host/Cores-VeeR-EH2/design/lib/*axi*.sv``
+     - 本章 §7 与 :ref:`appendix_a_rtl/shared_axi4`
+
+§10  参考资料
+-------------
 
 * 源文件绝对路径：:file:`/home/host/eh2-veri/rtl/design/lib/beh_lib.sv`
 * 源文件绝对路径：:file:`/home/host/eh2-veri/rtl/design/lib/eh2_lib.sv`

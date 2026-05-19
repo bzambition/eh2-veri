@@ -1782,7 +1782,48 @@ clock，再把操作数、控制包和乘积推进到 E3。
   在 LSU/EXU 之间的连接位置。
 * 最后回到本章 §3-§5，按 ALU、mul、div 子模块分别定位具体运算逻辑。
 
-§8  参考资料
+§8  EXU 常见失败模式与排查
+--------------------------
+
+EXU 失败通常不会只表现为“ALU 算错”。同一条 branch 或 DIV 指令可能同时影响
+flush、predict packet、GPR writeback、LSU bypass 和 cosim trace。定位时先看
+``eh2_exu.sv`` 的边界信号，再下钻到 ``eh2_exu_alu_ctl.sv``、``eh2_exu_mul_ctl.sv``
+或 ``eh2_exu_div_ctl.sv``。
+
+.. list-table:: EXU 失败模式
+   :header-rows: 1
+   :widths: 24 32 28 16
+
+   * - 现象
+     - 可能根因
+     - 排查命令
+     - 阅读入口
+   * - cosim 报 PC mismatch，且 branch 指令附近失败
+     - E1 upper flush、E4 lower flush 或 ``exu_flush_path_final`` 选择错误
+     - ``rg -n "flush_path|exu_flush_final|predict_p" /home/host/Cores-VeeR-EH2/design/exu``
+     - 本章 §6.1 与 :ref:`appendix_a_rtl/ifu`
+   * - DIV 指令写回晚到或被多写一次
+     - ``dec_div_cancel``、``finish_dly``、``exu_div_wren`` 时序关系错误
+     - ``rg -n "dec_div_cancel|finish_dly|exu_div_wren" /home/host/Cores-VeeR-EH2/design/exu``
+     - 本章 §5.1-§5.5
+   * - MUL 后接 load-use 场景结果错误
+     - ``load_mul_rs*_bypass_e1`` 与 ``lsu_result_dc3`` bypass 未按 packet 生效
+     - ``rg -n "load_mul_rs|lsu_result_dc3|mp_e1" /home/host/Cores-VeeR-EH2/design/exu/eh2_exu_mul_ctl.sv``
+     - 本章 §4.2
+   * - bitmanip 指令只在某些操作数失败
+     - ALU packet 的 bitmanip 控制位或 ``eh2_exu_alu_ctl`` operand mux 错位
+     - ``rg -n "bitmanip|grev|gor|shfl|cpop" /home/host/Cores-VeeR-EH2/design/exu``
+     - 本章 §3 与 :ref:`appendix_a_rtl/dec`
+   * - branch predictor update 覆盖率低
+     - ``fp_enable`` 或 ``final_predict_mp`` 未被目标 directed/riscv-dv 场景触发
+     - ``rg -n "fp_enable|final_predict_mp|exu_mp_pkt" /home/host/Cores-VeeR-EH2/design/exu/eh2_exu.sv``
+     - 本章 §6.1 与 :ref:`coverage_plan`
+   * - LEC 只在 EXU 子块失败
+     - 子块 DDC 与 RTL 文件映射错，或把 ``eh2_exu`` 顶层与 ALU/MUL/DIV 子块混淆
+     - ``sed -n '1,20p' syn/build/lec_summary.txt``
+     - :ref:`lec_flow` 与 :ref:`adr-0020`
+
+§9  参考资料
 ------------
 
 * 源文件绝对路径：:file:`/home/host/eh2-veri/rtl/design/exu/eh2_exu.sv`

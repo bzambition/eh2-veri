@@ -1289,7 +1289,47 @@ trace、CSR/TLU 和 icache debug 诊断路径复用。
 
 任何字段增删或顺序变化都会影响 ``$bits(<type>)`` 驱动的 pipeline flop 宽度，也会影响 ``.*`` 模块连接处结构化信号的二进制布局。因此，修改 ``eh2_def.sv`` 必须同时检查使用该类型的 DEC、EXU、LSU、IFU、TLU 和验证 trace 路径。
 
-§8  参考资料
+§8  Include/typedef 常见失败模式与排查
+------------------------------------------------
+
+``eh2_def.sv`` 和 ``eh2_pdef.vh`` 的问题通常不会在 include 文件本身报错，而是在
+DEC/EXU/LSU/IFU 某个 ``$bits(<packet>)`` flop、``.*`` 端口连接或 cosim trace 解码处
+暴露。修改 typedef 前先查完整使用面，再跑 compile 和 Sphinx 引用检查。
+
+.. list-table:: include/typedef 失败模式
+   :header-rows: 1
+   :widths: 24 32 28 16
+
+   * - 现象
+     - 可能根因
+     - 排查命令
+     - 阅读入口
+   * - compile 报 packet 字段不存在
+     - ``eh2_def.sv`` typedef 字段名改动后使用点未同步
+     - ``rg -n "<field_name>|eh2_.*_pkt_t" /home/host/Cores-VeeR-EH2/design``
+     - 本章 §3-§7
+   * - ``$bits`` 宽度不一致
+     - typedef 增删字段改变 pipeline flop 宽度，旧连线仍按原宽度拼接
+     - ``rg -n "\\$bits\\(eh2_.*_pkt_t\\)" /home/host/Cores-VeeR-EH2/design``
+     - :ref:`appendix_a_rtl/dec` 与 :ref:`appendix_a_rtl/lsu`
+   * - cosim trace 缺 rd 写回字段
+     - ``eh2_trace_pkt_t`` 字段与 RVFI/trace sidecar 文档不同步
+     - ``rg -n "eh2_trace_pkt_t|rd_wdata|rd_addr" /home/host/Cores-VeeR-EH2/design rtl dv/uvm/core_eh2``
+     - :ref:`rvfi_trace` 与 :ref:`adr-0015`
+   * - 某个 profile 下数组越界
+     - ``eh2_pdef.vh`` 中 ``pt.NUM_THREADS`` 或 memory 参数与 generate 使用点不一致
+     - ``rg -n "NUM_THREADS|ICCM|DCCM" rtl/snapshots/default /home/host/Cores-VeeR-EH2/design``
+     - 本章 §2 与 :ref:`appendix_a_rtl/wrapper`
+   * - lint 报 implicit cast 或 packed struct 宽度问题
+     - typedef 字段是 packed struct，跨模块连接时被截断或扩展
+     - ``rg -n "typedef struct packed|logic \\[.*\\].*=.*pkt" /home/host/Cores-VeeR-EH2/design``
+     - :ref:`lint_flow`
+   * - LEC packed-port 相关失败
+     - 旧 Formality 对 top-level packed port 支持有限，需要 block-level LEC
+     - ``rg -n "packed-port|block-level" docs/adr syn``
+     - :ref:`adr-0020`
+
+§9  参考资料
 ------------
 
 * 关联章节：:doc:`dec`、:doc:`exu`、:doc:`lsu`、:doc:`ifu`、:doc:`dbg`

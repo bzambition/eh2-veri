@@ -213,7 +213,80 @@
   :ref:`appendix_a_rtl/dmi`。
 * PIC、DMA、memory wrapper 和 shared AXI4 问题：读对应独立章节。
 
-§7  参考资料
+§7  v2-7 覆盖审计
+-----------------
+
+v2-7 先做 RTL 附录的覆盖审计，而不是直接重写所有模块页。当前审计结论是：
+:file:`/home/host/Cores-VeeR-EH2/design/` 下 46 个 ``.sv`` 文件名均已在
+``appendix_a_rtl`` 中出现；每个模块页已经至少包含一个 ``§4`` 源码精读入口和一个
+``§8`` 相关小节。这个结论只证明“文件级覆盖已建立”，不代表每个状态机和每条组合
+路径都已经讲到足够教学深度。
+
+审计命令如下：
+
+.. code-block:: bash
+
+   find /home/host/Cores-VeeR-EH2/design -name '*.sv' | sort
+   python3 - <<'PY'
+   from pathlib import Path
+   svs = sorted(Path('/home/host/Cores-VeeR-EH2/design').rglob('*.sv'))
+   text = '\n'.join(p.read_text(errors='ignore')
+                    for p in Path('docs/sphinx_cn/source/appendix_a_rtl').glob('*.rst'))
+   missing = [str(p) for p in svs if p.name not in text]
+   print('total', len(svs), 'missing', len(missing))
+   for item in missing:
+       print(item)
+   PY
+
+本轮实测输出：
+
+.. code-block:: text
+
+   total 46 missing 0
+
+.. note::
+
+   这里的 46 是当前上游 clone 实际 ``.sv`` 文件数。DMI 目录内的
+   ``dmi_wrapper.v``、``dmi_jtag_to_core_sync.v``、``rvjtag_tap.v`` 是 Verilog
+   ``.v`` 文件，也已由 :ref:`appendix_a_rtl/dmi` 覆盖，但不计入这个 ``.sv`` 统计。
+
+§8  全局失败模式与排查
+----------------------
+
+.. list-table:: RTL 附录阅读时的常见失败模式
+   :header-rows: 1
+   :widths: 24 32 28 16
+
+   * - 现象
+     - 根因
+     - 排查命令
+     - 修复/阅读入口
+   * - Sphinx 中某个 RTL 文件名找不到
+     - 上游 RTL clone 新增文件，但 appendix A 未同步
+     - ``find /home/host/Cores-VeeR-EH2/design -name '*.sv' | sort``
+     - 先更新本页 §7 审计，再补对应模块页
+   * - 仿真 compile 报 module not found
+     - ``eh2_rtl.f`` 或 ``eh2_shared.f`` 编译顺序/路径漂移
+     - ``sed -n '1,120p' dv/uvm/core_eh2/eh2_rtl.f``
+     - 从本页 §2 filelist 顺序回查
+   * - 某个 packet 字段连线不明
+     - ``eh2_def.sv`` typedef 与顶层 ``.*`` 连接混在一起
+     - ``rg -n "eh2_.*_pkt_t|\\$bits" /home/host/Cores-VeeR-EH2/design``
+     - 读 :ref:`appendix_a_rtl/include`
+   * - branch flush 或 PC 纠错看不懂
+     - IFU/DEC/EXU 三章共同决定最终 redirect
+     - ``rg -n "flush_path|misp|predict" /home/host/Cores-VeeR-EH2/design``
+     - 先读 :ref:`appendix_a_rtl/exu`，再回 :ref:`appendix_a_rtl/ifu`
+   * - load/store 返回顺序与 trace 对不上
+     - LSU bus buffer、NB-load 和 DEC writeback tag 交叉
+     - ``rg -n "nb_load|wb_tag|bus_buffer" /home/host/Cores-VeeR-EH2/design``
+     - 读 :ref:`appendix_a_rtl/lsu` 与 :ref:`appendix_a_rtl/dec`
+   * - LEC 数字与模块页不一致
+     - 手工复制了旧 summary 或把子块结果当顶层结果
+     - ``sed -n '1,40p' syn/build/lec_summary.txt``
+     - 以 :ref:`lec_flow` 和 :ref:`adr-0020` 为准
+
+§9  参考资料
 ------------
 
 源文件绝对路径：
