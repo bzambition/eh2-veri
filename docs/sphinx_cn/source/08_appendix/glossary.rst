@@ -201,7 +201,7 @@ waiver schema 中的字段名也是术语表的一部分：
      - 波形和调试查看工具
    * - NC/Incisive
      - simulator/debug
-     - 仅用于单测波形调试，不参与 sign-off coverage
+     - VCS 的完整备选 simulator，支持 compile、smoke、regress、sign-off、demo 和 SHM/SimVision 调试
    * - IFV
      - formal
      - Cadence 形式验证工具，formal stage 当前 46/46 PASS
@@ -234,8 +234,8 @@ AXI4、PIC、DMI/JTAG、DMA、DCCM/ICCM 和 block-level LEC 相关术语。
    # 检查 GROUP 和 functional 是否被混用为展示名
    rg -n "functional coverage|GROUP" docs/sphinx_cn/source
 
-   # 检查 NC 是否只出现在调试语境
-   rg -n "NC|Incisive" docs/sphinx_cn/source
+   # 检查 NC 是否按完整备选 simulator 口径描述
+   rg -n "NC|Incisive|cov_full_nc" docs/sphinx_cn/source
 
 已知限制与未来工作
 ------------------

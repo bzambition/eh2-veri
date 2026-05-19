@@ -18,6 +18,8 @@
 * 本手册为谁而写、各角色推荐的阅读路径（见 :ref:`reader` ）
 * 零基础读者如何用 4 周节奏跑通 smoke、读懂 TB top、写出第一个 directed test
   （见 :ref:`learning_path` ）
+* 读完 00_about 后如何用术语、命令、路径和报告数字做一次基线自测
+  （见 :ref:`glossary_pretest` ）
 * 手册中所有排版元素（模块名、信号名、CSR、文件路径、命令、交叉引用）的统一格式（见 :ref:`conventions` ）
 * 当你发现文档错误或需要为新模块添加文档时，如何提交贡献（见 :ref:`contributing` ）
 * 手册的版本号规则、状态字段语义、路径基准约定
@@ -112,6 +114,10 @@
      - 面向零基础读者的 4 周学习路线图：第 1 周跑通 smoke，第 2 周看懂
        TB top 和流水线，第 3 周理解 cosim / coverage / regression，第 4 周
        写第一个 directed test，并提供每日命令检查点和失败排查入口
+   * - :ref:`glossary_pretest`
+     - 术语基线自测题集：覆盖 DUT/TB/env/agent/scoreboard、VCS/NC simulator
+       口径、coverage 数字、9-stage sign-off、路径与命令判断，帮助读者确认是否
+       已具备进入微架构和 UVM 源码章节的最低词汇基础
    * - :ref:`conventions`
      - 排版元素全字段速查表（20+ 种元素）、核心术语中英对照表（30+ 条）、
        版本号与 :status: 生命周期规则、路径基准与关键目录速查、
@@ -149,6 +155,7 @@
 
 * :ref:`reader` — 读者对象与前置知识
 * :ref:`learning_path` — 零基础 4 周学习路线图
+* :ref:`glossary_pretest` — 术语基线自测
 * :ref:`conventions` — 排版、术语与版本约定
 * :ref:`contributing` — 文档贡献流程
 * :ref:`references` — 外部参考文献列表
