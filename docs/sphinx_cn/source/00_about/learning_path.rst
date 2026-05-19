@@ -269,7 +269,7 @@ test，确认它能进入 testlist、编译成 hex、被 regression 调度，再
    参考答案位置：后续 :file:`appendix_g_tutorials/g02_write_first_directed.rst`。
 
 §10  自检 5 问
---------------
+------------------------
 
 读完本章，你应该能回答：
 

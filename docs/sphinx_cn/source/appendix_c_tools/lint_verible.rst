@@ -509,3 +509,14 @@ review 时必须分清这两个范围，不能把 CI 的 DV-only 检查误写成
   DV lint gate。
 * :file:`dv/uvm/core_eh2/fcov/cov_waivers/*.yaml` 是 coverage waiver YAML，不是
   Verible 原生 ``waivers.vbl``；CI 当前把它传给 Verible 是源码事实，后续若改动需同步本文。
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页讲解的工具或脚本入口在哪个真实路径下，命令行参数是什么？
+2. 该工具读取哪些配置文件，写出哪些日志、报告或数据库？
+3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
+4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
+5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？

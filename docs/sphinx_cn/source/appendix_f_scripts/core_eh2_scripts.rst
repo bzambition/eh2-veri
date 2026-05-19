@@ -3624,3 +3624,14 @@ schema、coverage 合并和共享工具函数。
   ``yaml``、``Path`` 和 ``mock``。
 * 第 L12-L18 行：把脚本目录加入 ``sys.path``，随后导入 regression、RTL run、instr gen、
   template rendering 和 log checking 模块，后续测试用临时 workspace 验证这些模块的组合行为。
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页讲解的工具或脚本入口在哪个真实路径下，命令行参数是什么？
+2. 该工具读取哪些配置文件，写出哪些日志、报告或数据库？
+3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
+4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
+5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？

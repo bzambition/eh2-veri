@@ -985,3 +985,14 @@ riscv-dv 370/395 的稳定性依赖 ``core_eh2_vseqr`` 在 env connect phase 正
 ``irq_seqr``、``jtag_seqr`` 和 ``halt_run_seqr``。新增 directed vseq 时应避免发明
 当前源码不存在的 ``core_eh2_smoke_vseq`` 等旧名字，优先扩展现有 ``core_eh2_vseq`` 或
 test-specific helper sequence。
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页描述的 env、agent、sequence、scoreboard 或 coverage 组件在 UVM phase 中何时工作？
+2. 该组件连接的 SystemVerilog interface、DPI 或 probe 信号是哪一组真实文件？
+3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
+4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
+5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？

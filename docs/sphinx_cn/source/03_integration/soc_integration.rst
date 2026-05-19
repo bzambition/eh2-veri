@@ -1276,3 +1276,14 @@ reset vector、ICCM、DCCM、PIC、external data、serial IO 和 debug SB memory
 * :file:`/home/host/Cores-VeeR-EH2/design/eh2_veer_wrapper.sv`
 * :file:`/home/host/Cores-VeeR-EH2/snapshots/default/common_defines.vh`
 * :file:`/home/host/Cores-VeeR-EH2/snapshots/default/eh2_pdef.vh`
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页面向的读者是工具使用者、SoC 集成人员还是 release 维护者？
+2. 读者需要设置哪些环境变量或 Make 变量才能复现页面中的命令？
+3. 哪些连接或脚本属于验证平台便利设施，不能写成真实 SoC 集成约束？
+4. NC/Incisive 在本页中是完整备选 simulator，还是被误写成单测波形专用路径？
+5. 本页和 build、regression、sign-off 章节之间的交叉引用是否足以让读者继续排查？

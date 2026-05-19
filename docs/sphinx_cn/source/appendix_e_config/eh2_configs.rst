@@ -1312,3 +1312,14 @@ NC CCF 内部存在 block/expr/toggle/fsm/covergroup 选择规则，文档中只
   cross。
 * 第 L7-L16 行：YAML 根键为 ``waiver``，原因说明 RISC-V debug 规范要求 debug mode 中不接收
   NMI，EH2 TLU 会 gate ``take_nmi``，因此该 cross 是架构不可达组合。
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页讲解的工具或脚本入口在哪个真实路径下，命令行参数是什么？
+2. 该工具读取哪些配置文件，写出哪些日志、报告或数据库？
+3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
+4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
+5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？

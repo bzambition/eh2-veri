@@ -1339,3 +1339,14 @@ DEC/EXU/LSU/IFU 某个 ``$bits(<packet>)`` flop、``.*`` 端口连接或 cosim t
 * DEC trace 输出：``/home/host/eh2-veri/rtl/design/dec/eh2_dec.sv``
 * DEC decode 控制：``/home/host/eh2-veri/rtl/design/dec/eh2_dec_decode_ctl.sv``
 * LSU packet pipeline：``/home/host/eh2-veri/rtl/design/lsu/eh2_lsu_lsc_ctl.sv``
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页讲到的 RTL 模块或接口在当前 DUT hierarchy 中承担什么职责？
+2. 哪一段源码或 literalinclude 最能证明该职责，而不是只依赖文字描述？
+3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
+4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
+5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？

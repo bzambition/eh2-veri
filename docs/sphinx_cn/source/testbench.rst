@@ -156,3 +156,13 @@ TB top 应避免承载测试策略。以下内容应放在更合适的位置：
 * 新的覆盖点：放到 ``fcov/`` ，通过 bind 或 interface 接入。
 * 新的 directed 汇编：放到 ``tests/asm`` 或 ``directed_tests`` testlist。
 
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页作为索引、术语、附录或旧入口时，应该把读者导向哪个权威章节？
+2. 本页是否引用当前 VCS 主线数字，而不是旧 release 或历史审计数字？
+3. 页面中的命令、路径和文件名是否能在当前工作区直接找到？
+4. 如果读者只读这一页，是否会误解 NC/Incisive、coverage 或 sign-off 的当前口径？
+5. 本页需要同步更新 `.progress.md`、ADR 索引、glossary 还是 troubleshooting？

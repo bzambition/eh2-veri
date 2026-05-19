@@ -1526,3 +1526,14 @@ trace/probe 是 EH2 cosim 可信度的核心。2026-05-19 demo 中 riscv-dv 370/
 directed 40/40、formal 46/46 和 LEC 31635/31635 都依赖 trace/RVFI/probe 口径一致。
 修改 trace item 字段、``wb_tag`` 生成、trap CSR snapshot 或 probe interface 后，应复跑
 rvfi smoke、cosim directed、interrupt/debug directed 和至少一组 riscv-dv random。
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页描述的 env、agent、sequence、scoreboard 或 coverage 组件在 UVM phase 中何时工作？
+2. 该组件连接的 SystemVerilog interface、DPI 或 probe 信号是哪一组真实文件？
+3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
+4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
+5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？

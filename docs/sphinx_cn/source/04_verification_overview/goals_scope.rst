@@ -820,3 +820,14 @@ block-level LEC summary。status 记录 formal 46/46 和 syn 31635/31635。
 * :file:`/home/host/eh2-veri/dv/uvm/core_eh2/directed_tests/cosim_testlist.yaml`
 * :file:`/home/host/eh2-veri/dv/uvm/core_eh2/riscv_dv_extension/testlist.yaml`
 * :file:`/home/host/eh2-veri/dv/uvm/core_eh2/fcov/eh2_fcov_if.sv`
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页的决策、风险或 coverage 结论依赖哪一条 ADR、脚本或 sign-off 证据？
+2. 该结论是否区分当前事实、历史背景和未来工作？
+3. 是否避免了旧 coverage 维度、旧 NC 口径和伪 dashboard 叙述？
+4. 如果该决策被修改，最先需要同步哪些 Makefile、YAML、脚本或章节？
+5. reviewer 能否从本页追到 2026-05-19 demo 的统一数字和 LEC 证据？

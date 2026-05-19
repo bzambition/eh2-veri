@@ -92,3 +92,14 @@ FSM ``54.74%``、GROUP ``69.42%``、OVERALL ``65.17%``，LEC 为
 
    ADR 记录的是决策和边界，不是临时调试日志。若某条信息只是一次工具运行输出，
    应放在 sign-off 报告、release readiness 或对应 flow 章节，而不是新增 ADR。
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 这条 ADR 的状态、日期和决策边界是什么？
+2. 它解决的是 cosim、coverage、formal、synthesis、LEC、RVFI 还是 waiver 问题？
+3. 该 ADR 对应的实现文件或 sign-off gate 是哪一个？
+4. 当前 VCS/URG 默认 release 参考与 NC/Incisive 备选路径是否被正确区分？
+5. 若该 ADR 需要修订，是否应新增 superseding ADR 而不是静默改写历史？

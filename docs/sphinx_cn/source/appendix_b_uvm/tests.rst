@@ -3092,3 +3092,14 @@ cosim-disabled waiver、skip-in-signoff waiver、directed pool 完整性和 real
 * 源文件：:file:`/home/host/eh2-veri/dv/uvm/core_eh2/tests/core_eh2_intg_test_lib.sv`
 * 源文件：:file:`/home/host/eh2-veri/dv/uvm/core_eh2/tests/core_eh2_rvfi_smoke_test.sv`
 * 源文件：:file:`/home/host/eh2-veri/dv/uvm/core_eh2/tests/test_signoff_gates.py`
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页描述的 env、agent、sequence、scoreboard 或 coverage 组件在 UVM phase 中何时工作？
+2. 该组件连接的 SystemVerilog interface、DPI 或 probe 信号是哪一组真实文件？
+3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
+4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
+5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？

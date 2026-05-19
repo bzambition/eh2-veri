@@ -1267,3 +1267,14 @@ compliance、formal、syn 等 stage，并在 gate-only 模式下评估已有 sta
   known-limited waiver。
 * :ref:`adr-0020` — block-level LEC closure，与 `--lec-blocklevel` 和
   `--lec-summary-path` 的 sign-off 使用方式相关。
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页介绍的 Makefile target 或 Python 脚本入口是什么，默认 simulator 是否仍是 VCS？
+2. 该流程产生哪些 build 目录、log、JSON、coverage database 或 HTML artifact？
+3. VCS/URG 路径和 NC/IMC 备选路径在本页中是否被分开解释？
+4. 失败时第一份应打开的日志是哪一个，第二步应检查哪个变量或 YAML 配置？
+5. 本页中的 sign-off 数字是否仍为 9/9 PASS、102/104、LEC 31635/31635 和 LINE 95.05%？

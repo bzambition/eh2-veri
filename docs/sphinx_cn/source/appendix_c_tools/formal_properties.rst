@@ -1475,3 +1475,14 @@ formal property 体系由三层组成：
 * Formal top：``/home/host/eh2-veri/dv/formal/eh2_formal_top.sv``
 * Sail bridge：``/home/host/eh2-veri/dv/formal/spec/sail_bridge.sv``
 * Trace checker：``/home/host/eh2-veri/dv/formal/spec/sail_trace_check.py``
+
+§10  自检 5 问
+------------------------
+
+读完本页后，请用下面 5 个问题检查自己是否真正理解当前章节，而不是只看过命令和表格：
+
+1. 本页讲解的工具或脚本入口在哪个真实路径下，命令行参数是什么？
+2. 该工具读取哪些配置文件，写出哪些日志、报告或数据库？
+3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
+4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
+5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
