@@ -919,17 +919,10 @@ workflow 未调用这两个 target。
 **职责**：Sphinx 配置根据 builder 选择是否加载 rinoh，并配置 HTML theme 和
 PDF 输出文档。
 
-**关键代码** （`docs/sphinx_cn/source/conf.py:L20-L50`）：
+**关键代码** （`docs/sphinx_cn/source/conf.py:L28-L49`）：
 
 .. code-block:: python
 
-   def _requested_builder():
-       if "-b" in sys.argv:
-           idx = sys.argv.index("-b")
-           if idx + 1 < len(sys.argv):
-               return sys.argv[idx + 1]
-       return ""
-   
    extensions = [
        "sphinx.ext.intersphinx",
        "sphinx.ext.todo",
@@ -939,24 +932,31 @@ PDF 输出文档。
    # 可选扩展 - 未安装时静默跳过
    for ext in ["sphinx_copybutton", "myst_parser"]:
        try:
-
-**逐段解释**：
-
-* 第 L20-L25 行：`_requested_builder()` 从 `sys.argv` 中读取 `-b` 后的 builder
-  名称。
-* 第 L27-L31 行：基础扩展包含 intersphinx、todo 和 viewcode。
-* 第 L33-L39 行：`sphinx_copybutton` 和 `myst_parser` 是可选扩展，未安装时跳过。
-
-**关键代码** （`docs/sphinx_cn/source/conf.py:L35-L50`）：
-
-.. code-block:: python
-
-       try:
            __import__(ext)
            extensions.append(ext)
        except ImportError:
            pass
-   
+
+   # sphinx-tabs 是 v2 手册的交互式分流入口；本地旧环境未安装时使用兼容 fallback。
+   try:
+       __import__("sphinx_tabs.tabs")
+       extensions.append("sphinx_tabs.tabs")
+   except ImportError:
+       extensions.append("eh2_tabs_fallback")
+
+**逐段解释**：
+
+* 第 L28-L32 行：基础扩展包含 intersphinx、todo 和 viewcode。
+* 第 L35-L41 行：`sphinx_copybutton` 和 `myst_parser` 可导入时加入 extensions。
+  v2-11 起，`sphinx-copybutton` 已写入 `docs/requirements-docs.txt`，因此正式文档环境
+  应提供 bash 代码块复制按钮；本地旧环境缺包时仍可跳过。
+* 第 L44-L49 行：`sphinx-tabs` 安装时使用官方 tab UI；未安装时使用
+  `eh2_tabs_fallback`，保证 v2-10 的 tab 内容在旧 Sphinx 环境中也能构建。
+
+**关键代码** （`docs/sphinx_cn/source/conf.py:L51-L63`）：
+
+.. code-block:: python
+
    if _requested_builder() == "rinoh":
        try:
            import rinoh.frontend.sphinx  # noqa: F401
@@ -970,9 +970,25 @@ PDF 输出文档。
 
 **逐段解释**：
 
-* 第 L35-L39 行：可选扩展可导入时加入 extensions。
-* 第 L41-L50 行：只有 builder 是 `rinoh` 时才要求 `rinoh.frontend.sphinx`；
+* 第 L51-L63 行：只有 builder 是 `rinoh` 时才要求 `rinoh.frontend.sphinx`；
   导入失败会抛出 RuntimeError，并提示安装 docs 依赖。
+
+**关键代码** （`docs/sphinx_cn/source/conf.py:L101-L106`）：
+
+.. code-block:: python
+
+   # -- Copybutton -------------------------------------------------------------
+   copybutton_prompt_text = r"^\s*(\$|#|>>>|\.\.\.)\s+"
+   copybutton_prompt_is_regexp = True
+   copybutton_remove_prompts = True
+   copybutton_only_copy_prompt_lines = False
+   copybutton_copy_empty_lines = False
+
+**逐段解释**：
+
+* 第 L101-L106 行：copybutton 会剥离 shell、root shell、Python REPL 和续行提示符，
+  并且不复制空行。这让读者可以直接复制 `.. code-block:: bash` 中的命令，而不会把
+  `$` 或 `#` 提示符带进终端。
 
 **关键代码** （`docs/sphinx_cn/source/conf.py:L64-L78`）：
 

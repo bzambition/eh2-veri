@@ -98,7 +98,11 @@ intersphinx_mapping = {
 }
 
 # -- Copybutton -------------------------------------------------------------
-copybutton_prompt_text = r"\$ "
+copybutton_prompt_text = r"^\s*(\$|#|>>>|\.\.\.)\s+"
+copybutton_prompt_is_regexp = True
+copybutton_remove_prompts = True
+copybutton_only_copy_prompt_lines = False
+copybutton_copy_empty_lines = False
 
 # -- rinohtype PDF 配置 -----------------------------------------------------
 rinoh_documents = [
