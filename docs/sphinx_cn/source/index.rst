@@ -17,6 +17,7 @@ EH2 UVM 验证平台 — 参考手册
 
    00_about/index
    00_about/reader
+   00_about/learning_path
    00_about/conventions
    00_about/contributing
 
