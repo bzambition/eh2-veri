@@ -3702,3 +3702,92 @@ pytest 运行和 HTML report 解析契约很关键。
 
 失败定位：若这个单测失败，优先检查 ``gen_html_report.parse_coverage_report`` 是否仍支持
 当前 VCS/URG dashboard 格式；不要把 coverage 维度改回旧的 cond 口径。
+
+§13  v2-18 关键脚本全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-17 证明了每个脚本资产至少有源码片段；v2-18 进一步要求关键长脚本具备全文
+``literalinclude``，让审计能发现“只解释前几十行”的假完整。本节覆盖
+``signoff.py``、``gen_html_report.py`` 和 ``merge_cov.py`` 三个 release 证据核心脚本。
+
+§13.1  ``signoff.py`` — 9-stage 签核编排全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/signoff.py
+   :language: python
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/signoff.py:全文
+
+逐段精读：
+
+* L1-L90：脚本头、import、stage/profile 常量、coverage 门限、LEC/compliance 参数和
+  release 默认值。这里固定 VCS 主线、9-stage 顺序和 25% fail-rate ceiling 的基础契约。
+* L91-L201：JSON/YAML/CSV helper、stage 解析、工具存在性检查、GCC prefix 解析和
+  precheck。precheck 只检查环境和输出目录，不伪造任何 stage 结果。
+* L202-L351：``build_stage_cmd``、``run_command`` 和 stage summary loader。每个
+  stage 都被转换成真实 Make/Python 命令，日志写入 stage output，结果从 report JSON
+  或原生日志回读。
+* L352-L533：仿真类 stage 与 lint stage 收集。这里把 smoke、directed、cosim、
+  riscv-dv 等 stage 的 ``RegressionSummary`` 统一成 sign-off status，同时保留 log、
+  failure bucket 和 known-fail 分类。
+* L534-L793：formal、LEC 和 syn stage 收集。LEC 解析 block-level summary，
+  ``31635/31635`` 这类数字来自 summary 文件，不从脚本常量推导。
+* L794-L988：compliance suite 评价、URG dashboard header 解析、coverage 文本解析和
+  coverage candidate 选择。当前主线解析 line/toggle/assert/fsm/branch 与 functional/group，
+  不把历史 cond 当成 release 维度。
+* L989-L1152：coverage merge/evaluate、cosim waiver、skip-in-signoff 和 reason loophole
+  检查。这里是防止“关闭 cosim 却仍宣称 full sign-off”的主要 guardrail。
+* L1153-L1305：waiver schema、waiver set、directed pool coverage、real run count。
+  这些检查把 testlist、waiver YAML 和 stage 实跑数量连到最终签核判断。
+* L1306-L1484：``evaluate_signoff`` 与 Markdown report。该段集中实现 9-stage PASS/FAIL、
+  fail-rate ceiling、coverage gate、LEC gate 和 waiver gate。
+* L1485-L1774：HTML dashboard 选择、HTML report 生成、CLI 参数和 ``main``。最后
+  ``main`` 负责执行 stage、收集结果、写 JSON/Markdown/HTML，并以进程返回码表达签核状态。
+
+§13.2  ``gen_html_report.py`` — 静态 HTML dashboard 全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/gen_html_report.py
+   :language: python
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/gen_html_report.py:全文
+
+逐段精读：
+
+* L1-L69：脚本目标、默认路径、stage 顺序、coverage metric 列和颜色阈值。它只渲染
+  已生成证据，不运行 simulator。
+* L70-L142：HTML escape、百分比格式、status class、JSON/text 读取和相对链接 helper。
+  这些函数保证报告在离线目录中可浏览。
+* L143-L299：URG dashboard、module/group table 和 coverage report parser。它接受当前
+  VCS/URG dashboard 文本，把 LINE/BRANCH/TOGGLE/ASSERT/FSM/GROUP/OVERALL 组织成结构化数据。
+* L300-L469：stage 排序、test entry 归一化、stage detail、LEC/formal/waiver 数据抽取。
+  该段把 sign-off JSON 中异构 stage 结果映射到统一 dashboard model。
+* L470-L530：``load_report_data`` 和 HTML cell/link helper。它把 sign-off status、
+  coverage dashboard、输出路径和 report link 汇成一个 data dict。
+* L531-L788：stage summary、coverage bars、stage detail、coverage detail、formal、
+  LEC、lint 和 waivers section 渲染。每个 section 只显示原始证据的结构化视图。
+* L789-L1008：navigation、header 和 CSS。CSS 固定静态 HTML 风格，避免依赖外部资源。
+* L1009-L1138：JavaScript、完整 HTML 拼装、写文件、CLI 和 ``main``。JavaScript 只做表格
+  过滤/折叠等前端交互，不改变 PASS/FAIL 语义。
+
+§13.3  ``merge_cov.py`` — VCS/URG 与 NC/IMC coverage 合并全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/merge_cov.py
+   :language: python
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/merge_cov.py:全文
+
+逐段精读：
+
+* L1-L31：脚本头说明两种调用模式：Ibex-style metadata mode 和 standalone mode。
+  当前 VCS 主线的 release 参考是 URG 原生 merge/report。
+* L32-L100：VCS ``simv.vdb`` 发现与 ``urg -dir ... -dbname merged`` 调用。
+  这段是 Ibex 对齐路径，报告输出交给 URG 原生 dashboard。
+* L101-L224：NC run directory 发现、IMC cumulative metric 解析和兼容 dashboard 写出。
+  NC/Incisive 是完整备选 simulator；该路径用于 ``cov_work``/IMC 兼容输出。
+* L225-L288：``merge_imc`` 负责调用 IMC command-line flow，并把生成目录整理成 report
+  artifact。它与 VCS/URG path 分开，避免混淆 database 格式。
+* L290-L317：metadata mode 入口，从 regression framework 传入 run list 和输出目录。
+* L318-L398：standalone CLI、参数解析和 ``main``。手工调用时按 ``--simulator`` 选择
+  VCS 或 NC，不从文件名猜测 release 口径。

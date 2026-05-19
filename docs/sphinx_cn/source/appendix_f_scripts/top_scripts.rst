@@ -1164,6 +1164,34 @@ compliance 报告是否存在。
 * 共享状态：读取 `dv/formal/build`、`build/cov_fulltext/dashboard.txt`、
   `dv/uvm/riscv_compliance/work/report.json`。
 
+§13  v2-18 ``v2_literal_line_check.py`` 行段覆盖门禁
+--------------------------------------------------------------------------------
+
+v2-18 新增 ``scripts/v2_literal_line_check.py``，用于审计 Sphinx 手册对真实源码行段的
+``literalinclude`` 覆盖。它与 ``v2_source_explain_check.py`` 的关系是：后者检查资产级
+引用、片段和解释标记；本脚本检查片段是否覆盖到文件的具体行段。
+
+.. literalinclude:: ../../../../scripts/v2_literal_line_check.py
+   :language: python
+   :linenos:
+   :caption: scripts/v2_literal_line_check.py:全文
+
+逐段精读：
+
+* L1-L21：脚本说明、import 和 typing。默认模式是 baseline audit；``--strict`` 才会
+  把低于阈值的文件变成失败。
+* L23-L56：repo、文档根目录、上游 RTL 路径、源码后缀、特殊文件名和跳过目录集合。
+  这些集合与 ``v2_source_explain_check.py`` 保持同一资产边界。
+* L58-L119：``Asset``、``LiteralHit``、文件过滤、行数统计和资产收集。脚本同时覆盖
+  上游 RTL、``dv/uvm``、``dv/formal``、``syn``、``rtl``、``scripts``、``tests`` 和
+  顶层 Makefile/env 文件。
+* L122-L173：解析 ``:lines:`` 选项和收集 ``literalinclude`` hit。没有 ``:lines:``
+  的片段按全文覆盖计算，有 ``:lines:`` 的片段按显式区间计算。
+* L176-L192：合并重叠行段并计算覆盖行数。这个逻辑避免同一文件多个页面重复引用时
+  把同一行重复计数。
+* L195-L257：focus 过滤、CLI、summary 输出和 strict gate。``--focus`` 可先对关键长文件
+  建立 100% 行段门禁，再逐步扩展到全仓库。
+
 §5.2 ``rc5_self_check.sh`` — RC5 检查项
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

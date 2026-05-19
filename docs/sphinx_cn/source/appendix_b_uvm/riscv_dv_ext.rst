@@ -3331,3 +3331,35 @@ generator 绑定到 EH2 debug ROM 生成策略。
 逐段精读：L1-L33 定义脚本用途、CSV 字段和 trace 正则；L35-L93 解析 EH2 retire
 日志、寄存器写回和异常字段；L96-L120 开始输出 CSV 记录。后续 compare/CLI 路径
 在前文 §7 已逐段说明。
+
+§14  v2-18 ``eh2_directed_instr_lib.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+``eh2_directed_instr_lib.sv`` 是 EH2 riscv-dv 定向 stream 的集中定义文件。v2-17
+只引用到 L180，覆盖了基类、CSR、bitmanip 和 PIC stream 的开头；v2-18 补齐全文，
+确保 atomic、breakpoint、exception 和 CSR hazard stream 没有被遗漏。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/riscv_dv_extension/eh2_directed_instr_lib.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/riscv_dv_extension/eh2_directed_instr_lib.sv:全文
+
+逐段精读：
+
+* L1-L46：``eh2_base_directed_stream`` 定义 EH2 directed stream 的公共约束、构造函数
+  和 ``post_randomize``。所有派生 stream 都通过它接入 riscv-dv instruction list。
+* L52-L112：``eh2_csr_access_stream`` 生成 EH2 CSR read/write/set/clear 序列，覆盖
+  machine/debug/PMP 相关 CSR 的基本访问。
+* L114-L179：``eh2_bitmanip_stream`` 生成 Zb* 指令组合，补随机流在短回归中难以稳定命中
+  的 bitmanip corner。
+* L181-L238：``eh2_pic_int_stream`` 生成 PIC/interrupt 相关 CSR 和 helper instruction，
+  包含 ``get_li_instr``、``get_csr_instr`` 等局部构造函数。
+* L244-L281：``eh2_debug_csr_stream`` 生成 debug CSR 和 debug entry 相关序列，服务
+  debug cosim、DRET/EBREAK 和 trigger 场景。
+* L287-L334：``eh2_atomic_stream`` 生成 LR/SC/AMO 场景，配合 directed assembly 和
+  cosim scoreboard 验证 memory side effect。
+* L340-L365：``eh2_breakpoint_stream`` 生成 breakpoint/trigger 类随机定向序列，
+  关注 debug entry 和 PC 捕获。
+* L371-L399：``eh2_exception_stream`` 生成异常触发指令，覆盖 illegal/trap 类路径。
+* L405-L460：``eh2_csr_hazard_stream`` 生成 back-to-back CSR hazard 序列，验证 CSR
+  forwarding、serialization 和 pipeline hazard 行为。

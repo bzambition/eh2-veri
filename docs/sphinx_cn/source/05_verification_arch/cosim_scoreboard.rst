@@ -1572,3 +1572,41 @@ pending trace、memory notify、Spike step、init/report，Ibex 对照说明 RVF
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§54  v2-18 ``eh2_cosim_scoreboard.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+本页前文已经按数据流解释 cosim scoreboard，但 literalinclude 行段仍缺中间若干 helper。
+v2-18 在此补齐全文源码片段，并按 UVM phase、异步写回、memory side effect 和
+Spike compare 四条主线做完整段落级解释。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_scoreboard.sv:全文
+
+逐段精读：
+
+* L1-L32：文件头、analysis imp 声明和宏展开。scoreboard 通过多个 analysis FIFO 接收
+  trace、probe 和 LSU AXI4 数据。
+* L33-L116：class 成员定义，包括 cfg、FIFO、pending queue、Spike handle、统计计数和
+  per-thread 状态。这些成员解释了双线程 lockstep 为什么不能只用单一 retire 队列。
+* L117-L152：constructor、build phase 和 connect phase。build phase 创建 FIFO 并取得
+  cfg；connect phase 将 analysis export 连接到内部 FIFO。
+* L153-L205：run phase、reset monitor 和 ``flush_state``。reset 边界必须清空 pending
+  trace、async writeback 和 memory access，避免跨 reset compare。
+* L206-L279：trace/probe/dmem 三个并发消费 task。trace 进入 pending queue，probe 提供
+  async writeback hint，dmem 提供 LSU memory side effect。
+* L280-L392：async writeback 判定、pending trace 处理、memory instruction 分类和 source
+  命名。该段解决 EH2 非阻塞 load、debug/CSR hint 与 retire trace 不同拍的问题。
+* L393-L507：async hint 消费、memory access 入队、计数和匹配。AXI4 beat 被转成
+  Spike 可理解的 memory notification，store/AMO/load fault 都在这里建立关联。
+* L508-L564：``notify_memory_access`` 把 AXI4 transaction 拆成 DPI 参数，包括地址、
+  byte enable、write data、error 和 thread id。
+* L565-L704：``compare_instruction`` 是主 compare loop，负责 PC、instruction、GPR、
+  CSR/trap、memory notification 和 Spike step。任何 architectural divergence 都应在这里
+  形成可诊断 mismatch。
+* L705-L794：cosim error 字符串和 report helper。它把 DPI 返回码、pending 状态和统计
+  信息转成 UVM log。
+* L795-L853：report/final/pre_abort phase。正常结束和 abort 都会输出 scoreboard 状态，
+  防止失败时丢失 pending queue 线索。

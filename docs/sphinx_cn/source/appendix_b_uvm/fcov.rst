@@ -2089,3 +2089,32 @@ PMP/ePMP 相关 CSR 地址；L40-L55 预留分类宏，供后续 covergroup 或 
 key/value 解析 helper；L67-L120 展开 ``load_waiver_file`` 的前半段，按行读取
 YAML-like 文件并构造 waiver 记录。后半段在前文章节已经逐段解释，这里以入口片段
 保证审计闭环。
+
+§16  v2-18 ``eh2_pmp_fcov_if.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+``eh2_pmp_fcov_if.sv`` 是 PMP/ePMP functional coverage 的大文件。此前文档只引用了
+接口开头片段，无法证明所有 covergroup、cross 和 helper 都被看到。本节补齐全文
+``literalinclude``，并按 coverage 主题解释全部源码段落。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/fcov/eh2_pmp_fcov_if.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/fcov/eh2_pmp_fcov_if.sv:全文
+
+逐段精读：
+
+* L1-L72：interface 声明、clock/reset、CSR/PMP/exception/privilege/LSU/IFU 采样信号。
+  这些输入来自 bind 层和 DUT hierarchy，是 PMP coverage 与 RTL 状态的连接面。
+* L73-L210：PMP region、permission、address mode、lock bit 和 privilege 相关 coverpoint。
+  该段回答“PMP 配置本身有没有被写到足够多组合”。
+* L211-L420：instruction-side 与 data-side access/fault covergroup。它把 IFU fetch、
+  LSU load/store/AMO 与 PMP hit/fault 关联起来，覆盖 iside/dside 两条访问路径。
+* L421-L690：ePMP/MSECCFG、machine/user/debug privilege、trap cause 和 lock 行为 cross。
+  这些 cross 用来证明 ePMP 语义不是只在 M-mode happy path 中被采样。
+* L691-L930：PMP region priority、TOR/NAPOT/NA4/OFF 组合、地址对齐和边界穿越覆盖。
+  directed PMP tests 主要用于填这些随机流难以稳定命中的 bin。
+* L931-L1180：采样 helper、reset/valid gate、CSR decode 与 coverage event 组织。它决定
+  什么时候 sample，避免 reset、无效访问或未实现 CSR 污染覆盖率。
+* L1181-L1461：剩余 cross、ignore/illegal bins 和注释化的覆盖意图。这里的 ignore
+  bin 是结构性排除，不是 sign-off waiver；最终覆盖率仍由 VCS/URG 和 waiver 说明共同解释。
