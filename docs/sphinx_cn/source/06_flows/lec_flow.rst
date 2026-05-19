@@ -9,6 +9,30 @@ LEC 流程 — 详细参考
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+--------------------------------------------------------------------------------
+
+读懂本章前，请先确认：
+
+* :ref:`synthesis_flow` — 知道 DC 综合会生成 netlist、DDC 和 SVF；
+* :ref:`signoff_flow` — 知道 syn stage 读取 ``syn/build/lec_summary.txt`` 做 gate；
+* :ref:`coverage_plan` — 能区分 coverage gate 与 LEC gate，二者不能互相替代；
+* 基础 LEC（logic equivalence checking）概念：reference design、implementation
+  design、compare point、SVF、failing/unverified；
+* 基础 Tcl/Make 概念：``fm_shell -f``、``dc_shell -f``、per-block 循环。
+
+LEC 的目标是证明综合后的 implementation 与 RTL reference 在逻辑上等价。EH2 当前
+sign-off 使用 block-level Formality 流程，而不是早期 top-level 兜底路径。最新证据是
+9 个 block、``31635/31635`` compare points PASS，failing 和 unverified 都为 ``0``。
+
+学完本章你应该能够：
+
+1. 解释为什么当前签核数字来自 ``syn/build/lec_summary.txt`` 的 TOTAL 行。
+2. 区分 DC 阶段的 ``dc_<top>.log`` 与 Formality 阶段的 ``lec_<label>.rpt``。
+3. 说明 ADR-0020 为什么选择 block-level LEC，而不是继续依赖 top-level packed-port 失败路径。
+4. 跑 ``make -C syn block_lec`` 后知道先看哪个目录、哪个 summary 文件。
+5. 解释 LEC PASS 不能替代 UVM、formal 或 compliance，只说明综合等价。
+
 §1  流程边界
 --------------------------------------------------------------------------------
 
@@ -1676,3 +1700,47 @@ implementation port 的显式 ``set_user_match`` 映射。它们记录了 ADR-00
   :file:`/home/host/eh2-veri/syn/scripts/lec_blocklevel/lec_exu_mul.tcl`、
   :file:`/home/host/eh2-veri/syn/scripts/lec_blocklevel/lec_exu_div.tcl`、
   :file:`/home/host/eh2-veri/syn/scripts/lec_summary.py`。
+
+§9  动手练习
+--------------------------------------------------------------------------------
+
+入门题（5 分钟）：
+
+.. code-block:: bash
+
+   cd /home/host/eh2-veri
+   sed -n '1,40p' syn/build/lec_summary.txt
+
+写下 TOTAL 行的 passing、failing、unverified 和 status。合格答案应为
+``31635``、``0``、``0``、``PASS``。
+
+进阶题（30 分钟）：
+
+.. code-block:: bash
+
+   rg -n "BLOCK_LEC_TOPS|BLOCK_LEC_LABELS|block_lec" syn/Makefile
+
+解释为什么 EXU 在 summary 里拆成 ``alu``、``mul``、``div`` 三个 label，而不是一个
+``eh2_exu`` 单体。
+
+挑战题（2 小时）：
+
+任选一个 ``syn/scripts/lec_blocklevel/lec_*.tcl``，列出 reference 读取、implementation
+读取、SVF 载入、match/verify 和 report 输出 5 个步骤。参考 :ref:`appendix_c_tools/syn_lec`
+的源码精读格式，不需要实际修改 Tcl。
+
+§10  自检 5 问
+--------------------------------------------------------------------------------
+
+1. 当前 sign-off 的 LEC 证据为什么是 block-level，而不是 top-level？
+2. ``dc_shell`` 与 ``fm_shell`` 在 LEC 流程中分别负责什么？
+3. ``failing=0`` 与 ``unverified=0`` 为什么都必须满足？
+4. ADR-0019 和 ADR-0020 的边界是什么？
+5. LEC PASS 与 formal 46/46 PASS、coverage LINE 95.05% 的质量含义有什么不同？
+
+§11  下一步
+--------------------------------------------------------------------------------
+
+完成本章后，建议回到 :ref:`signoff_flow` §7.3-§7.5，查看 ``signoff.py`` 如何读取
+``lec_summary.txt`` 并把 syn stage 写入最终 JSON。若要看每个 Tcl 文件的逐段解释，
+继续阅读 :ref:`appendix_c_tools/syn_lec`。

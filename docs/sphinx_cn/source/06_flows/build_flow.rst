@@ -352,9 +352,9 @@ wrapper。
 
 **逐段解释** ：
 
-* 第 156-L158 行：tool command 变量为 ``vcs``、``xrun`` 和 ``irun``。当前
-  sign-off 主线强制使用 VCS；NC/Incisive 只作为 ``SIMULATOR=nc WAVES=1`` 的单测
-  波形调试通道。
+* 第 156-L158 行：tool command 变量为 ``vcs``、``xrun`` 和 ``irun``。当前默认
+  simulator 是 VCS；NC/Incisive 是完整备选 simulator，可显式用于 compile、smoke、
+  regress、sign-off、demo 和波形调试。
 * ``TESTLIST_PATH`` 根据 ``TESTLIST`` 在 directed、cosim 和 riscv-dv extension
   三类 YAML 之间选择。``regress`` 和 sign-off stage 都依赖这个派生路径。
 
@@ -392,7 +392,8 @@ wrapper。
                            -cm_fsmcfg $(VCS_FSM_CFG) \
                            -cm_fsmresetfilter $(VCS_FSM_RESET_FILTER) \
                            -cm_fsmopt report2StateFsms+allowTmp+reportvalues+reportWait+upto64
-   NC_COMPILE_COV_OPTS :=
+   NC_COV_CCF      := $(TB_DIR)/cov_full_nc.ccf
+   NC_COMPILE_COV_OPTS := -coverage all -covworkdir $(BUILD_SUBDIR)/cov_work -covoverwrite -covdut core_eh2_tb_top -covfile $(NC_COV_CCF)
    VCS_RUN_COV_OPTS := -cm $(VCS_COV_METRICS) -cm_dir $(BUILD_SUBDIR)/cov \
                        -cm_name $(TEST)_$(SEED) +enable_eh2_fcov=1
    
@@ -410,7 +411,9 @@ wrapper。
 * 第 189-L203 行：``cover.cfg`` 在编译时限定 ``core_eh2_tb_top.dut`` 子树，
   toggle 采用 Ibex 风格的 ``portsonly`` 与 ``structarr``，并使用 FSM config 与
   reset filter。coverage 数据库按 ``BUILD_SUBDIR`` 写入 per-target island。
-* 第 204-L205 行：``NC_COMPILE_COV_OPTS`` 为空，表示 NC 不参与 sign-off coverage。
+* 第 204-L205 行：``NC_COV_CCF`` 和 ``NC_COMPILE_COV_OPTS`` 启用 NC coverage，
+  数据库写入 ``$(BUILD_SUBDIR)/cov_work``，scope 由 ``cov_full_nc.ccf`` 限定到
+  DUT-only 口径。
 * 第 206-L213 行：run 阶段使用同一组 VCS metrics 和 per-target coverage 目录，并用
   ``+enable_eh2_fcov=1`` 打开 EH2 covergroup 采样。
 * 第 146-L147 行：两个内联 Python 片段从

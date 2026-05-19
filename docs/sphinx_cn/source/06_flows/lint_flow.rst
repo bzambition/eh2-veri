@@ -9,6 +9,29 @@ Lint 流程 — 详细参考
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+--------------------------------------------------------------------------------
+
+读懂本章前，请先确认：
+
+* :ref:`glossary_pretest` — 知道 lint 是 sign-off 的静态质量 stage；
+* :ref:`build_flow` — 知道 lint 不生成 ``simv``，也不运行 RTL 仿真；
+* :ref:`signoff_flow` — 知道 lint stage FAIL 会阻断 full profile；
+* 基础 SystemVerilog 语法：``module``、``always_comb``、``always_ff``、``interface``；
+* 基础 waiver 概念：豁免必须有边界和理由，不能用来掩盖真实错误。
+
+Lint 的价值在于尽早暴露语法、风格、未用信号、潜在综合歧义和可维护性问题。EH2 使用
+Verible 与 Verilator 双路径：Verible 更偏 SystemVerilog 风格和规则，Verilator 更偏
+静态 elaboration 与综合/仿真可疑点。两者都不是仿真器，也不替代 VCS/NC regression。
+
+学完本章你应该能够：
+
+1. 解释 ``make -C lint lint`` 如何展开到 ``lint-verible`` 和 ``lint-verilator``。
+2. 区分 Verible rules、Verible waivers、Verilator config 和 Verilator waivers。
+3. 在 ``lint/build`` 中找到 blocking error 的来源。
+4. 判断一个 waiver 是否有足够理由，是否违反 blanket waiver 禁令。
+5. 说明 lint PASS 与 formal/LEC/coverage PASS 的边界。
+
 §1  流程边界
 --------------------------------------------------------------------------------
 
@@ -724,3 +747,79 @@ config 和 waiver 文件，并把 log 写入 :file:`lint/build/verilator.log`。
   :file:`/home/host/eh2-veri/lint/verible/waivers.vbl`、
   :file:`/home/host/eh2-veri/lint/verilator/verilator-config.vlt`、
   :file:`/home/host/eh2-veri/lint/verilator/verilator_waiver.vlt`。
+
+§8  常见失败模式与排查
+--------------------------------------------------------------------------------
+
+.. list-table:: Lint 常见失败模式
+   :header-rows: 1
+   :widths: 24 30 30 16
+
+   * - 现象
+     - 根因
+     - 排查命令
+     - 修复路径
+   * - ``verible-verilog-lint`` not found
+     - Verible 未安装或 PATH 未设置
+     - ``which verible-verilog-lint``
+     - 修环境，不要改源码绕过
+   * - ``verible_errors.txt`` 非空
+     - 触发 blocking Verible rule
+     - ``cat lint/build/verible_errors.txt``
+     - 修对应 SV，或补有理由 waiver
+   * - ``%Error`` 出现在 Verilator log
+     - 静态 elaboration 或语法问题
+     - ``rg -n "%Error" lint/build/verilator.log``
+     - 优先修 RTL，不先加 waiver
+   * - waiver 被审查打回
+     - 缺 reason 或范围过宽
+     - ``sed -n '1,120p' lint/verible/waivers.vbl``
+     - 缩小路径/行号并写清原因
+   * - sign-off lint FAIL
+     - lint stage 收集到 error
+     - ``rg -n "lint" build/signoff_vcs/signoff_report.md``
+     - 回到 ``lint/build`` 看原始工具日志
+
+§9  动手练习
+--------------------------------------------------------------------------------
+
+入门题（5 分钟）：
+
+.. code-block:: bash
+
+   cd /home/host/eh2-veri
+   make -C lint lint-quick
+
+记录命令是否找到 Verible/Verilator；如果工具缺失，说明缺的是环境而不是 RTL。
+
+进阶题（30 分钟）：
+
+.. code-block:: bash
+
+   sed -n '1,120p' lint/verible/verible.rules
+   sed -n '1,120p' lint/verilator/verilator-config.vlt
+
+分别写下一个 Verible rule 和一个 Verilator warning 配置，并说明它们为何属于 lint
+而不是仿真。
+
+挑战题（1 小时）：
+
+任选 ``lint/verible/waivers.vbl`` 或 ``lint/verilator/verilator_waiver.vlt`` 中一条
+waiver，按 §6.2 的 policy 检查它是否有理由、是否具体到文件/规则、是否可能掩盖真实
+RTL bug。
+
+§10  自检 5 问
+--------------------------------------------------------------------------------
+
+1. Verible 与 Verilator 的 lint 关注点有什么差异？
+2. 为什么 tool missing 不应被描述成“RTL 通过 lint”？
+3. blocking gate 分别检查 ``verible_errors.txt`` 和 ``%Error`` 的原因是什么？
+4. 什么是 blanket waiver？为什么禁止？
+5. lint PASS 不能替代哪几类动态或形式验证？
+
+§11  下一步
+--------------------------------------------------------------------------------
+
+完成本章后，继续阅读 :ref:`formal_flow` 和 :ref:`lec_flow`，把静态规则检查、形式证明
+和逻辑等价检查放到同一个 sign-off 质量框架下理解。函数和规则级细节见
+:ref:`appendix_c_tools/lint_verible` 与 :ref:`appendix_c_tools/lint_verilator`。

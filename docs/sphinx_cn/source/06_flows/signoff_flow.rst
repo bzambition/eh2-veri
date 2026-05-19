@@ -9,6 +9,32 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+--------------------------------------------------------------------------------
+
+读懂本章前，请先确认你已经掌握：
+
+* :ref:`glossary_pretest` — 能区分 smoke、regress、sign-off、coverage、waiver 和 LEC；
+* :ref:`build_flow` — 知道 ``make signoff`` 会先编译，再由 ``signoff.py`` 调度 stage；
+* :ref:`regression_flow` — 知道 ``report.json``、``result.yaml`` 和 ``regr.log`` 的来源；
+* :ref:`functional_coverage` — 知道 LINE/GROUP/OVERALL 的区别；
+* 基础 Python ``argparse``、JSON、YAML 和返回码概念。
+
+本章讨论的 sign-off（签核）不是“跑一个测试通过”，而是把 smoke、directed、cosim、
+riscv-dv、lint、CSR unit、compliance、formal 和 syn/LEC 9 个 stage 合并成一个
+可审计结论。默认 simulator 是 VCS；NC/Incisive 是完整备选 simulator，可显式用
+``SIMULATOR=nc`` 跑 sign-off/cross-check，产物与 VCS 按 ``build/<target>_<simulator>/``
+隔离。
+
+学完本章你应该能够：
+
+1. 解释 ``make signoff``、``make signoff GATE_ONLY=1`` 和 ``make signoff_replay`` 的区别。
+2. 说明 25% fail-rate ceiling 为什么比单纯 pass count 更严格。
+3. 在 ``signoff_status.json``、``signoff_report.md`` 和 ``report.html`` 中找到同一
+   stage 的 PASS/FAIL 证据。
+4. 解释 LINE 95.05%、GROUP 69.42%、实跑覆盖率 102/104 和 LEC 31635/31635 分别来自哪里。
+5. 当 full profile FAIL 时，按 precheck、stage、coverage、waiver、LEC 的顺序排查 blocker。
+
 §1  流程边界
 --------------------------------------------------------------------------------
 
@@ -19,8 +45,9 @@
 
 本章的签核事实以 2026-05-19 01:02 VCS 主线 demo 为准。该 run 使用
 Synopsys VCS、``cover.cfg`` DUT-only scope、URG 原生 dashboard、block-level
-Formality LEC，完成 9/9 stages PASS；NC/Incisive 不参与 sign-off 或 coverage，
-只保留 ``make smoke|regress SIMULATOR=nc WAVES=1`` 单测波形调试入口。
+Formality LEC，完成 9/9 stages PASS。NC/Incisive 是完整备选 simulator，可通过
+``SIMULATOR=nc`` 跑 compile、smoke、regress、sign-off、demo 和波形调试；VCS 仍是
+默认主线和 Ibex 对齐路径。
 
 .. list-table::
    :header-rows: 1
@@ -159,22 +186,25 @@ coverage、waiver 和最终 `status`。stage 内部的并行度来自
 
 **职责**：`signoff` target 把 Make 变量转换为 `signoff.py` CLI 参数。
 
-**关键代码** （`Makefile:L1063-L1091`）：
+**关键代码** （`Makefile:L1236-L1268`）：
 
 .. code-block:: makefile
 
    SIGNOFF_LEC_OPTS := $(if $(filter 1,$(LEC_BLOCKLEVEL)),$(if $(wildcard $(LEC_SUMMARY_PATH)),--lec-blocklevel --lec-summary-path $(LEC_SUMMARY_PATH),--lec-known-limited),$(if $(filter 1,$(LEC_KNOWN_LIMITED)),--lec-known-limited,))
-   
+
    signoff:
-   	@# Sign-off 强制 VCS。NC 只用于 `make smoke/regress SIMULATOR=nc WAVES=1` 单测+波形场景。
-   	@if [ "$(SIMULATOR)" != "vcs" ]; then \
-   	  echo "ERROR: signoff 仅支持 SIMULATOR=vcs (当前为 $(SIMULATOR))。"; \
-   	  echo "       NC 仅用于 'make smoke|regress SIMULATOR=nc WAVES=1' 单测波形调试。"; \
-   	  exit 1; \
-   	fi
-   	@$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory asm)
-   	@$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(SIGNOFF_OUT) COV=$(COV))
-   	python3 $(SCRIPTS_DIR)/signoff.py \
+       @# VCS 是 sign-off 默认；NC 也可作 cross-check（覆盖率独立合并，
+       @# 维度名与 VCS 同构但工具不同，参见 cover.cfg / cov_full_nc.ccf）。
+       @if [ "$(SIMULATOR)" != "vcs" ] && [ "$(SIMULATOR)" != "nc" ]; then \
+         echo "ERROR: signoff 仅支持 SIMULATOR=vcs (默认) 或 SIMULATOR=nc (当前为 $(SIMULATOR))。"; \
+         exit 1; \
+       fi
+       @if [ "$(SIMULATOR)" = "nc" ]; then \
+         echo "[signoff] 注意：当前用 NC simulator (备选)。VCS 是 sign-off 默认。"; \
+       fi
+       @$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory asm)
+       @$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(SIGNOFF_OUT) COV=$(COV))
+       python3 $(SCRIPTS_DIR)/signoff.py \
    	  --profile $(PROFILE) \
    	  --simulator $(SIMULATOR) \
    	  --seed $(SEED) \
@@ -190,14 +220,14 @@ coverage、waiver 和最终 `status`。stage 内部的并行度来自
 
 **逐段解释**：
 
-* 第 L1063-L1067 行：`SIGNOFF_LEC_OPTS` 先判断 block-level summary 是否存在。
+* 第 L1236-L1240 行：`SIGNOFF_LEC_OPTS` 先判断 block-level summary 是否存在。
   存在时走 `--lec-blocklevel --lec-summary-path`；不存在时转入
   `--lec-known-limited`，使报告明确暴露 LEC 证据缺口。
-* 第 L1069-L1076 行：`make signoff` 明确拒绝非 VCS simulator，错误信息直接说明
-  NC 只用于单测波形调试。
-* 第 L1078-L1079 行：非 `GATE_ONLY` 时先运行 ASM 和 compile，compile 使用
-  `BUILD_SUBDIR=$(SIGNOFF_OUT)`，保证 sign-off 有自己的 VCS build island。
-* 第 L1081-L1091 行：coverage 阈值来自 Make 变量，默认 line 65、GROUP/function
+* 第 L1242-L1253 行：`make signoff` 接受 `SIMULATOR=vcs|nc`。VCS 是默认主线；
+  NC 作为备选/cross-check 时会打印提示，但不会被拒绝。
+* 第 L1254-L1255 行：非 `GATE_ONLY` 时先运行 ASM 和 compile，compile 使用
+  `BUILD_SUBDIR=$(SIGNOFF_OUT)`，保证 sign-off 有自己的 per-simulator build island。
+* 第 L1256-L1268 行：coverage 阈值来自 Make 变量，默认 line 65、GROUP/function
   40；`SIGNOFF_ALLOW_WARNINGS=1` 会传入 `--allow-warnings`。
 
 **接口关系**：
@@ -1797,21 +1827,23 @@ coverage 文本报告。
 §8.4  `auto_merge_stage_coverage()` - stage coverage 自动合并
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**职责**：当本次运行开启 coverage 时，扫描各 stage 的 `.vdb` 或
-`coverage` 目录，调用 `merge_cov.py` 生成 merged coverage 目录。
+**职责**：当本次运行开启 coverage 时，扫描各 stage 的 `.vdb`、``coverage`` 目录
+和 NC ``cov_work`` 目录，调用 `merge_cov.py` 生成 merged coverage 目录。
 
-**关键代码** （`dv/uvm/core_eh2/scripts/signoff.py:L958-L993`）：
+**关键代码** （`dv/uvm/core_eh2/scripts/signoff.py:L989-L1028`）：
 
 .. code-block:: python
 
    def auto_merge_stage_coverage(stage_results: List[Dict],
                                   output_dir: Path) -> Path:
-       """Merge coverage databases from all stages into a single merged report.
-   
-       Scans each stage's results_dir for .vdb directories, runs urg merge,
-       and generates dashboard.txt. Returns the merged output directory path.
-       """
-       vdb_dirs = []
+      """Merge coverage databases from all stages into a single merged report.
+
+      Scans each stage's results_dir for .vdb directories, and additionally
+      includes the centralized output_dir/cov.vdb that VCS produces when
+      every stage shares the same -cm_dir. Runs urg merge and generates
+      dashboard.txt. Returns the merged output directory path.
+      """
+      vdb_dirs = []
        for stage in stage_results:
            results_dir = Path(stage.get("results_dir", ""))
            if not results_dir.is_dir():
@@ -1825,40 +1857,34 @@ coverage 文本报告。
 
 **逐段解释**：
 
-* 第 L958-L964 行：docstring 说明函数扫描 stage 的 coverage DB 并运行
-  merge script。
-* 第 L965-L975 行：对每个 stage 的 `results_dir` 查找 `.vdb` 目录和
+* 第 L989-L997 行：docstring 说明函数扫描 stage 的 coverage DB，并补充 VCS
+  shared ``-cm_dir`` 产生的 centralized ``cov.vdb``。
+* 第 L998-L1008 行：对每个 stage 的 `results_dir` 查找 `.vdb` 目录和
   `coverage` 子目录。
 
-**关键代码** （`dv/uvm/core_eh2/scripts/signoff.py:L977-L993`）：
+**关键代码** （`dv/uvm/core_eh2/scripts/signoff.py:L1010-L1028`）：
 
 .. code-block:: python
 
-       if len(vdb_dirs) < 2:
-           return Path()
-   
-       merged_dir = output_dir / "cov_merged"
-       merge_script = SCRIPT_DIR / "merge_cov.py"
-       if not merge_script.exists():
-           return Path()
-   
-       cmd = [sys.executable, str(merge_script),
-              "--dirs"] + vdb_dirs + ["--output", str(merged_dir)]
-       try:
-           subprocess.run(cmd, stdout=subprocess.DEVNULL,
-                          stderr=subprocess.DEVNULL, timeout=3600)
-       except Exception:
-           return Path()
-   
-       return merged_dir
+      central_vdb = output_dir / "cov.vdb"
+      if central_vdb.is_dir():
+          vdb_dirs.append(str(central_vdb))
+
+      # NC/imc coverage layout (build_dir/cov_work) — full sign-off support.
+      # merge_cov.py auto-detects .vdb (VCS) vs cov_work/*.ucd (NC) and routes
+      # to urg / imc accordingly. NC produces dashboard.txt in the same
+      # column layout as VCS so the signoff parser stays simulator-agnostic.
+      central_cov_work = output_dir / "cov_work"
+      if central_cov_work.is_dir():
+          vdb_dirs.append(str(central_cov_work))
 
 **逐段解释**：
 
-* 第 L977-L983 行：少于两个 coverage DB 或缺少 `merge_cov.py` 时返回空
-  `Path()`。
-* 第 L985-L989 行：构造 `merge_cov.py --dirs ... --output <cov_merged>` 并
-  最多等待 3600 秒。
-* 第 L990-L993 行：异常时返回空路径；否则返回 merged 目录。
+* 第 L1010-L1012 行：VCS shared coverage 目录位于 ``output_dir/cov.vdb`` 时也加入合并。
+* 第 L1014-L1021 行：NC ``cov_work`` 是完整 sign-off coverage 路径的一部分；
+  ``merge_cov.py`` 根据 ``.vdb`` 或 ``cov_work/*.ucd`` 自动分流到 URG 或 IMC。
+* 第 L1022-L1024 行：NC 合并后仍输出同样列布局的 ``dashboard.txt``，因此后续 parser
+  保持 simulator-agnostic。
 
 **接口关系**：
 
@@ -2944,9 +2970,11 @@ coverage、waiver、LEC 和 HTML 报告开关。
 
 * 第 L1491-L1494 行：`--max-iter-per-test` 是 `--iterations` 的别名，
   parallel 默认 1，timeout 默认 7200 秒。
-* 第 L1495-L1503 行：coverage、waves、coverage path 和 coverage required
+* 第 L1559-L1565 行：simulator 支持 ``vcs``、``nc``、``xlm``、``questa``；
+  顶层 Makefile 当前只允许 sign-off 使用 ``vcs`` 或 ``nc``。
+* 第 L1572-L1580 行：coverage、waves、coverage path 和 coverage required
   escape hatch 在这里定义。
-* 第 L1504-L1510 行：裸 CLI 默认 pass rate 为 100.0，line coverage threshold
+* 第 L1581-L1588 行：裸 CLI 默认 pass rate 为 100.0，line coverage threshold
   为 60.0，其他 coverage threshold 默认 0.0。顶层 Makefile 在 `COV=1` 时会
   覆盖其中部分阈值。
 
