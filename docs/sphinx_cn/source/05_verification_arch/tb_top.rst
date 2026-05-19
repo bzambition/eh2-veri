@@ -9,6 +9,30 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+-----------------
+
+读懂本章，你需要先知道两件事：RTL 顶层模块通过端口和外界连接，UVM testbench
+通过 virtual interface 驱动和采样这些端口。如果你只懂 C 语言，先把
+:ref:`getting_started` 跑通，再读本章；不要一开始就跳进 UVM class 继承树。
+
+建议前置知识：
+
+* 基础 SystemVerilog：``module``、``interface``、``logic``、``initial``；
+* 基础 UVM：知道 ``run_test()`` 会启动 UVM test，``uvm_config_db`` 用来传对象句柄；
+* :ref:`pipeline` — 理解 DUT 内部至少有 IFU/DEC/EXU/LSU 四类主要路径；
+* :ref:`quickstart` — 知道 ``make smoke`` 最终会启动 ``core_eh2_tb_top``。
+
+学完本章你能：
+
+1. 在 :file:`dv/uvm/core_eh2/tb/core_eh2_tb_top.sv` 中找到 DUT 实例、时钟复位和
+   ``run_test()`` 入口；
+2. 解释 TB top 为什么要实例化 AXI4 memory model、IRQ/JTAG/Halt-Run/trace/probe/RVFI/fcov
+   等 interface；
+3. 说出 ``uvm_config_db::set`` 如何把 virtual interface 传给 env 和 agent；
+4. 遇到 smoke hang、mailbox 未 PASS、interface get 失败或 waveform 缺信号时，
+   知道应先检查 TB top 的哪一类连接。
+
 §1  本章导读
 -------------
 

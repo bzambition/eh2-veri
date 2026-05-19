@@ -9,6 +9,28 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+-----------------
+
+读懂本章，你需要先掌握三个概念：第一，程序由一条条指令组成；第二，流水线会让多条指令
+在不同阶段重叠执行；第三，异常、中断和分支会打断顺序执行。如果这些概念还不熟，
+先读 :ref:`introduction` 和 :ref:`features`，再回到本章。
+
+建议前置章节：
+
+* :ref:`reader` — 确认术语、路径和源码引用约定；
+* :ref:`introduction` — 理解 EH2 是双线程 RV32IMAC + Zb* 核；
+* :ref:`getting_started` — 至少跑过一次 ``make smoke``，知道日志在 ``build/`` 下；
+* :ref:`tb_top` — 选读，帮助理解 RTL 信号如何被 UVM testbench 观察。
+
+学完本章你能：
+
+1. 画出 EH2 从 IFU 到 DEC/EXU/LSU 的主要流水级，并说明每一级在做什么；
+2. 用 i0/i1 解释双发射为什么会带来 dependency、stall 和 flush 约束；
+3. 跟踪一条最简单的 ``addi`` 从取指、译码、执行到写回的端到端路径；
+4. 在 cosim mismatch 时判断首查方向是 PC、GPR 写回、trap CSR、flush 还是异步写回；
+5. 把流水线相关覆盖率与 2026-05-19 VCS/URG sign-off 数据对应起来。
+
 §1  本章导读
 -------------
 

@@ -7,6 +7,30 @@ EH2 项目背景与定位
 :source: CONTEXT.md, README.md, INDUSTRIAL_GRADE_AUDIT.md
 :last-reviewed: 2026-05-19
 
+§0  前置知识自检
+-----------------
+
+读懂本章，你只需要具备最基础的计算机组成概念：CPU 会取指、译码、执行，
+程序由指令组成，寄存器保存临时数据。不要求你懂 SystemVerilog、UVM 或 EDA 工具。
+如果你已经知道 RISC-V 是一种开放指令集，本章会更顺；如果不知道，也可以先读完本章，
+再回到 :ref:`standards` 查规范细节。
+
+建议阅读顺序：
+
+* 先读 :ref:`reader`，确认自己使用的是零基础路径还是工程师速查路径；
+* 本章负责建立 EH2 项目全景，不深入讲某个 RTL 信号；
+* 想知道 EH2 支持哪些指令和外设，接着读 :ref:`features`；
+* 想马上跑起来，跳到 :ref:`getting_started`；
+* 想看 EH2 和 Ibex 的完整差异，读 :ref:`ibex_capability_matrix`。
+
+学完本章你能：
+
+1. 用一段话解释 EH2 是什么、和 Ibex 最直观的差异是什么；
+2. 在 :file:`/home/host/Cores-VeeR-EH2/design/` 中指出 EH2 RTL 的上游来源；
+3. 说出本验证平台为什么采用 UVM、Spike cosim、riscv-dv、coverage 和 LEC 组合；
+4. 理解 2026-05-19 sign-off 数据中 ``9/9 Stages PASS``、``LEC 31635/31635``
+   和 ``LINE 95.05%`` 分别代表什么质量证据。
+
 §1  本章导读
 -------------
 

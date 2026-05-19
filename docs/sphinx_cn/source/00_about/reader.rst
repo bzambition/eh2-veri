@@ -6,6 +6,31 @@
 :status: draft
 :last-reviewed: 2026-05-13
 
+§0  前置知识自检
+-----------------
+
+读懂本章不需要任何 EH2、SystemVerilog 或 UVM 基础。本章就是整本手册的入口，
+用于帮你判断自己属于哪类读者、应该先读哪些章节、哪些知识可以边做边补。
+
+如果你只懂 C 语言、第一次接触处理器验证，先按下面的“小白路径”走：
+
+* 先读本章，确认自己需要补哪些词汇和工具概念；
+* 再读 :ref:`introduction`，用 30 分钟理解 EH2 是什么；
+* 接着读 :ref:`getting_started`，照着命令跑出第一个 ``smoke``；
+* 然后读 :ref:`quickstart`，理解 ``compile``、``smoke``、``regress``、``signoff`` 的关系；
+* 最后再进入 :ref:`pipeline` 和 :ref:`tb_top`，开始读 RTL 与 UVM 源码。
+
+如果你已经是验证工程师，可以跳过入门解释，但仍建议检查本章的路径约定。
+本手册大量使用 :file:`/home/host/eh2-veri/...` 绝对路径、``:ref:`` 交叉引用、
+源码行号和实测数据；如果这些约定没看懂，后面的源码精读会很难定位。
+
+学完本章你能：
+
+1. 根据自己的角色选择“零基础学习路径”“验证工程师路径”或“审计路径”；
+2. 说出读懂 UVM、cosim、coverage、formal、LEC 分别需要哪些前置知识；
+3. 看懂本手册里的路径、命令、术语和源码引用格式；
+4. 知道遇到读不懂的章节时，应先回到哪一章补背景。
+
 §1  本章导读
 -------------
 
@@ -318,6 +343,35 @@
   :ref:`glossary` — 中英术语对照表；
   :ref:`about_index` — 手册全局目录；
   :ref:`references` — 完整参考文献列表
+
+§10  自检 5 问
+--------------
+
+读完本章，你应该能回答：
+
+1. 只懂 C 语言的新读者为什么不应直接跳到 :ref:`appendix_b_uvm/cosim_agent`？
+2. 验证工程师和 SoC 集成人员的阅读路径为什么不同？
+3. 手册中的 :file:`dv/uvm/core_eh2/...` 路径默认相对于哪个仓库根目录？
+4. 如果后续章节第一次出现 ``RVFI``、``DPI``、``URG`` 等术语，你应该去哪里查？
+5. 为什么本手册要求每个关键结论都绑定源码路径、命令或实测数据？
+
+如果第 1 题答不上来，回到 §2 重新看读者画像；如果第 3 题答不上来，
+回到 §7 重新看路径约定；如果第 4 题答不上来，先读 :ref:`glossary`。
+
+§11  v2 学习路径参考资料
+-------------------------
+
+本章之后建议按目标选择下一步：
+
+* 零基础读者：:ref:`introduction` → :ref:`getting_started` → :ref:`quickstart`；
+* 想理解 RTL：:ref:`features` → :ref:`pipeline` → :ref:`dual_thread`；
+* 想理解 UVM：:ref:`quickstart` → :ref:`tb_top` → :ref:`05_verification_arch/env`；
+* 想调 cosim：:ref:`rvfi_trace` → :ref:`05_verification_arch/agent_cosim` →
+  :ref:`05_verification_arch/cosim_scoreboard`；
+* 想做质量审计：:ref:`targets` → :ref:`signoff_flow` → :ref:`coverage_plan`。
+
+v2 教学层会在后续阶段新增 :file:`00_about/learning_path.rst` 和
+:file:`00_about/glossary_pretest.rst`。在这些章节创建前，本章就是学习路线的主入口。
 
 ..
    自检八问：

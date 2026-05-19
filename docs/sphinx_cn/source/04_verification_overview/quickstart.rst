@@ -9,6 +9,25 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+-----------------
+
+读懂本章，你需要已经看过 :ref:`getting_started`，至少知道 ``env.sh``、``make compile``、
+``make smoke`` 和 ``make signoff`` 的基本作用。本章面向验证平台使用者，重点解释
+“第一次跑通以后，如何理解每条命令背后的验证含义”。
+
+如果你还没跑过任何命令，先回到 :ref:`getting_started`。如果你已经能跑通 smoke，
+本章会把 smoke 扩展成一个完整的验证心智模型：编译产生 ``simv``，仿真执行
+``smoke.hex``，UVM testbench 监控 mailbox，cosim scoreboard 可以逐条对比 Spike，
+sign-off 再把 smoke、directed、riscv-dv、formal、LEC 等 stage 汇总成质量证据。
+
+学完本章你能：
+
+1. 区分 ``make compile``、``make smoke``、``make regress``、``make signoff`` 的边界；
+2. 解释 ``NO_COSIM=1`` 和 ``+disable_cosim=1`` 分别发生在编译期还是运行期；
+3. 找到 smoke 日志、sign-off JSON、coverage dashboard 和 HTML 报告的默认位置；
+4. 遇到 deprecated alias 时，把旧命令改写成当前推荐入口。
+
 §1  本章边界
 -------------
 

@@ -9,6 +9,28 @@
 :last-reviewed: 2026-05-19
 :authors: GPT-doc-author
 
+§0  前置知识自检
+-----------------
+
+读懂本章，你需要能在 Linux shell 中完成最基本操作：``cd`` 切目录、``source`` 加载环境、
+``make <target> VAR=value`` 传变量，以及用 ``grep`` 在日志中搜索关键字。不要求你已经懂
+SystemVerilog 或 UVM；本章的目标是先把平台跑起来，再回头解释内部机制。
+
+开始前请确认：
+
+* 你位于 :file:`/home/host/eh2-veri` 工作区，且知道这是验证平台仓库；
+* 上游 DUT clone 位于 :file:`/home/host/Cores-VeeR-EH2/`；
+* VCS 是默认仿真器，NC/Incisive 是可选备选路径；本章命令优先展示 VCS；
+* 你能接受第一次编译较慢，因为 testbench、DUT、UVM package 和 coverage 选项都要展开。
+
+学完本章你能：
+
+1. 从一个新 shell 进入工作区并加载 :file:`env.sh`；
+2. 在没有 Spike cosim 环境时用 ``NO_COSIM=1`` 编译出最小 ``simv``；
+3. 跑 ``make smoke`` 并知道去哪个 ``build/`` 子目录找日志；
+4. 把单测扩展到 ``make regress`` 和 ``make signoff PROFILE=quick``；
+5. 遇到工具缺失、GCC 缺失或旧 target 提示时，知道先查哪一节。
+
 §1  本章边界
 -------------
 
