@@ -2254,3 +2254,320 @@ ADR 引用：
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§16  v2-21 LSU 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-21 将 LSU 目录 12 个 SystemVerilog 文件全部纳入 ``literalinclude``，
+并把已有的片段级讲解提升为全文行段级索引。读者可以先读 §1-§15 的架构、
+时序和验证关系，再回到本节用完整源码核对每一个端口、组合 assign、寄存器、
+generate 和状态机。该层的目标不是替代 RTL，而是让源码本身成为手册的一部分，
+后续 Sphinx 构建、源码解释审计和 literal line 门禁都能证明 LSU 没有遗漏。
+
+§16.1  ``eh2_lsu.sv`` — LSU 顶层胶合与子模块实例
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu.sv:全文
+
+逐段精读：
+
+* L1-L27：版权、include 和模块注释。源码把本文件定义为 load/store unit
+  顶层，并明确 DC1 到 DC4 是核心存储流水线。
+* L28-L104：模块参数与 DEC/EXU/TLU 输入、flush、CSR 配置、LSU packet、DMA packet、
+  PMU、trigger 和 back-pressure 输出。这里定义 LSU 与 decode、trap/debug、DMA 和
+  性能事件的控制边界。
+* L105-L199：DCCM、PIC、AXI、DMA slave 和 clock/reset 端口。该段证明 EH2 LSU
+  同时服务紧耦合 DCCM、PIC memory、外部 AXI master 和 DMA DCCM/PIC 访问。
+* L201-L315：内部信号声明。DCCM ECC、store buffer、bus buffer、clockdomain、LR/SC、
+  raw forwarding、single/double ECC、DMA tag 和 flush staging 都在这里建立。
+* L317-L382：DMA ready、flush、dual access、decode stall、halt idle 和 LSU bus request
+  组合控制。该段决定 DEC 是否可继续发 LSU 指令，以及 halt/debug 能否安全进入空闲态。
+* L383-L397：store buffer 请求、外部 bus 请求、PMU load/store 事件和 diagnostic 地址控制。
+  这段把 DC5 commit 结果映射为 DCCM store buffer 或 AXI bus 事务。
+* L399-L465：AMO、DCCM control、store buffer、ECC、trigger、clockdomain 和 bus interface
+  实例化。大部分实例使用同名连接，故上一段内部信号名就是跨子模块接口契约。
+* L467-L520：flush/ECC/DMA pipeline flop、store data bypass mux、SVA 和 atomic ordering
+  assertion。该段把 DC2-DC5 错误、tag、raw forwarding 和 store data 旁路同步到提交阶段。
+
+§16.2  ``eh2_lsu_lsc_ctl.sv`` — 地址生成、packet 管线与 LR/SC
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_lsc_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_lsc_ctl.sv:全文
+
+逐段精读：
+
+* L1-L27：文件头和模块说明。该模块是 LSU load/store control，不直接访问 SRAM，
+  而是生成地址、packet、result 和错误包。
+* L28-L156：模块端口。输入来自 DEC 操作数、TLU flush、DCCM/PIC/bus 返回、ECC、
+  DMA 和 trigger；输出包括 DC1-DC5 packet、地址、commit、load result、FIR 和错误包。
+* L157-L199：局部参数和内部信号。``THREADS``、RS1/raw bypass、core start/end address、
+  fault staging、store data pipeline、LR/SC reservation 和 raw forwarding 信号在这里声明。
+* L203-L247：RS1 旁路、offset 符号扩展、DC1 start/end address 计算、``eh2_lsu_addrcheck``
+  实例和 DCCM/PIC/external/dual 标记生成。该段是所有 LSU 访问路径的地址根。
+* L249-L287：ECC 计数、错误包、access fault/misaligned/FIR 组合和 packet valid 控制。
+  TLU 看到的 LSU exception metadata 从这里开始形成。
+* L289-L330：DCCM/PIC/bus load data mux、sign/zero extension、fast interrupt 地址、
+  commit 判定和 store data 旁路。load result 写回 DEC 的值由这一段最终选择。
+* L331-L394：DC1-DC5 packet、store data、地址、end address、region、fault 和 ECC
+  pipeline flop。该段保证控制、地址和数据在五级 LSU 管线中保持对齐。
+* L396-L436：``pt.ATOMIC_ENABLE`` generate。启用 atomic 时维护每线程 LR reservation、
+  SC 成功比较和跨线程 store reset；关闭 atomic 时 SC 结果与 reservation 被 tie-off。
+
+§16.3  ``eh2_lsu_addrcheck.sv`` — DCCM/PIC/ICCM/外部地址判定
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_addrcheck.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_addrcheck.sv:全文
+
+逐段精读：
+
+* L1-L28：文件头和模块说明。地址检查器只做 memory map、alignment 和访问错误判定。
+* L29-L86：模块端口。输入是 DC1 start/end address、DC2 packet、fast interrupt 和
+  DCCM/PIC/DMA 配置；输出是 DCCM/PIC/ICCM/external 标记、misaligned/access fault、
+  FIR 错误和 machine-specific cause。
+* L87-L134：DCCM、PIC 和 ICCM region 命中组合。源码按 base/size/mask 参数比较地址，
+  区分 data tightly-coupled memory、interrupt controller memory 和 instruction memory。
+* L135-L153：core address 输出和 DCCM region 标记。该段被 ``eh2_lsu_lsc_ctl`` 在 DC1
+  使用，用来决定 load/store 后续走 DCCM、PIC 或 bus。
+* L155-L183：alignment 和 fast interrupt 特殊访问检查。byte/half/word/dword、dual access
+  与 fast interrupt 规则共同决定 ``misaligned_fault_dc2``。
+* L184-L211：access fault、external access 和 exception cause。访问 ICCM、非法 PIC/DCCM
+  或 fast interrupt 错误时，错误包 cause 在这里确定。
+* L213-L229：fast interrupt DCCM/non-DCCM 错误输出和模块收尾。该段专门服务 FIR path，
+  使 directed/interrupt 测试能区分 DCCM 和非 DCCM 错误。
+
+§16.4  ``eh2_lsu_dccm_ctl.sv`` — DCCM/PIC 读写、ECC 修复与 DMA
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_dccm_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_dccm_ctl.sv:全文
+
+逐段精读：
+
+* L1-L28：文件头和模块说明。该文件把 LSU 管线访问翻译为 DCCM/PIC memory 端口。
+* L29-L164：模块端口。输入覆盖 DC1-DC5 地址/packet、DCCM read data、PIC read data、
+  DMA、store buffer forwarding、ECC 状态和 AMO data；输出覆盖 DCCM/PIC 端口、DMA read
+  返回、load data、ECC block 和 store data 扩展。
+* L165-L198：局部参数和内部信号。byte enable、read data merge、ECC kill、bypass、
+  PIC mask、DCCM data staging 和 corrected data staging 都在这里声明。
+* L202-L218：DMA read return、DCCM data 对齐和 store buffer forwarding merge。
+  8 个 byte lane 逐字节选择 stbuf forwarding 或 DCCM/ECC corrected data。
+* L220-L246：single-bit ECC 修复 kill、load ECC error 分类和 store buffer commit gating。
+  该段避免 DMA 或同周期 store 破坏 ECC 纠正写回。
+* L252-L269：DCCM read/write enable 与 lo/hi bank 地址选择。DMA spec write、store buffer
+  drain 和 ECC correction 均可成为 DCCM write 来源。
+* L270-L310：DC2-DC5 byte enable、write bypass 比较和 AMO/SC store data 选择。
+  SC 失败时 hi data 被用作 ECC corrected data，普通 AMO 则写 ``amo_data_dc3``。
+* L317-L369：按 ``pt.LOAD_TO_USE_PLUS1`` 选择 DCCM data staging 策略。两种配置都维护
+  DC3/DC4/DC5 data、ECC bit 和 stbuf bypass 对齐。
+* L371-L394：ECC disable、PIC read/write/mask、PIC forward data 和 PIC read data flop。
+  PIC store 通过 mask read 保护 side-effect/mask semantics。
+* L396-L442：DCCM data pipeline、ECC error pipeline、store data pipeline 和 module 结束。
+  这里把 corrected store data 推到 DC4/DC5，并把 single ECC repair 状态保存到下一拍。
+
+§16.5  ``eh2_lsu_stbuf.sv`` — DCCM store buffer 与 forwarding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_stbuf.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_stbuf.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头和模块说明。源码注明 Store Buffer 支持 dual writes and single drain。
+* L25-L95：端口。输入覆盖 DC1-DC5 地址、packet、store data、DCCM data、thread/region、
+  commit、DMA kill 和 clock；输出是 drain 请求、empty/full、PIC/DCCM forwarding。
+* L96-L174：depth、width、队列数组、match vector、pointer、thread counter、forwarding
+  和 DMA kill 状态声明。store buffer 的所有物理 entry 字段都在这里定义。
+* L179-L218：verification probe、thread match、byte enable、ECC merge 和 store data merge。
+  该段把 DCCM corrected data 与 store byte enable 合成为可写入 stbuf 的数据。
+* L220-L263：coalescing 和 entry 更新规则。源码按 wrptr、wrptr+1、lo/hi coalesce 和
+  dual access 决定每个 entry 是否写入新地址、数据和 byte enable。
+* L264-L309：drain、RdPtr/WrPtr、spec valid、empty/full、thread entry count 和 pointer
+  更新。DEC load block 与 DCCM write drain 都依赖这些状态。
+* L319-L354：load forwarding compare 和 DMA kill。load 在 DC2 与 store queue 地址比较，
+  命中后按 byte lane 形成 forwarding 选择。
+* L356-L480：pipe forwarding、stbuf forwarding、PIC forwarding 和优先级选择。该段决定
+  load 能从 pipeline、store queue 或 PIC mask/data 中拿到最新字节。
+* L481-L482：module 收尾。所有 store buffer 状态通过前面的 ``rvdff``/``rvdffe`` 实例保存。
+
+§16.6  ``eh2_lsu_bus_intf.sv`` — 双线程外部总线汇聚
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_bus_intf.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_bus_intf.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头和模块说明。该模块连接 LSU pipeline 与 per-thread bus buffer。
+* L25-L271：端口和内部信号。输入覆盖 DC1-DC5 packet、地址、store data、flush、
+  side-effect 配置、AXI response、clock 和 per-thread buffer 状态；输出覆盖 AXI 五通道、
+  NB-load、imprecise error、stall、load forwarding 和 buffer idle/full。
+* L275-L325：coalescing disable、byte enable、alignment、same doubleword、merge 禁止
+  和 store data 拆分。这里为后续 bus write merge 和 load forwarding 准备 byte lane 信息。
+* L327-L416：pipeline store-to-load forwarding。DC2 load 与 DC3/DC4/DC5 store 做地址、
+  thread 和 byte lane 比较，命中后生成 ``bus_read_data_dc3``。
+* L419-L424：nonblocking load valid/tag/invalidate。DEC CAM 依赖这些 tag 跟踪外部 load。
+* L427-L476：跨线程 bus command ready、obuf 选择、AXI AW/W/AR/R/B 信号和默认属性。
+  ``pt.LSU_BUS_TAG`` 把 thread 和 buffer tag 编码进 AXI ID。
+* L512-L588：每线程 ``eh2_lsu_bus_buffer`` 实例化和 NB-load return arbiter。双线程 EH2
+  与单线程 Ibex 的一个主要差异就在这一层。
+* L603-L720：flush、force halt、bus clock domain、pending/idle/full 归并和断言。该段保证
+  halt/debug 不会在外部事务尚未收敛时误判 LSU idle。
+
+§16.7  ``eh2_lsu_bus_buffer.sv`` — 每线程 AXI outstanding 队列
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_bus_buffer.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_bus_buffer.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头和模块说明。该模块是某个 thread 的 load/store buffer。
+* L25-L149：端口。输入来自 bus interface、AXI response、DC5 store/load commit、flush、
+  side-effect 策略和 clock；输出是 obuf、buffer state、nonblocking return 和 imprecise error。
+* L150-L206：状态枚举、depth、timer、entry 字段、obuf/ibuf 字段、pointer、age matrix
+  和 response age matrix 声明。``IDLE``、``WAIT``、``CMD``、``RESP``、``DONE`` 等状态
+  定义了每个 outstanding entry 的生命周期。
+* L208-L317：write pointer、input buffer、coalescing、side-effect、merge 和 obuf 输入选择。
+  外部 store/load 能否合并、是否需要保持顺序、是否走 ibuf，都由这里判定。
+* L323-L417：byte-level load forwarding 和 pending buffer hit。该段让外部 load 可以从
+  已排队 store 中获得最新数据，避免不必要地等待总线返回。
+* L427-L496：obuf command/data/rsp pending、bus handshake 完成标记和 obuf 寄存器。
+  AXI AW/W/AR 由 ``obuf_*`` 字段统一驱动。
+* L503-L574：entry 分配、age/rspage 选择和 command/response pointer 编码。该段决定哪个
+  outstanding entry 先发 command，哪个 response 先被 retire。
+* L579-L710：buffer entry 状态机和 entry flops。每个 entry 根据 command ready、response、
+  error、flush 和 force halt 在 IDLE/WAIT/CMD/RESP/DONE 间迁移。
+* L715-L797：buffer empty/full/pending、nonblocking load data sign/zero extension 和
+  imprecise error 地址选择。DEC/TLU 看到的 NB-load 返回和 bus error 来源于这里。
+* L798-L829：WrPtr pipeline、byte aggregation、age assertion 和 module 结束。该段同步
+  DC1-DC5 tag，并用 SVA 约束 age matrix 不出现非法 self-age。
+
+§16.8  ``eh2_lsu_ecc.sv`` — DCCM SEC/DED 编码、纠正与写回数据
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_ecc.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_ecc.sv:全文
+
+逐段精读：
+
+* L1-L27：文件头和模块说明。该模块把 DCCM 数据、store data 和 ECC code 连接成 SEC/DED
+  数据路径。
+* L28-L103：端口和内部信号。输入是 DC3 packet、地址、DCCM read data、store data、
+  DMA write data、disable/kill 信号；输出是 corrected data、ECC error 和 DCCM write data。
+* L107-L124：dual access、ECC enable、byte enable 和 store data alignment。store data
+  先按地址低位左移，再拆为 lo/hi bank。
+* L129-L140：partial store merge 与 DCCM write data 选择。未写字节保留 corrected read data，
+  spec DMA write 可直接覆盖 lo/hi write data。
+* L142-L190：在 ``pt.DCCM_ENABLE`` 下实例化 ECC encode/decode helper，生成 single/double
+  error、corrected data 和 final write ECC bit。
+* L192-L205：ECC 修复数据延迟和关闭 DCCM 时 tie-off。关闭 DCCM/ECC 的配置不会留下
+  X-propagation 路径。
+* L210：module 结束。该文件不保存复杂状态，主要状态仅是 single ECC repair 的延迟数据。
+
+§16.9  ``eh2_lsu_amo.sv`` — AMO 组合运算
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_amo.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_amo.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头和模块说明。虽然注释沿用 memory map 文案，实际逻辑是 AMO result 计算。
+* L25-L39：模块端口。输入是 DC3 packet、PIC 标记、corrected load operand 和 store data；
+  输出是写回 store path 的 ``amo_data_dc3``。
+* L40-L65：AMO decode 和内部运算信号声明。该段按 ``atomic_instr`` 区分 swap、add、
+  min/max、逻辑类和 SC。
+* L70-L88：指令类型 one-hot、operand gating 和 select 组合。只有 valid atomic packet
+  才会把 DCCM corrected data 与 store data 送入 AMO datapath。
+* L90-L118：AND/OR/XOR、adder、min/max 比较和最终 result mux。SC/swap 直接选择
+  ``amo_operand2``，普通 AMO 选择逻辑、加法或 min/max 结果。
+* L120：module 结束。该文件无 flop，AMO 时序由上层 DC3/DC5 pipeline 保证。
+
+§16.10  ``eh2_lsu_trigger.sv`` — LSU load/store trigger match
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_trigger.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_trigger.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头和模块说明。该模块只服务 LSU trigger，不实现 CSR state。
+* L25-L44：端口。输入是 per-thread trigger packet、DC3/DC4 LSU packet、地址、
+  store data 和 AMO data；输出是 4-bit trigger match。
+* L45-L52：内部信号声明。trigger enable、store data pipeline、match data 和 per-trigger
+  packet 在这里准备。
+* L54-L64：按所有 thread/trigger packet 生成 ``trigger_enable``，并选择普通 store data
+  或 AMO data 作为匹配数据。
+* L66-L79：地址/data 选择、DC3 到 DC4 store data flop 和 4 个 trigger 比较。``select``
+  决定比较地址还是 store data，``store``/``load`` 位决定访问类型。
+* L82：module 结束。匹配结果进入 DEC/TLU debug trigger path。
+
+§16.11  ``eh2_lsu_clkdomain.sv`` — LSU 时钟门控
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_clkdomain.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_clkdomain.sv:全文
+
+逐段精读：
+
+* L1-L26：文件头和模块说明。源码注释明确所有 LSU clock 在这里生成。
+* L27-L122：端口。输入包括 packet、store buffer/bus buffer 状态、region、force halt、
+  LR valid、clock override、scan 和 bus clock enable；输出是 DC1-DC5、store、DCCM、PIC、
+  stbuf、bus buffer、bus master 和 free clock。
+* L123-L140：DC1-DC5 C1/C2 clock enable、store clock enable 和 store buffer clock enable。
+  这些 enable 把 packet valid 与上一拍 enable 组合，避免流水线半拍断裂。
+* L142-L154：每线程 bus ibuf/obuf/buf clock enable 与 clock header。EH2 双线程使 bus
+  clock gating 必须按 thread 生成。
+* L156-L170：DCCM/PIC/free clock enable 和 enable delay flop。LR/SC、ECC repair、DMA、
+  bus pending 和 imprecise error 都会保持 free clock 活动。
+* L172-L203：clock header 实例、bus master clock enable 和 FPGA gate 变体。``pt.BUILD_AHB_LITE``
+  或 FPGA 配置会影响 bus clock 实现方式，但 VCS 主线仍按同一 RTL 语义验证。
+
+§16.12  ``eh2_lsu_dccm_mem.sv`` — DCCM banked SRAM wrapper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lsu/eh2_lsu_dccm_mem.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_dccm_mem.sv:全文
+
+逐段精读：
+
+* L1-L41：文件头、include 和模块说明。该 wrapper 封装 DCCM bank array，不包含 LSU 控制。
+* L42-L68：模块端口。输入是 lo/hi read/write address、write data、read/write enable、
+  clock override、scan、active clock 和 reset；输出是 lo/hi read data。
+* L69-L96：DCCM bank 宽度、index、depth、bank address/data 数组和 unaligned 判断。
+  lo/hi bank 地址不同即代表跨 bank 非对齐访问。
+* L99-L130：按 ``pt.DCCM_NUM_BANKS`` 生成 bank write/read enable、bank address 和 write data。
+  wrapper 根据 lo/hi address 是否命中同一 bank 选择读写 bank 与数据。
+* L132-L285：每个 bank 的 memory macro 或 FPGA/generic memory 实例。该长段把同一个
+  DCCM 语义映射到不同综合/FPGA 配置，不改变 LSU 上层协议。
+* L287-L315：read bank address 延迟和 read data mux。根据读地址保存的 bank index，从
+  ``dccm_bank_dout`` 或 ``dccm_bank_dout_q`` 选出 lo/hi 返回数据。
+* L318：module 结束。DCCM memory wrapper 的可见状态主要是 bank memory 和 read address
+  pipeline。
