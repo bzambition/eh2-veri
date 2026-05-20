@@ -3349,3 +3349,68 @@ sequence library，以及 cosim assembly 的局部 Makefile。大型 ``core_eh2_
 * L44-L46：通用 ``%.hex`` 规则先用 objdump 生成 ``.dis``，再用 objcopy 生成 Verilog hex。
 * L48-L49：``clean`` 删除输出目录下 ``.elf``、``.hex`` 和 ``.dis``，不会删除源 assembly
   或 linker script。
+
+§13  v2-39 ``core_eh2_base_test.sv`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``core_eh2_base_test.sv`` 是所有常规 UVM test class 的生命周期基类。它创建 env、
+读取 virtual interface、构造 cosim 配置、加载 binary、启动 virtual sequence，并通过
+signature、wall-clock timeout、cycle timeout 和 double-fault detector 四路机制结束测试。
+本节补齐全文 ``literalinclude``，让读者能从单个页面审计 base test 的完整行为。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/core_eh2_base_test.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/tests/core_eh2_base_test.sv:全文
+
+逐段精读：
+
+* L1-L23：文件头说明该基类借鉴 Ibex ``core_ibex_base_test``，职责包括 env 创建、ISA
+  string、binary loading、cosim configuration、reset handling、四路 completion detection、
+  signature CSR helper 和 virtual sequence orchestration；随后导入 UVM、env、AXI4、trace、
+  IRQ、JTAG 和 cosim package。
+* L24-L47：``core_eh2_base_test`` 继承 ``uvm_test`` 并注册 UVM component，保存
+  ``core_eh2_env``、``core_eh2_env_cfg``、``core_eh2_vseq``、TB service interface、
+  halt/run interface、test name、ISA string、signature address 和 boot address。
+* L49-L68：localparam 定义 riscv-dv style core status code，覆盖 initialized、running、
+  pass/fail、exception、debug、CSR、WFI、timer/external interrupt 和 ecall。constructor 创建
+  ``core_eh2_report_server`` 并安装为全局 UVM report server。
+* L73-L94：``build_phase`` 创建 ``core_eh2_env``，从 ``env.cfg`` 取得 ``env_cfg``，
+  必须从 config_db 获取 ``tb_vif``，可选获取 ``halt_run_vif``，然后调用
+  ``build_isa_string`` 并打印 ISA。
+* L99-L128：``end_of_elaboration_phase`` 在 cosim 打开且 scoreboard 存在时构造
+  ``isa/pc/mtvec/pmp/mhpm`` 配置字符串，写入 ``scoreboard.cosim_config``；binary 非空时只设置
+  pending binary path/base addr，让 scoreboard 在 init_cosim 中延迟加载，避免初始化竞态。
+* L133-L156：``run_phase`` raise objection，先加载 binary，再启动 vseq，然后等待 completion。
+  completion 返回后停止 vseq 并 drop objection，这是普通 EH2 UVM test 的主干流程。
+* L158-L191：``halt_core_for_loading`` 和 ``release_core_after_loading`` 是可选 helper。
+  halt helper 在 ``halt_run_vif`` 存在时拉高 ``mpc_debug_halt_req``、等待 halt ack 或 100
+  clocks timeout；release helper 清 halt、拉 run，并等待 5 个 clock。当前 ``run_phase`` 的
+  binary loading 注释说明 core 仍在 reset 中，因此主流程没有调用这两个 helper。
+* L196-L199：``build_isa_string`` 固定写 ``rv32imac_zba_zbb_zbc_zbs``。这一路径服务
+  cosim config，不从命令行动态解析 ISA。
+* L204-L226：``load_binary_to_mem`` 从 ``env_cfg.binary`` 取路径。路径为空则跳过；
+  ``tb_vif.early_bin_loaded`` 为真时也跳过，避免与 TB 顶层 ``$readmemh`` 重复加载；后缀
+  ``.hex`` 走 hex loader，其它路径走 raw binary loader。
+* L229-L251：``load_raw_binary_to_mem`` 以二进制方式打开文件，从 ``base_addr`` 开始逐 byte
+  ``$fread``，每读到一个 byte 就调用 ``write_mem_byte``，最后关闭文件并打印加载字节数。
+* L254-L321：``load_hex_to_mem`` 解析 ``@ADDR`` 风格 hex 文件。遇到 ``@`` 解析新地址；
+  遇到十六进制字符就累积 nybble；遇到空白或文件结束时把当前 byte 写入 memory。该解析器支持
+  大小写 hex 字符和显式地址跳转。
+* L323-L333：``write_mem_byte`` 把单 byte 写请求委托给 ``tb_vif.write_mem_byte``，不直接依赖
+  RTL hierarchy；``load_binary_to_cosim`` 在 scoreboard 存在时调用 ``scoreboard.load_binary``。
+* L338-L342：``start_vseq`` 通过 factory 创建 ``core_eh2_vseq``，把 ``env_cfg`` 传给 vseq，
+  再从 ``env.vseqr`` 启动。base test 不直接启动 IRQ/JTAG agent sequence，而交给 vseq 决策。
+* L347-L378：``wait_for_completion`` fork 四路终止条件：signature mailbox、wall-clock timeout、
+  cycle timeout 和 double-fault detector。任一分支返回后 ``join_any`` 结束，并 ``disable fork``
+  关闭其它分支。
+* L382-L399：``wait_for_signature`` 每个 ``tb_vif.clk`` 上升沿轮询 ``mailbox_test_done``。
+  mailbox data 低 8 位等于 ``8'hFF`` 时打印 ``TEST PASSED (signature)``，否则报 UVM error；
+  完成后等待 10 个 clock，让 AXI monitor 和 scoreboard drain 未完成 transaction。
+* L402-L414：``detect_double_fault`` 每 1000 ns 检查 trace monitor 的 exception count 是否超过
+  ``env_cfg.double_fault_threshold``，超过则报 UVM error 并返回。
+* L420-L465：signature/CSR helper 复用 TB mailbox：``wait_for_mem_txn`` 等待
+  ``mailbox_write`` 并返回地址、数据和 is_write；``check_next_core_status`` 比较低 8 位 status；
+  ``wait_for_core_status`` 和 ``wait_for_csr_write`` 循环等待目标 status 或 CSR address。
+* L470-L479：``report_phase`` 调用父类后打印 test name、ISA 和 binary 路径。PASS/FAIL
+  summary 由前面安装的 ``core_eh2_report_server`` 负责。
