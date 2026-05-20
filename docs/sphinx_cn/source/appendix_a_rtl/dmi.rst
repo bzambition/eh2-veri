@@ -988,3 +988,77 @@ debug module。排查时不要只盯 ``eh2_dbg.sv``，需要同时看 TAP 状态
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§11  v2-23 DMI/JTAG 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-23 将 DMI 目录 3 个 Verilog 文件全部纳入 ``literalinclude``。DMI wrapper、
+JTAG-to-core 同步桥和 TAP 状态机共同构成外部 JTAG agent 到 ``eh2_dbg`` 的访问链，
+缺少其中任一段都会让 debug directed test、JTAG agent 或综合排查出现断点。
+
+§11.1  ``dmi_wrapper.v`` — JTAG TAP 与 core debug 端口胶合
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dmi/dmi_wrapper.v
+   :language: text
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dmi/dmi_wrapper.v:全文
+
+逐段精读：
+
+* L1-L23：文件头和注释。该 wrapper 是 DMI/JTAG 目录对外的顶层连接点。
+* L24-L42：模块端口。输入是 JTAG ``trst_n``、``tck``、``tms``、``tdi``、core clock/reset
+  和 DMI read data；输出是 ``tdo``、``tdoEnable``、``dmi_reg_en``、write enable、地址和数据。
+* L43-L58：内部 JTAG 域信号声明。``jtag_reg_wr_en``、``jtag_reg_rd_en``、``jtag_reg_addr``
+  和 ``jtag_reg_wdata`` 是 TAP 到 CDC 桥的接口。
+* L59-L76：``rvjtag_tap`` 实例。TAP 负责 JTAG state machine、IR/DR shift、IDCODE 和 DMI
+  request 打包。
+* L77-L89：``dmi_jtag_to_core_sync`` 实例。该桥把 TAP 产生的 JTAG 域脉冲同步到 core
+  clock 域，形成 ``dmi_reg_en`` 与 ``dmi_reg_wr_en``。
+* L90：module 结束。wrapper 本身不保存 debug architectural state。
+
+§11.2  ``dmi_jtag_to_core_sync.v`` — JTAG 到 core clock CDC
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dmi/dmi_jtag_to_core_sync.v
+   :language: text
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dmi/dmi_jtag_to_core_sync.v:全文
+
+逐段精读：
+
+* L1-L24：文件头。该模块只处理 CDC pulse 同步，不解释 DMI register semantics。
+* L25-L43：模块端口和同步寄存器声明。输入是 JTAG 域 read/write pulse、地址、wdata 和
+  core clock/reset；输出是 core 域 register enable、write enable、地址和 wdata。
+* L44-L48：组合输出。``reg_en`` 是 read/write pulse 的 OR，``reg_wr_en`` 只来自 write pulse。
+* L49-L59：三拍同步寄存器。``rd_en``、``wr_en``、地址和 wdata 在 core clock 上采样，
+  reset 时全部清零。
+* L60-L64：边沿检测和 module 结束。``rden[1] & ~rden[2]``、``wren[1] & ~wren[2]`` 把
+  JTAG 域脉冲转换为 core 域单拍事件。
+
+§11.3  ``rvjtag_tap.v`` — JTAG TAP state machine 与 DMI DR
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dmi/rvjtag_tap.v
+   :language: text
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dmi/rvjtag_tap.v:全文
+
+逐段精读：
+
+* L1-L15：文件头和说明。该 TAP 实现 JTAG instruction/data register shift，不包含
+  ``eh2_dbg`` 的 debug register state。
+* L16-L49：模块参数与端口。``AWIDTH`` 控制 DMI address width，JTAG pins 与 core read data
+  在这里进入 TAP。
+* L50-L75：USER DR length、device ID、BYPASS、IDCODE、DTMCS、DMI DR 和 address bits
+  定义。``USER_DR_LENGTH = AWIDTH + 34`` 对应 address、data、wr_en、rd_en 打包。
+* L76-L129：JTAG 16 状态 TAP FSM。``TEST_LOGIC_RESET`` 到 ``UPDATE_IR/DR`` 的跳转由
+  ``tms`` 和 ``trst`` 控制，并派生 ``shift_dr``、``capture_dr``、``update_dr`` 等信号。
+* L131-L148：``tdoEnable``、IR shift/capture/update 和 DR 选择。IDCODE、DTMCS、DMI DR
+  和 bypass 的选择由当前 IR 决定。
+* L153-L188：DR shift register。capture 阶段装入 IDCODE/DTMCS/DMI read data，shift 阶段
+  串行移动 ``tdi``，DMI DR 捕获 address/data/read/write 请求。
+* L189-L207：TDO 输出和 DMI read data staging。``tdo`` 在 ``negedge tck`` 输出 ``sr[0]``，
+  读数据在 update/capture 时保持。
+* L208-L224：``dr`` 输出寄存和 module 结束。最终 ``wr_addr``、``wr_data``、``wr_en`` 和
+  ``rd_en`` 送入 CDC 同步桥。
