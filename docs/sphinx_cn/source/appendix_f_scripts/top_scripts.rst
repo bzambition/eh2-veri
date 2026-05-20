@@ -1534,9 +1534,8 @@ sign-off gate 阈值文本，并打印仍需额外工具运行时间的项目。
 
 .. literalinclude:: ../../../../scripts/v2_source_explain_check.py
    :language: python
-   :lines: 1-277
    :linenos:
-   :caption: scripts/v2_source_explain_check.py:L1-L277
+   :caption: scripts/v2_source_explain_check.py:全文
 
 逐段精读：
 
@@ -1550,8 +1549,21 @@ sign-off gate 阈值文本，并打印仍需额外工具运行时间的项目。
 * L153-L190：``load_docs`` 与匹配函数读取所有 RST，并判断 reference/snippet/explanation
   三类命中。
 * L193-L241：``print_summary`` 按 area 汇总统计，并打印缺口列表。
-* L244-L277：CLI 支持 ``--strict``。当前 v2-15/v2-16 先用默认模式暴露缺口，待缺口清零后
-  可把 ``--strict`` 接入 release 文档门禁。
+* L242-L262：``require_snippet`` 分支把 snippet 与 paragraph explanation 合并成严格缺口；
+  默认分支只按 explanation 缺口返回数量。明细输出会标注 ``no_reference``、``no_snippet`` 或
+  ``no_paragraph_explanation``，便于定位是缺源码块还是缺解释文字。
+* L265-L291：``main`` 定义 CLI 参数：``--strict`` 控制非零退出，``--require-snippet`` 把源码块
+  纳入门禁，``--max-missing`` 限制缺口打印数量。随后收集资产、加载 RST、执行审计并按 strict
+  结果返回 0 或 1。
+* L294-L295：脚本入口用 ``raise SystemExit(main())`` 传递返回码，保证 CI 或本地 shell 能直接用
+  退出状态判断文档解释覆盖是否满足当前阶段要求。
+
+接口关系：
+
+* 被调用：v2 阶段门禁通过 ``python3 scripts/v2_source_explain_check.py --strict --require-snippet``
+  运行。
+* 调用：只读取仓库源码路径和 ``docs/sphinx_cn/source`` 下的 RST 文件，不写文件。
+* 共享状态：资产集合与 ``v2_literal_line_check.py`` 的覆盖目标共同约束中文手册是否真正覆盖源码。
 
 §12  v2-35 UVM 输出后处理 Shell 脚本全文行段级精读
 --------------------------------------------------------------------------------
