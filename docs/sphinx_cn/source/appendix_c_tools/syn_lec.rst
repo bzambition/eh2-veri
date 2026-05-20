@@ -2482,3 +2482,149 @@ reference/implementation 读入骨架，而是 RTL 侧 packed struct/2D packed a
 * 被调用：人工定位 top-level port matching 缺口时运行。
 * 调用：Formality ``report_unmatched_points -ref/-impl -port -max 30``。
 * 共享状态：读取 wrapper/netlist/library；输出 unmatched port 列表到运行日志。
+
+§19  v2-53 LEC matching 表与 summary 汇总器全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 synthesis LEC 中最后 4 个 no-literal 资产：``lec_matching.tcl``、
+``lec_rc4_fix.tcl``、``lec_user_match.tcl`` 和 ``lec_summary.py``。前三个仍属于早期
+top-level Formality 收敛历史，核心问题是 2D packed array port 被 DC 展平成 1D bit vector 后，
+Formality 无法自动完成命名匹配；``lec_summary.py`` 则属于当前 block-level release path，用真实
+Formality report 生成 ``syn/build/lec_summary.txt``。
+
+§19.1  ``lec_matching.tcl`` — top-level bucket 级 matching 指令全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_matching.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_matching.tcl:全文
+
+逐段精读：
+
+* L1-L20：文件头把 194 个 unmatched output ports 分类为 bus bit-blasting，并列出 8 个 bucket：
+  ``ic_wr_data`` 142 点、``btb_rw_addr`` 18 点、``btb_rw_addr_f1`` 18 点、
+  ``btb_sram_rd_tag_f1`` 10 点，以及 trace valid/address/exception/interrupt 共 6 点。
+  这说明问题来自 RTL 2D packed array 与 netlist flattened port 名称差异。
+* L22-L37：设置 ``BUILD_DIR``、suppression、SV 2012、relaxed mode、undriven 处理、search path，
+  并读取 ``class.db``/``gtech.db``。这些设置与其他 top-level LEC 实验保持一致。
+* L39-L43：读取 ``eh2_dc_wrapper.sv`` 作为 reference，读取 ``eh2_synth.v`` 作为 implementation，
+  两侧 top 都设为 ``eh2_veer``。
+* L45-L83：按 bucket 添加粗粒度 ``set_user_match``。这里是端口级同名匹配，而不是逐 bit 映射：
+  脚本尝试把 reference 的 2D port 与 implementation 的 flattened port 整体关联起来。
+* L85-L95：执行 ``match`` 和 ``verify``，输出 ``lec_p0_1_final.log`` 与
+  ``lec_p0_1_failing.rpt``。该脚本是 bucket-level matching 实验，粒度比
+  ``lec_user_match.tcl`` 更粗。
+
+接口关系：
+
+* 被调用：人工运行 top-level matching 实验时使用。
+* 调用：Formality ``set_user_match``、``match``、``verify`` 和 report 命令。
+* 共享状态：读取 wrapper/netlist/library；写 ``lec_p0_1_final.log`` 和
+  ``lec_p0_1_failing.rpt``。
+
+§19.2  ``lec_rc4_fix.tcl`` — RC4 top-level undriven/clock-gate 修复全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_rc4_fix.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_rc4_fix.tcl:全文
+
+逐段精读：
+
+* L1-L5：脚本头记录目标是诊断并处理 RC3 run 中 214 failing 与 1258 unverified compare points，
+  ``BUILD_DIR`` 仍固定在 ``syn/build``。
+* L7-L14：抑制常见非关键消息，设置 SV 2012 与 relaxed mode，并把 undriven signals 设为 0。
+  注释说明 DC 会把 tied-off ports 拉低，因此这里的 0 处理是为了对齐综合后常量行为。
+* L16-L27：配置 search path 并读取 ``class.db``/``gtech.db``，与其他 top-level Formality 脚本的
+  读入环境一致。
+* L29-L39：读取 reference wrapper、implementation netlist，并把两侧 top 设置为 ``eh2_veer``。
+* L41-L45：设置 ``verification_clock_gate_hold_mode low``，用于处理 DC 生成的
+  ``SNPS_CLOCK_GATE`` cells 与 RTL clock-enable 结构差异。
+* L47-L61：执行 ``match``、``verify``，输出 status、verbose failing、verbose unverified 和
+  passing summary。该脚本是 RC4 诊断修复尝试，当前 release 不再用它作为最终 gate。
+
+接口关系：
+
+* 被调用：RC4 top-level LEC 修复实验或人工诊断时运行。
+* 调用：Formality verification mode、clock-gate、match/verify/report 命令。
+* 共享状态：读取 wrapper/netlist/library；写 ``lec_rc4_report.txt``、``lec_rc4_failing.rpt``、
+  ``lec_rc4_unverified.rpt`` 和 ``lec_rc4_passing.rpt``。
+
+§19.3  ``lec_user_match.tcl`` — P0-A 194 点逐 bit user-match 表全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_user_match.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_user_match.tcl:全文
+
+逐段精读：
+
+* L1-L6：文件头说明这是自动生成的 P0-A ``set_user_match`` 表，用公式
+  ``linear(i,j) = (i-d1_min)*sub_w + (j-d2_min)`` 把 2D packed-array reference ports 映射到 1D
+  flattened implementation ports，并抑制 ``VER-130``/``VER-250``。
+* L7-L24：映射 ``btb_rw_addr``。reference 的 ``[0][1]`` 到 ``[0][9]`` 对应 implementation
+  bit 0..8，``[1][1]`` 到 ``[1][9]`` 对应 bit 9..17；每个 way 宽 9 bit。
+* L25-L42：映射 ``btb_rw_addr_f1``，规则与 ``btb_rw_addr`` 相同，是 IFU F1 阶段 BTB 地址的
+  flattened 对齐表。
+* L43-L52：映射 ``btb_sram_rd_tag_f1``。两路 way、每路 5 bit，reference ``[0][0:4]`` 对应
+  implementation bit 0..4，reference ``[1][0:4]`` 对应 bit 5..9。
+* L53-L123：映射 ``ic_wr_data[0][0:70]`` 到 implementation ``ic_wr_data[0:70]``。由于该文件按字符串
+  排序生成，行序不是严格数值递增，但每个 reference bit 都覆盖到同号 implementation bit。
+* L124-L194：映射 ``ic_wr_data[1][0:70]`` 到 implementation ``ic_wr_data[71:141]``。这与
+  线性化公式一致：way 1 的 base offset 是 71。
+* L195-L200：映射 trace 相关剩余点，包括 address bit 0/32、exception bit 0、interrupt bit 1 和
+  valid bit 0/1。这些是 P0-A top-level unmatched 分类中 trace bucket 的逐点补丁。
+
+接口关系：
+
+* 被调用：``lec_p0a.tcl`` 通过 ``source`` 加载。
+* 调用：Formality ``set_user_match``。
+* 共享状态：不读写文件；只向当前 Formality session 注册 194 个 top-level matching directive。
+
+§19.4  ``lec_summary.py`` — block-level LEC report 汇总器全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_summary.py
+   :language: python
+   :linenos:
+   :caption: syn/scripts/lec_summary.py:全文
+
+逐段精读：
+
+* L1-L11：脚本以 Python 3 运行，导入 ``datetime``、``re``、``Path``，并从脚本位置推导
+  ``SYN_ROOT``、``BUILD`` 和输出文件 ``syn/build/lec_summary.txt``。它不修改 Formality 原始输出。
+* L13-L26：定义 base modules 和 EXU submodules。base 列表包含 DEC、LSU、PIC、DMA、DBG、IFU；
+  EXU 被拆为 ALU/MUL/DIV 三个子块。这与当前 block-level LEC summary 的 9 个模块口径一致。
+* L29-L31：``_extract_int`` 用正则从 report 文本里取第一个整数，匹配失败时返回 0。该 helper 用于
+  parsing passing/failing/unverified compare point 数量。
+* L34-L45：``parse_module`` 先定位 ``lec_<label>.rpt``、timeout status report 和 log。缺少主 report
+  时返回 ``MISSING`` 与 0 计数，避免汇总器伪造通过结果。
+* L47-L63：如果 timeout status report 更新，则优先读取它；随后提取 passing、failing、unverified
+  数，并根据 ``Verification SUCCEEDED``、``FAILED``、``INCONCLUSIVE`` 判定状态。
+* L65-L82：处理 timeout 和 standalone implementation 注记。若 log 显示进程被 kill 或 Signal 15，
+  新 timeout report 存在时标为 ``INCONCLUSIVE``，否则标为 ``TIMEOUT``，并说明计数来自最后完成的
+  report；standalone DDC/Verilog 信息只作为 note。
+* L84-L90：返回单模块 parsed dict，包含三类计数、status 和 note。这里没有 waiver 或
+  set-dont-verify 逻辑。
+* L93-L103：``main`` 决定模块集合。若 ALU/MUL/DIV 三个 report 都存在，则用 EXU decomposition
+  替代旧 ``eh2_exu``；否则回退到 monolithic EXU。
+* L105-L119：逐模块调用 ``parse_module``，对子块补 note，并累加 total passing/failing/unverified。
+  total status 规则是：0 failing 且 0 unverified 为 ``PASS``；failing 小于 30 且 0 unverified 为
+  ``PARTIAL_PASS_LT30``；否则为 ``INCOMPLETE``。
+* L121-L139：生成 Markdown 表头和每个模块的数据行。输出字段固定为 Module、Passing、Failing、
+  Unverified、Status 和 Note，便于 sign-off 文档引用。
+* L140-L155：追加 TOTAL 行与 Notes，明确报告来源是 ``syn/build/lec_blocklevel/lec_*.rpt``，
+  EXU 子块会替代 monolithic EXU，timeout status report 可覆盖陈旧失败计数，且不使用
+  ``set_dont_verify_points`` waiver。
+* L157-L163：把 summary 写入 ``lec_summary.txt``，同时打印路径和内容；作为脚本入口时执行
+  ``main``。
+
+接口关系：
+
+* 被调用：``syn/Makefile:block_lec`` 在所有 block Formality run 完成后调用。
+* 调用：Python 标准库 ``Path``、``re`` 和 ``datetime``；不调用 Formality。
+* 共享状态：读取 ``syn/build/lec_blocklevel/lec_*.rpt``、``lec_*_timeout_status.rpt`` 和
+  ``lec_*.log``；写 ``syn/build/lec_summary.txt`` 并向 stdout 打印同一份 summary。
