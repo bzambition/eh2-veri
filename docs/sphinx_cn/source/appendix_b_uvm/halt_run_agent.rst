@@ -1113,3 +1113,77 @@ driver/sequencer，并始终创建 monitor；L32-L34 只连接 driver 到 sequen
 逐段精读：L5-L13 声明 virtual interface 和 ``item_port``；L19-L25 从
 ``uvm_config_db`` 取得 ``vif`` 并创建 analysis port；L27-L47 的 run phase 只观察
 ack/status 并打印 ``uvm_info``，没有 ``item_port.write``。
+
+§13  v2-29 Halt/Run interface、item 与 driver 全源码精读
+--------------------------------------------------------------------------------
+
+本节补齐 Halt/Run agent 目录中此前未全文覆盖的 interface、sequence item 和 driver。
+这些文件决定 active stimulus 如何写 MPC debug halt/run、reset-run 和 CPU halt 请求。
+
+§13.1  ``eh2_halt_run_intf.sv`` — halt/run 信号束与 clocking block
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_intf.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_intf.sv:全文
+
+逐段精读：
+
+* L1-L5：文件头说明该 interface 负责驱动 MPC halt/run、CPU halt/run，并观察对应
+  acknowledge/status 信号。
+* L7-L10：interface 端口只接收 ``clk`` 和 ``rst_n``，具体请求与响应信号在 interface
+  内声明，由 TB 顶层连接到 DUT。
+* L12-L21：请求信号分为 MPC debug halt/run/reset-run 和 CPU halt/run 两组。默认值让
+  debug run/reset-run 为高，halt 请求为低，CPU run request 注释说明参考 testbench
+  中保持为 0。
+* L23-L28：ack/status 信号包括 CPU halt ack、CPU run ack、CPU halt status 和 debug mode
+  status，供 driver 等待和 monitor 打 log。
+* L29-L36：driver clocking block 声明可输出的请求信号，统一在 ``posedge clk`` 驱动。
+* L38-L49：monitor clocking block 只读请求与响应信号，用于 observation path。
+* L51-L56：driver modport 允许 driver 通过 clocking block 写请求并直接读 ack/status；
+  monitor modport 只暴露只读 clocking block。
+
+§13.2  ``eh2_halt_run_seq_item.sv`` — halt/run 动作编码
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_seq_item.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_seq_item.sv:全文
+
+逐段精读：
+
+* L1-L4：文件头与 class 声明表明该 item 是 Halt/Run agent 的 UVM transaction 类型。
+* L6-L15：``action_e`` 定义 4 种动作：halt core、run core、reset run 和 CPU halt；
+  item 还包含一个随机 delay 字段，用于发起动作前等待若干 clock。
+* L17-L24：约束把 delay 限制在 0 到 100 个周期，并用 UVM field macro 注册 action
+  与 delay，便于随机化、打印和比较。
+* L26-L34：constructor 只调用父类；``convert2string`` 输出 action 名称与 delay，
+  是 driver log 的 transaction 摘要。
+
+§13.3  ``eh2_halt_run_driver.sv`` — active halt/run 请求驱动
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_driver.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/halt_run_agent/eh2_halt_run_driver.sv:全文
+
+逐段精读：
+
+* L1-L6：文件头说明 driver 通过 Halt/Run interface 向 DUT 驱动 halt/run 信号；class
+  继承 ``uvm_driver#(eh2_halt_run_seq_item)``。
+* L8-L21：注册 component 类型，保存 virtual interface，并在 build phase 从 config DB
+  读取 ``halt_run_vif``。读取失败为 fatal，因为 active driver 无法无接口运行。
+* L23-L31：run phase 开始时给请求信号设置默认值：不请求 halt，debug run/reset-run
+  为高，CPU halt 为低，CPU run 为高。
+* L33-L39：主循环从 sequencer 获取 item，并按 item 的 delay 等待对应数量的 clock。
+* L40-L50：``HALT_CORE`` 拉高 ``mpc_debug_halt_req``、拉低 ``mpc_debug_run_req``，
+  最多等待 100 个 clock 直到 ``o_cpu_halt_ack``。
+* L52-L61：``RUN_CORE`` 清 halt、拉高 debug run，并最多等待 100 个 clock 直到
+  ``o_cpu_run_ack``。
+* L63-L68：``RESET_RUN`` 短暂拉低 ``mpc_reset_run_req`` 5 个周期，再拉回高电平。
+* L70-L78：``CPU_HALT`` 走 CPU halt 请求线，拉高 ``i_cpu_halt_req``、拉低
+  ``i_cpu_run_req``，并等待 halt ack。
+* L80-L85：每个 case 完成后调用 ``item_done``，driver 不生成 response item。

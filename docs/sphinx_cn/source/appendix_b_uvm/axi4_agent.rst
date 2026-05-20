@@ -864,3 +864,152 @@ Spike D-side 访问。
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§11  v2-29 AXI4 agent 全源码行段级精读
+--------------------------------------------------------------------------------
+
+本节把 AXI4 agent 目录从摘录级提升为全文源码级：package、transaction、monitor、
+driver、sequencer 和 agent wrapper 都纳入 ``literalinclude``，并按源码顺序说明它们
+如何把 EH2 LSU/IFU/SB AXI channel 转换成 UVM transaction。
+
+§11.1  ``axi4_agent_pkg.sv`` — package 入口与 include 顺序
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/axi4_agent/axi4_agent_pkg.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/axi4_agent/axi4_agent_pkg.sv:全文
+
+逐段精读：
+
+* L1-L6：文件头说明该 package 汇集 AXI4 sequence item、driver、monitor、
+  sequencer 和 agent，是其它 UVM 组件导入 AXI4 agent 类型的统一入口。
+* L8-L12：打开 ``axi4_agent_pkg``，包含 UVM 宏并导入 ``uvm_pkg``；后续 class
+  能直接使用 ``uvm_sequence_item``、``uvm_driver`` 和 ``uvm_agent`` 等基类。
+* L13-L18：按依赖顺序 include 源文件。``axi4_seq_item.sv`` 必须先出现，因为
+  driver、monitor 和 sequencer 都使用 ``axi4_seq_item`` 类型；agent wrapper 最后 include，
+  因为它组合 driver、monitor 和 sequencer。
+* L20：关闭 package。该文件不含运行逻辑，只定义编译/类型可见性边界。
+
+§11.2  ``axi4_seq_item.sv`` — AXI4 transaction 数据模型
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/axi4_agent/axi4_seq_item.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/axi4_agent/axi4_seq_item.sv:全文
+
+逐段精读：
+
+* L1-L17：文件注释列出 transaction 字段，明确一个 ``axi4_seq_item`` 表示一次
+  AXI4 read 或 write transaction，而不是单个 channel beat。
+* L18-L36：class 继承 ``uvm_sequence_item``，并定义 transaction type、burst type
+  和 response type 枚举。response 枚举覆盖 OKAY、EXOKAY、SLVERR 和 DECERR。
+* L38-L56：字段区保存地址、ID、burst 长度、beat size、写数据、write strobe、
+  读数据、response 以及起止时间。``len`` 仍按 AXI 语义存储，实际 beat 数为
+  ``len + 1``。
+* L58-L68：UVM field macro 注册字段，支持打印、拷贝、比较和 factory 相关基础能力。
+  ``resp`` 没有出现在 field macro 中，因此需要读者查看 monitor/scoreboard 对该数组的直接使用。
+* L70-L82：constructor 只调用父类；两个约束把随机 burst 长度限制在最多 16 beats，
+  并把 beat size 限制到 8 bytes 以内。
+* L84-L97：helper 将 AXI encoded ``len`` 和 ``size`` 转成 beat 数、每拍字节数和总字节数。
+  monitor、scoreboard 或调试输出可用这些 helper 避免重复编码。
+* L99-L105：``convert2string`` 输出 transaction 类型、地址、ID、长度、size 和 burst，
+  是 monitor/driver 高等级日志的主要摘要。
+
+§11.3  ``axi4_monitor.sv`` — AW/W/B 与 AR/R 事务采样
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/axi4_agent/axi4_monitor.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/axi4_agent/axi4_monitor.sv:全文
+
+逐段精读：
+
+* L1-L15：文件头把 monitor 架构说明清楚：写路径按 AW -> W -> B 组合 transaction，
+  读路径按 AR -> R 组合 transaction，两条线程独立运行。
+* L16-L28：class 以 ``ID_WIDTH`` 参数化，持有 virtual ``axi4_intf``、analysis port
+  和 ``agent_name``。EH2 中 LSU、IFU、SB agent 用不同 ID width 实例化同一 monitor 类型。
+* L29-L43：constructor、build phase 和 connect phase。build phase 创建 analysis port；
+  connect phase 从 config DB 读取 ``vif``，读取失败只 warning，允许 monitor 被禁用。
+* L45-L51：run phase 在 ``vif`` 为空时直接返回；否则 fork 写事务监控和读事务监控。
+* L53-L72：``monitor_writes`` 等待 AW handshake，并捕获 address、length、size、
+  burst 和 ID。这里记录的是 write address phase，而不是 write data beat。
+* L74-L88：创建 ``write_txn``，填入 transaction metadata，并按 ``awlen + 1`` 分配
+  data/strobe 数组。
+* L89-L100：逐 beat 收集 W channel。代码特别处理 AW 与 W 同周期握手的情况：如果
+  当前采样边沿已经看到 W handshake，就立即消费，避免错过第一拍。
+* L102-L117：先把 response 默认设为 OKAY 并发布到 analysis port，再以非阻塞方式在可见时
+  drain B response。这样 EH2 store retire 早于外部 B response 时，cosim scoreboard
+  不会因为等 B 而饿死。
+* L120-L149：``monitor_reads`` 等待 AR handshake，捕获 read address phase 并创建
+  ``read_txn``。
+* L151-L168：按 burst beat 数分配 ``rdata`` 和 ``resp``，等待每个 R handshake，
+  记录读数据与 response，最后写入 analysis port。
+* L171：关闭 class。monitor 不改变 AXI 信号，只把总线观察转换成 UVM transaction。
+
+§11.4  ``axi4_driver.sv`` — AXI response sideband 错误注入
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/axi4_agent/axi4_driver.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/axi4_agent/axi4_driver.sv:全文
+
+逐段精读：
+
+* L1-L21：文件头限定 driver 职责：它不是完整 AXI slave，不接管地址/数据处理，只通过
+  ``axi4_intf`` 上的 ``error_inject_mode``、``force_bresp`` 和 ``force_rresp`` 影响
+  slave memory response。
+* L23-L38：class 参数化 ID width，持有 virtual interface 和错误/延迟注入配置。当前
+  运行路径只真正使用错误注入，延迟相关字段保留为扩展点。
+* L39-L52：定义 response 枚举与读写错误统计计数器。
+* L53-L62：connect phase 从 config DB 获取 ``vif``；失败为 ``uvm_fatal``，因为 active
+  driver 没有 interface 就不能驱动 sideband。
+* L64-L85：run phase 先清空 sideband。``enable_error_inject`` 为 0 时只按时钟空转；
+  打开后 fork 读、写两个错误注入线程。
+* L87-L119：``inject_read_errors`` 等待 AR handshake，按概率决定是否注入 SLVERR/DECERR，
+  设置 ``force_rresp`` 后等待最后一个 R beat 完成再清空 sideband。
+* L121-L153：``inject_write_errors`` 等待 AW handshake，按概率设置 ``force_bresp``，
+  等待 B handshake 后清空 sideband。
+* L155-L173：helper 分别决定是否注错、随机选择 SLVERR/DECERR，并保留 response delay
+  计算接口。
+* L175-L185：report phase 在错误注入打开时打印读写错误计数和总事务数，用于 fault
+  injection 测试收敛判断。
+
+§11.5  ``axi4_sequencer.sv`` — typed sequencer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/axi4_agent/axi4_sequencer.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/axi4_agent/axi4_sequencer.sv:全文
+
+逐段精读：
+
+* L1-L5：文件头说明这是标准 UVM sequencer，只负责向 driver 提供 AXI4 sequence item。
+* L7-L13：class 继承 ``uvm_sequencer#(axi4_seq_item)`` 并注册 component 类型；
+  constructor 无额外状态。
+* L15：关闭 class。该 sequencer 没有自定义仲裁、response queue 或协议状态机。
+
+§11.6  ``axi4_agent.sv`` — active/passive 组合边界
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/axi4_agent/axi4_agent.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/axi4_agent/axi4_agent.sv:全文
+
+逐段精读：
+
+* L1-L16：文件头定义 agent 由 driver、monitor 和 sequencer 组成，并说明默认可作为
+  active agent；EH2 env 会按 LSU error injection 配置把 LSU 设为 active 或 passive。
+* L17-L30：class 参数化 ID width，声明 driver、monitor、sequencer、analysis port 和
+  debug name。
+* L32-L47：build phase 始终创建 monitor；只有 ``get_is_active() == UVM_ACTIVE`` 时才创建
+  driver 和 sequencer。因此 passive IFU/SB agent 只保留观察面。
+* L49-L59：connect phase 把 agent 的 ``ap`` 指向 monitor 的 analysis port；active 时再把
+  driver 的 ``seq_item_port`` 接到 sequencer。
+* L61：关闭 class。agent wrapper 本身不解析 AXI channel，协议细节分别落在 monitor 与
+  driver 中。

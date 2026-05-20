@@ -1882,3 +1882,135 @@ monitor 与 seq item 已在前文章节逐段解释；package 片段用于固定
 trace monitor、DUT probe monitor、memory monitor 和 agent wrapper。DUT probe monitor
 依赖 probe interface 字段，memory monitor 依赖 AXI4 item，因此 package 必须先导入
 ``axi4_agent_pkg``。
+
+§14  v2-29 Trace interface、item 与 monitor 全源码精读
+--------------------------------------------------------------------------------
+
+本节把 trace agent 中还未全文覆盖的接口、transaction 和两个 monitor 纳入行段级说明。
+这些文件决定 retire trace、regular writeback、DIV async writeback 和 non-blocking load
+completion 如何进入 cosim scoreboard。
+
+§14.1  ``eh2_trace_intf.sv`` — EH2 trace 观察接口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/trace_agent/eh2_trace_intf.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/trace_agent/eh2_trace_intf.sv:全文
+
+逐段精读：
+
+* L1-L18：文件头说明 EH2 trace interface 不是标准 RVFI。它提供每线程每周期最多两条
+  instruction 的 instruction、PC、valid、exception、interrupt 和 trap value，但缺少
+  标准 RVFI 的完整 CSR 与 memory 视图。
+* L19-L24：interface 以 ``NUM_THREADS`` 参数化，并接收 ``clk`` 与 ``rst_n``。
+* L26-L38：原始 trace bus 保存 instruction、address、valid、exception、ecause、
+  interrupt、tval，以及验证专用的 RVFI-equivalent writeback view：``rd_valid``、
+  ``rd_addr`` 和 ``rd_wdata``。
+* L39-L58：为 thread 0 的 i0/i1 lane 声明解码后的便捷信号，包括 PC、instruction、
+  valid、exception、ecause 和 writeback 字段。
+* L60-L68：assign thread 0 lane 0，从 packed trace bus 低 32 位和 lane 0 writeback
+  位段取值。
+* L70-L77：assign thread 0 lane 1，从 packed trace bus 高 32 位和 lane 1 writeback
+  位段取值。
+* L79-L91：monitor clocking block 只读 trace bus 和 writeback view。当前 trace monitor
+  使用该 block 外的便捷信号和原始 interrupt/tval 数组共同构造 item。
+* L93：关闭 interface。该文件不驱动 DUT，只定义 UVM monitor 的可观察面。
+
+§14.2  ``eh2_trace_seq_item.sv`` — retire trace transaction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/trace_agent/eh2_trace_seq_item.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/trace_agent/eh2_trace_seq_item.sv:全文
+
+逐段精读：
+
+* L1-L7：文件头说明每个 item 表示一条已提交 instruction，class 继承
+  ``uvm_sequence_item``。
+* L9-L18：保存 thread id、slot、PC 和 instruction。slot 区分 EH2 每周期可 retire 的
+  i0/i1 两个位置。
+* L19-L24：保存 exception、ecause、interrupt 和 tval，这是 Spike step 与 trap CSR
+  对比的基础输入。
+* L25-L32：保存 GPR writeback 视图，包括 valid、destination、data、suppress 标志、
+  writeback tag 和 writeback source。source 区分 regular、DIV 和 non-blocking load。
+* L33-L45：保存中断/NMI/debug/mcycle 状态以及 DUT trap CSR snapshot，供 cosim 在
+  step 前后同步副作用。
+* L46-L74：保存 commit time/cycle count，并用 UVM field macro 注册主要字段，便于
+  scoreboard log 和 debug。
+* L76-L85：constructor 无额外逻辑；``convert2string`` 输出 thread、slot、PC、instruction
+  和 exception 摘要。
+* L87-L96：helper 解码 opcode 与普通 32-bit instruction 的 rd。
+* L97-L135：``get_compressed_rd`` 解码 RV32C 常见写回目的寄存器；对不写 rd 的压缩格式
+  返回 x0。
+* L137-L145：helper 解码 rs1 和 rs2。
+* L147-L165：helper 判断 branch、load、store 和 AMO，均基于 opcode。
+* L167-L174：``is_div`` 判断 DIV/REM 类操作；压缩指令直接排除，MUL 虽共享 opcode/funct7，
+  但 funct3 不在 DIV/REM 集合内。
+* L176-L194：helper 判断是否为压缩指令，以及压缩 load/store。RV32C memory op 覆盖
+  quadrant 0 的 C.LW/C.SW 和 quadrant 2 的 C.LWSP/C.SWSP。
+* L196-L206：helper 判断 jump，并给出 architectural write rd：压缩指令走
+  ``get_compressed_rd``，普通指令走 ``get_rd``。
+* L208-L224：``writes_rd`` 过滤 x0 和非写回 opcode，并把 CSR funct3 非 0 的指令视为
+  写 rd。
+* L226：关闭 class。scoreboard 使用这些 helper 区分 regular writeback 与异步 writeback
+  的匹配语义。
+
+§14.3  ``eh2_trace_monitor.sv`` — retire trace 到 analysis port
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/trace_agent/eh2_trace_monitor.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/trace_agent/eh2_trace_monitor.sv:全文
+
+逐段精读：
+
+* L1-L13：文件头说明 monitor 捕获 EH2 commit trace，处理每周期两条 instruction、
+  exception 和 cycle counting。
+* L14-L28：class 声明 virtual trace interface、可选 DUT probe interface、analysis port
+  和统计计数器。trace interface 类型当前固定为 ``NUM_THREADS(1)``。
+* L30-L48：build phase 创建 analysis port；connect phase 获取 trace ``vif``，失败为
+  fatal；probe interface 读取失败只 warning，因为缺 probe 时仍可发布基础 trace item。
+* L50-L54：run phase fork ``monitor_trace``。当前只有一个 monitor 线程。
+* L56-L71：``populate_cosim_state`` 从 probe interface 填充 debug、NMI、MIP 和 mcycle；
+  缺 probe 时这些字段清零。
+* L73-L95：``monitor_trace`` 每个 reset 释放后的 clock 递增 cycle count；i0 valid 时
+  创建 item，填入 thread、slot、PC、instruction、exception、interrupt、tval 和时间信息。
+* L96-L108：i0 item 的 regular writeback 字段来自 trace interface lane 0；source 标为
+  ``EH2_WB_SRC_REGULAR``，并在 probe 存在时记录当前 ``wb_seq`` 作为异步相关 tag。
+* L109-L127：更新 commit/exception 统计；exception 或 interrupt 时 snapshot trap CSR；
+  最后打印 commit log 并写 analysis port。
+* L129-L154：i1 valid 路径与 i0 同构，但 slot 为 1，并使用 lane 1 的 PC、instruction
+  和 writeback 字段。
+* L156-L174：i1 路径同样更新统计、snapshot trap CSR、打印日志并发布 transaction。
+* L178-L190：report phase 打印总 commit、exception、cycle 和 IPC 统计。
+
+§14.4  ``eh2_dut_probe_monitor.sv`` — DIV 与 non-blocking load 异步写回
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/trace_agent/eh2_dut_probe_monitor.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/trace_agent/eh2_dut_probe_monitor.sv:全文
+
+逐段精读：
+
+* L1-L12：文件头限定 DUT probe monitor 只发布异步 writeback 事件。regular pipeline
+  writeback 已经通过 trace channel 的 ``wb_*`` 字段携带。
+* L13-L22：class 声明 probe virtual interface、analysis port、writeback 计数和全局
+  ``wb_seq_counter``。
+* L23-L31：constructor 把 sequence counter 从 1 开始，build phase 创建 analysis port。
+* L33-L38：connect phase 从 config DB 获取 probe ``vif``；失败 warning，表示异步
+  writeback monitoring 被禁用。
+* L40-L47：run phase 在 ``vif`` 存在时 fork DIV monitor 和 non-blocking load monitor。
+* L49-L70：``monitor_division`` 看到 ``div_wren`` 且 rd 非 x0 时创建 DIV writeback item，
+  填入 destination、data、source、tag，写回 ``vif.wb_seq``，发布到 analysis port 并递增计数。
+* L71-L89：DIV cancel 且 ``div_cancel_overwrite`` 为真时，发布 suppress item，表示已经
+  retire 的 DIV architectural writeback 被年轻同 rd 写覆盖。
+* L90-L96：speculative flush cancel 没有匹配 retire trace，因此只打印 log，不发布 item。
+* L98-L121：non-blocking load completion 看到 ``nb_load_wen`` 且目的寄存器非 x0 时，
+  发布 ``EH2_WB_SRC_NB_LOAD`` item，并写入相同的 sequence tag 机制。
+* L123-L130：report phase 打印异步 writeback 总数和最后 sequence counter。scoreboard
+  用这些 item 对 regular trace stream 做补充或抑制。

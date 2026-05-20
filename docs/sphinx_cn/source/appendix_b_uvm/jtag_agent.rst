@@ -1971,3 +1971,108 @@ L26-L30 连接 ``seq_item_port``。源码没有 ``eh2_jtag_monitor``，所以 DM
 
 逐段精读：L5-L11 声明 typed sequencer。JTAG 事务的复杂性集中在 driver 的 TAP/DMI
 task，而不是 sequencer 派生类。
+
+§14  v2-29 JTAG interface、item、sequence 与 driver 全源码精读
+--------------------------------------------------------------------------------
+
+本节把 JTAG agent 目录中仍未全文覆盖的 interface、transaction、sequence 和 driver
+纳入源码层。重点是从 JTAG pin、TAP state、IR/DR scan 到 DMI read/write retry 的完整链路。
+
+§14.1  ``eh2_jtag_intf.sv`` — JTAG pin 级 virtual interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_intf.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_intf.sv:全文
+
+逐段精读：
+
+* L1-L8：文件头和 interface 端口说明该 interface 接在 DUT JTAG 信号上，只接收
+  testbench 主时钟与复位。
+* L11-L16：声明 JTAG pin：``tck``、``tms``、``tdi``、``trst_n`` 和 ``tdo``。其中
+  ``tdo`` 由 DUT 返回，其他信号由 driver 驱动。
+* L18-L24：initial block 给 JTAG pin 默认值：TCK 低、TMS 高、TDI 低、TRSTn 低；
+  注释说明 reset release 由 JTAG driver 控制。
+* L26-L33：driver clocking block 输出 TCK/TMS/TDI/TRSTn，并输入 TDO，所有 driver
+  task 都通过该 block 驱动 pin。
+* L35-L44：monitor clocking block 只读 5 个 JTAG pin。当前 agent 没有 monitor component，
+  但 interface 预留了可观察视图。
+
+§14.2  ``eh2_jtag_seq_item.sv`` — DMI transaction item
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_seq_item.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_seq_item.sv:全文
+
+逐段精读：
+
+* L1-L7：文件头说明 item 表示 JTAG/DMI transaction，class 继承 ``uvm_sequence_item``。
+* L8-L12：``jtag_op_e`` 只区分 read 和 write。
+* L14-L28：``dmi_reg_e`` 列出 debug spec 中常用 DMI 地址，包括 ``DMCONTROL``、
+  ``DMSTATUS``、abstract command、system bus 和 ``HALTSUM``。
+* L30-L35：字段区保存 op、DMI 地址、写数据、读数据和 response code。读数据与 response
+  由 driver 的 ``dmi_read``/``dmi_write`` 回填。
+* L37-L43：UVM field macro 注册所有字段，支持打印、拷贝与事务调试。
+* L45-L56：constructor 无额外逻辑；``convert2string`` 按 read/write 输出不同摘要。
+
+§14.3  ``eh2_jtag_seq.sv`` — 单 transaction sequence helper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_seq.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_seq.sv:全文
+
+逐段精读：
+
+* L1-L8：文件头说明这是发送 JTAG/DMI transaction 的简单 sequence，并注册 object 类型。
+* L10-L22：sequence 持有一个 ``txn``；body 只有在 ``txn`` 非空时调用
+  ``start_item``/``finish_item``。它不随机生成多笔事务。
+* L24-L32：``send_write`` 是静态 helper，创建 sequence 和 item，设置 op、addr、wdata，
+  然后在指定 sequencer 上启动。
+* L34-L42：``send_read`` 同样创建 read item，启动后从 ``seq.txn.rdata`` 取回读数据。
+* L44：关闭 class。debug directed tests 通常通过这两个 static task 发起 DMI 读写。
+
+§14.4  ``eh2_jtag_driver.sv`` — TAP 状态机与 DMI read/write
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_driver.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/jtag_agent/eh2_jtag_driver.sv:全文
+
+逐段精读：
+
+* L1-L16：文件头定义 driver 实现完整 JTAG TAP 和 DMI protocol，并说明 41-bit DMI DR
+  scan 的 bit layout：addr、data 和 op，以及下一次 scan 返回的 response layout。
+* L17-L43：class 注册 UVM component，保存 virtual interface，并定义 16 个 TAP state。
+  ``tap_state`` 是 driver 软件侧对硬件 TAP FSM 的镜像。
+* L45-L68：定义 DMI op、response code、DTMCS reset bit、busy retry 参数、DMI 宽度和
+  RISC-V debug IR 值。
+* L69-L78：connect phase 获取 ``jtag_vif``；失败为 fatal。
+* L80-L106：run phase 初始化 pin，保持 TRSTn 低 10 个 clock 后释放，进入
+  TEST_LOGIC_RESET/RUN_TEST_IDLE，写 IR 为 DMI access，然后循环处理 sequence item。
+* L108-L123：``drive_jtag_transaction`` 根据 item op 分派到 ``dmi_read`` 或
+  ``dmi_write``；未知 op 报 ``uvm_error``。
+* L125-L146：``tck_cycle`` 生成一个 TCK 周期并在高半拍采样 TDO；``tck_nav`` 用于只靠
+  TMS 导航，并调用 ``update_tap_state`` 更新软件状态。
+* L148-L263：``goto_state`` 采用先回 TEST_LOGIC_RESET、再走已知路径的保守策略，
+  覆盖 DR/IR capture、shift、pause、update 等目标状态。
+* L265-L286：``update_tap_state`` 按 JTAG TAP 状态转移表更新 ``tap_state``；default
+  回到 TEST_LOGIC_RESET。
+* L288-L318：``write_ir`` 从 RUN_TEST_IDLE 进入 IR scan，LSB-first shift 5 位 IR，
+  update IR 后回到 RUN_TEST_IDLE，并等待 2 个 clock 让 IR 生效。
+* L320-L357：``shift_dr_41`` 进入 DR scan，LSB-first shift 41 位 input data，同时捕获
+  TDO 到 ``output_data``，最后 update DR 并返回 idle。
+* L363-L393：``write_dtmcs`` 临时切换 IR 到 DTMCSR，shift 32-bit DTMCS 数据，用于写
+  ``dmireset`` 等恢复控制位，然后切回 DMI access。
+* L395-L400：``reset_dmi`` 写 DTMCS 的 ``dmireset`` bit，并等待 5 个 clock 清理 busy。
+* L406-L462：``dmi_read`` 构造 read request，先 scan request，再等待 5 个 clock 后用
+  NOP scan 捕获 response；BUSY 时 reset DMI 并按 ``BUSY_RETRY_DELAY`` 重试。
+* L464-L519：``dmi_write`` 与 read 同构，构造 write request 并在下一次 NOP scan
+  捕获 write response；BUSY 和 FAIL 的日志处理与 read 路径一致。
+* L521：关闭 class。该 driver 把 UVM transaction 展开为 pin-level TAP 操作，不依赖
+  独立 monitor 回传 DMI response。

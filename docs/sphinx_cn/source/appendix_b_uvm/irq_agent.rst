@@ -1503,3 +1503,80 @@ level、source、duration 传给 driver。它是 test 层发起 IRQ 激励的最
 
 逐段精读：L5-L11 仅声明 typed ``uvm_sequencer#(eh2_irq_seq_item)``。没有额外仲裁、
 队列或响应模型，因此 IRQ 写接口的行为主要由 sequence 与 driver 决定。
+
+§14  v2-29 IRQ interface、item 与 driver 全源码精读
+--------------------------------------------------------------------------------
+
+本节补齐 IRQ agent 中直接决定中断信号行为的 3 个文件。它们覆盖 timer/software、
+external interrupt 和 NMI 的 virtual interface、transaction 字段以及 driver 驱动策略。
+
+§14.1  ``eh2_irq_intf.sv`` — EH2 interrupt 信号接口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/irq_agent/eh2_irq_intf.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/irq_agent/eh2_irq_intf.sv:全文
+
+逐段精读：
+
+* L1-L5：文件头说明 interface 对接 DUT 的 timer interrupt、software interrupt 和
+  external interrupt source request。
+* L7-L13：interface 以 ``NUM_THREADS`` 和 ``PIC_TOTAL_INT`` 参数化，默认覆盖单线程和
+  127 个外部中断源。
+* L15-L20：声明 4 类中断信号：``timer_int``、``soft_int``、``extintsrc_req`` 和
+  ``nmi_int``。external interrupt vector 使用 ``[PIC_TOTAL_INT:1]`` 编号。
+* L21-L27：initial block 把所有 interrupt 信号清零，避免仿真初始 X 传播到 DUT。
+* L29-L35：driver clocking block 把 4 类 interrupt 声明为输出，供 active driver 写入。
+* L37-L43：monitor clocking block 只读 4 类 interrupt；当前 IRQ agent 目录没有 monitor
+  component，但 interface 预留了观察面。
+* L45-L57：driver 和 monitor modport 分别暴露写/读视图，统一包含 ``clk`` 和 ``rst_n``。
+
+§14.2  ``eh2_irq_seq_item.sv`` — 中断 transaction 字段
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/irq_agent/eh2_irq_seq_item.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/irq_agent/eh2_irq_seq_item.sv:全文
+
+逐段精读：
+
+* L1-L7：文件头说明该 item 表示 EH2 PIC/interrupt transaction，class 继承
+  ``uvm_sequence_item``。
+* L9-L15：``irq_type_e`` 覆盖 timer、software、external 和 NMI 4 类中断。
+* L17-L21：字段区保存中断类型、external interrupt ID、目标电平和持续周期。
+  ``duration == 0`` 在 driver 中解释为单周期 pulse。
+* L23-L28：UVM field macro 注册 4 个字段，支持 sequence 随机化和打印。
+* L30-L42：constructor 无额外逻辑；约束把 external interrupt ID 限定到 0 到 126，
+  并把 duration 限定到 0 到 255。
+* L44-L49：``convert2string`` 输出中断类型、ID、电平和持续周期，便于 driver 日志定位。
+
+§14.3  ``eh2_irq_driver.sv`` — active interrupt 驱动与 reset 清理
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/irq_agent/eh2_irq_driver.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/irq_agent/eh2_irq_driver.sv:全文
+
+逐段精读：
+
+* L1-L8：文件头限定 driver 职责：驱动 127 个 external interrupt、timer interrupt、
+  software interrupt，并处理 reset 时的后台线程清理。
+* L10-L17：注册 component 类型，保存 virtual interface 和 ``bg_process``。``bg_process``
+  指向后台 de-assert 线程，reset 时可被 kill。
+* L18-L27：connect phase 从 config DB 获取 ``irq_vif``；失败为 fatal，因为 driver
+  不能在没有 virtual interface 的情况下驱动中断。
+* L29-L37：run phase 主循环从 sequencer 取 ``eh2_irq_seq_item``，调用
+  ``drive_interrupt``，然后 ``item_done``。
+* L39-L60：timer interrupt 分支立即写 ``timer_int``。duration 大于 0 时 fork 后台线程
+  等待对应周期后清零；duration 为 0 时同步等待一个 clock 后清零。
+* L62-L76：software interrupt 分支与 timer 分支同构，只是写 ``soft_int``。
+* L78-L92：external interrupt 分支索引 ``extintsrc_req[txn.irq_id]``，支持指定外部
+  interrupt source 的置位与清零。
+* L94-L108：NMI 分支写 ``nmi_int``，同样支持持续周期或单周期 pulse。
+* L112-L124：``pre_reset_phase`` 在 reset 前 kill 后台 de-assert 线程，并清空所有
+  interrupt 信号，避免 reset 后遗留异步中断。
+* L126：关闭 class。driver 不发布 analysis transaction，IRQ 观察由 DUT probe/trace
+  或 directed sequence 侧完成。

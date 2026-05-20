@@ -2012,3 +2012,61 @@ scoreboard、agent 的顺序 include，保证 ``eh2_cosim_agent`` 能看到 scor
 逐段精读：L1-L17 说明 helper 的职责是把 ELF/HEX binary 装入 Spike cosim memory；
 L19-L73 处理文件打开、地址递增和 byte 写入；L75-L125 负责错误报告和关闭路径。
 它是 scoreboard 初始化前的 helper，不直接参与 retire compare。
+
+§17  v2-29 cosim 配置与 CSR 预注册全源码精读
+--------------------------------------------------------------------------------
+
+本节补齐 cosim agent 中仍未全文纳入文档的两个配置类资产：``eh2_cosim_cfg.sv``
+给 Spike DPI 初始化提供 ISA、PMP、内存窗口和 debug module 地址；``eh2_cosim_csr_preregister.svh``
+在 scoreboard 初始化时把 EH2 vendor CSR 预注册到 cosim 模型。
+
+§17.1  ``eh2_cosim_cfg.sv`` — Spike cosim 配置对象
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_cfg.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_cfg.sv:全文
+
+逐段精读：
+
+* L1-L8：文件头说明该配置对象由 testbench 放入 ``uvm_config_db``，scoreboard 在
+  build phase 读取；设计模式借鉴 Ibex cosim cfg，但字段按 EH2 调整。
+* L10-L21：class 继承 ``uvm_object`` 并注册 factory；默认 ISA string 是
+  ``rv32imac_zba_zbb_zbc_zbs``，起始 PC 为 ``0x8000_0000``，``mtvec`` 初值为 0。
+* L23-L36：保存 PMP region 数量、PMP granularity、MHPM counter 数量、relax cosim
+  开关和 Spike log 文件路径。这些字段决定 cosim mismatch 是 fatal 还是降级记录。
+* L38-L40：debug module 地址窗口默认是 ``0x0000_0000`` 到 ``0x0000_0FFF``，供 debug
+  访问模型识别 debug memory range。
+* L42-L55：定义 ``mem_region_t`` 并列出 boot、debug system bus、外部数据、
+  ICCM 与 DCCM 的默认窗口。注释说明这些值可由 plusarg 或 RTL 参数注入覆盖。
+* L56-L66：提供 flat 的 DCCM/ICCM base/size 字段，并继续定义 PIC、mailbox 和
+  NMI vector memory region。flat 字段用于 env 注入路径，struct 字段用于统一 region
+  列表表达。
+* L67-L78：constructor 无额外逻辑；``sync_mem_regions`` 把 flat ICCM/DCCM 字段同步回
+  ``mem_iccm`` 和 ``mem_dccm``，避免 plusarg override 后两种表示不一致。
+* L80-L86：``convert2string`` 输出 ISA、PC、mtvec、PMP、relax 标志和 DCCM/ICCM base，
+  用于初始化 log 中快速确认 cosim 配置。
+
+§17.2  ``eh2_cosim_csr_preregister.svh`` — EH2 vendor CSR 白名单
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_csr_preregister.svh
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/cosim_agent/eh2_cosim_csr_preregister.svh:全文
+
+逐段精读：
+
+* L1-L12：文件头说明 EH2 有 28 个 Spike 默认 ``csrmap`` 不认识的 vendor-specific CSR。
+  预注册的目标不是完整建模 WARL 语义，而是避免 Spike 把这些 CSR 指令误判为非法指令。
+* L14-L24：第一组调用注册 machine/custom debug 相关 CSR，包括 ``mscause``、``mrac``、
+  ``mfdc``、``mcgc``、``mpmc``、``mcpc``、``dmst``、``mfdht``、``mfdhs``、
+  ``mhartstart`` 和 ``mnmipdel``。
+* L25-L30：第二组注册 internal timer 相关 CSR：``mitcnt0/1``、``mitb0/1`` 和
+  ``mitctl0/1``。
+* L31-L35：第三组注册 ECC/cache/error 相关 CSR：``mdeau``、``mdseac``、``micect``、
+  ``miccmect`` 和 ``mdccmect``。
+* L36-L41：最后一组注册 PIC external interrupt 相关 CSR，包括 ``meivt``、``meihap``、
+  ``meipt``、``meicpct``、``meicurpl`` 和 ``meicidpl``。每项初值均为 0，thread id
+  参数也为 0。

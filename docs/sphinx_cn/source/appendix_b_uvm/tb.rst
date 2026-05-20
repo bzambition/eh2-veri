@@ -1841,3 +1841,31 @@ halt/run、functional coverage 和 CSR monitor 的每一段连接都有源码证
   coverage/csr/instr interface 注入 ``uvm_test_top``，env build phase 从这里取 handle。
 * L1157-L1161：``run_test()`` 与 module 结束。UVM 测试名来自 plusarg 或默认 test；
   TB 顶层在这里把 SystemVerilog module 世界交给 UVM phase 调度。
+
+§15  v2-29 ``core_eh2_tb_intf.sv`` 全源码行段级精读
+--------------------------------------------------------------------------------
+
+``core_eh2_tb_intf.sv`` 是 UVM class 世界与 TB module 世界之间的服务接口。它避免
+UVM test/base sequence 直接写层次化路径，而是把 clock wait、mailbox 状态、early binary
+load 状态和 byte backdoor memory write 封装成 virtual interface 服务。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/common/core_eh2_tb_intf.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/common/core_eh2_tb_intf.sv:全文
+
+逐段精读：
+
+* L1-L8：文件头说明 UVM classes 位于 package 中，不应通过层次化引用直接伸进
+  ``core_eh2_tb_top``；因此该 interface 承载少量 testbench 服务。
+* L9-L12：interface 只接收 ``clk`` 与 ``rst_n``，作为 clocked service 的基础时序。
+* L14-L18：mailbox 字段保存 testbench 观测到的 mailbox write、地址、数据、测试完成状态，
+  以及 reset 前 early binary 是否已加载。
+* L20-L25：backdoor byte write 服务使用地址、数据、request id、done id 和 event
+  进行请求/完成握手。id 机制避免多个请求只靠 event 丢失完成状态。
+* L26-L28：``wait_clks`` task 封装重复等待 ``posedge clk``，base test 的 timeout、
+  drain window 和 directed helper 都可以复用它。
+* L30-L36：``write_mem_byte`` 设置地址与数据，递增 request id，触发 ``mem_write_req``，
+  然后等待 ``mem_write_done_id`` 追上当前 request id。TB 顶层响应该 event 后完成实际
+  memory model backdoor write。
+* L38：关闭 interface。该文件不创建 UVM component，只提供可注入 config DB 的服务句柄。
