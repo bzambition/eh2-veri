@@ -1638,9 +1638,8 @@ scoreboard。
 
 .. literalinclude:: ../../../../dv/uvm/cs_registers_eh2/csrc/rmapats.h
    :language: c
-   :lines: 1-120
    :linenos:
-   :caption: dv/uvm/cs_registers_eh2/csrc/rmapats.h:L1-L120
+   :caption: dv/uvm/cs_registers_eh2/csrc/rmapats.h:全文
 
 .. literalinclude:: ../../../../dv/uvm/cs_registers_eh2/vc_hdrs.h
    :language: c
@@ -1655,8 +1654,82 @@ scoreboard。
   编译环境，不承载 EH2 业务逻辑。
 * ``rmar.h``、``rmar0.h``：提供 VCS RMA runtime 的 include guard 与 C linkage。
   它们属于仿真生成/中间层边界，文档只说明用途，不把它们当手写平台逻辑。
-* ``rmapats.h``：定义 VCS runtime 需要的大量 typedef、枚举和结构体。CSR unit
-  文档引用前 120 行是为了说明类型来源；不要求验证工程师逐个维护这些 internal type。
+* ``rmapats.h``：定义 VCS RMA/HSIM runtime 需要的大量 typedef、枚举、队列、调度、
+  callback 和 extern API。它是 simulator 生成边界的一部分，不是 EH2 手写验证逻辑；
+  但全文保留有助于复现 CSR unit VCS 编译、链接和 DPI/VPI callback 问题。
+
+``rmapats.h`` 全文行段级精读：
+
+* L1-L8：include guard、C++ linkage 和 ``VCS_RTLIB_TLS_MODEL``。这一段把头文件限定为可被
+  C/C++ 混合编译包含，并声明 VCS runtime 使用 initial-exec TLS model。
+* L10-L59：基础别名、``vec32``、timestamp、pulse-delay enum 和 ``TypeData``。这些类型把 VCS
+  内部值表示统一成 ``U``、``UB``、``RP``、``TimeStamp`` 和 ``vec32``，后续所有 RMA 结构都建立在
+  这些别名上。
+* L60-L127：``etype``、clock union、``EBLK`` 和 ``RmaEblk``。``etype`` 记录大量 bit-field 类型属性；
+  ``EBLK`` 是事件块基础节点，保存 next 指针、回调函数、instance template 和调度标记。
+* L128-L185：``RmaEblklq``、``RmaRetain`` 和 ``retain_t``。这一组支持 level queue 与 retain
+  状态，在 event-driven 仿真中保存 pending value、previous value、HSIM 标记和保留节点链接。
+* L186-L269：``MPSched``、``RmaMPSched``、pulse scheduler、``RmaTransEventHdr`` 和新 CSDF
+  pulse layout。它们描述多路径/脉冲延迟的调度载体，包含当前值、前值、clock struct、state 和
+  指向 pcode/function 的指针。
+* L270-L326：``RED``、``PREDD``、``rhs_value``、``NBS`` 和 ``RmaPulse``。该段把 reduction、
+  pulse-delay descriptor、RHS value union、nonblocking assignment queue 和 pulse event 统一成
+  runtime 可调度对象。
+* L327-L372：``QIRDModuleType`` 与 ``BitFlags``。QIRD 用于 VCS elaboration/runtime 的设计元数据，
+  bit flags 则集中保存 module/package、debug、coverage、callback、mixed-language 等状态位。
+* L373-L925：超长 ``struct qird``。它是全文件最大的 design/runtime descriptor，聚合名称字符串、
+  VCD/coverage 指针、task/class/static data、clock/load 数据、cosim/mhdl/registry 信息、
+  callback 表、DAI/PLI/TLI 等句柄。对 CSR unit 文档来说，只需知道它是 VCS 对已 elaborated design
+  的全局元数据承载体，不应手工修改字段。
+* L926-L983：``PCBT``、``iptmpl``、``FileOffset`` 和 ``RmaMultiInputTable``。这些结构描述 process
+  callback table、instance template、文件偏移与多输入逻辑表，为 pcode/gate evaluation 提供
+  instance 与输入映射。
+* L984-L1038：HSIM period、signal monitor 和 node record。它们保存 clock/glitch/edge 监控需要的
+  timestamp、状态位、node/instance 编号和 monitor 指针，用于高速仿真中的信号变化记录。
+* L1039-L1158：IBF pcode/IP、小型 gate/fanout/schedule/callback/force selector 结构。这里开始把
+  RTL gate evaluation 拆成许多紧凑 struct：根 callback、force callback、nettype driver/gather/
+  scatter、NBA gate 和 1-input fanin。
+* L1159-L1302：sequential primitive output、conditional load、multi-input logic、sched0/delta
+  gate、bit-edge block、gate/behavioral/MP/transport delay。该段覆盖从 UDP/seq primitive 到
+  timing delay 的调度数据形态。
+* L1303-L1387：NTC/IC/port delay、RTL X-edge、RTL edge block 和 remote DBSED load。它们服务
+  timing check、interconnect delay、edge-sensitive load 和远端 load 链接。
+* L1388-L1499：table assignment、clocked table assignment、thread table header、wakeup list、
+  timestamp array 和 condition MDB。该段是表驱动赋值与线程化 wakeup 的数据层。
+* L1500-L1757：``RmaTcCore*`` 与 conditional timestamp load 族。它们组合 timing check list、
+  simple/conditional/optimized/no-list/MTC/MDB/nochange 多种布局，用来覆盖 VCS timing check 的
+  不同优化路径。
+* L1758-L1835：scan switch、doubly linked list、switch gate、non-edge load、child clock
+  propagation 和 HDL cosim DUT gate。这里把 scan/clock/cosim 输入变化纳入同一个 RMA runtime
+  header。
+* L1836-L1904：master/child X-prop load、``clock_load``、``clock_data``、``clock_hiconn`` 和
+  DAI callback gate。该段支撑 clock/X-propagation、high-connection clock 信息和 Direct Access
+  Interface callback。
+* L1905-L2019：callback memory optimization union、future event queue、scheduler table 和
+  ``dummyq_struct``。``dummyq_struct`` 保存大量 EBLK queue 头、future queue、retain queue、
+  scheduler table、thread/global state 和当前 clock，是 VCS runtime 调度器的核心上下文之一。
+* L2020-L2061：函数指针 typedef、level queue、clock level 和 ``Qhdr``。这些类型让 runtime 可以
+  用统一签名调用 scalar/vector/nettype/eVCD callback，并把 level queue 组织成 heap 或 list。
+* L2062-L2134：extern table 与全局 runtime 状态。包括 X 值转换表、force/release 状态、
+  function array、thread-local dummy scalar、coverage/wave dump flag、schedule callback 函数表、
+  edge 表和 loop-detect 标记。
+* L2137-L2188：delay evaluation、function array setup、HSIM callback、root callback copy、
+  event sync list、2-state conversion 和 MP scheduling extern API。这些声明由 VCS runtime library
+  实现，本头文件只暴露链接接口。
+* L2189-L2257：event scheduling API。包含 future queue head/tail、``schedule``/``sched0``/
+  ``schedal``、threaded scheduler、TB reactive/NBA region、parallel clock/OVA 调度、timing
+  violation 和 gate scheduling。
+* L2258-L2301：value update、part-select、force/release、change-check、memory allocation 和
+  vector boolean evaluation API。它们是 RMA pcode 执行时更新 scalar/vector 值的基础操作。
+* L2302-L2355：standard C memory helpers、scan optimization、PVCS CCN、reset/recovery DBS、
+  unary/binary/ternary evaluation、EVCD status、MHDL export、level queue 和 RCI RTL 入口。
+* L2356-L2411：loop report/call graph、edge evaluation、NBA/gated-clock/child-clock/HDL cosim
+  drive、2-state 判断和 node record update。该段暴露 debug、loop detect、edge-sensitive load
+  和 hwcosim 驱动相关 runtime 函数。
+* L2412-L2430：``FuncPtr`` 与 ``asm_bsf`` inline helper。在 Linux x86 路径使用 ``bsf`` 指令，
+  AArch64 路径回退到 ``ffs``，其他平台返回 0。
+* L2433-L2444：再次打开 C linkage，声明 ``hsG_0__0``，然后关闭 C++ linkage 与 include guard。
+  这标记整个生成头文件结束。
 
 接口边界：这些 C 头文件可帮助复现 VCS 编译环境问题，但 sign-off 行为仍由
 SystemVerilog testbench、``eh2_dec_csr`` wrapper、reg model 和 scoreboard 决定。
