@@ -1922,3 +1922,112 @@ scoreboard、virtual sequencer，以及 CSR/RVFI/instruction/DUT probe 观察接
 * L42-L58：monitor clocking block 只读两个 slot 与 pipeline control 信号。
 * L60：关闭 interface。该 interface 支撑 instruction-level coverage 或调试观察，不替代
   retire trace monitor。
+
+§14  v2-47 CSR unit VCS 生成入口与 sequence library 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 CSR unit 子环境中两个仍未全文覆盖的资产：
+``dv/uvm/cs_registers_eh2/csrc/Makefile`` 和
+``dv/uvm/cs_registers_eh2/env/cs_registers_seq_lib.sv``。前者是 VCS 在 ``csrc`` 目录中生成的
+C/C++ model 链接 Makefile，服务仿真可执行文件 ``out/simv`` 的二次链接；后者是 CSR unit
+的核心 sequence library，负责 reset、WARL、permission、access matrix、illegal 和 hazard
+六类寄存器访问检查。
+
+§14.1  ``csrc/Makefile`` — VCS generated model link Makefile
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/cs_registers_eh2/csrc/Makefile
+   :language: make
+   :linenos:
+   :caption: dv/uvm/cs_registers_eh2/csrc/Makefile:全文
+
+逐段精读：
+
+* L1-L3：文件头直接说明这是 VCS 生成的 model build Makefile，并提醒 ``-Mupdate`` 时才会覆盖。
+  因此它是仿真工具生成入口，不是 CSR unit 手写 flow 的主 Makefile。
+* L4-L17：``VSRC`` 指向上一级，``PRODUCTBASE`` 定位到 ``../out/simv``，``PRODUCT_TIMESTAMP``
+  用于判断是否需要重新链接。CSR unit 的上层 ``Makefile`` 负责编译触发，本文件负责 VCS
+  生成物内部的 object/link 管理。
+* L19-L24：runtime library 路径绑定到本机 Synopsys VCS O-2018.09-1 安装，包含
+  ``libvcsnew``、``libsimprofile``、``libuclinative``、``vcs_tls.o`` 和 save/restore object。
+  这类绝对路径说明该文件不可移植，迁移机器时应重新生成而不是手工修。
+* L26-L36：C/C++ 编译器和 linker 默认使用 ``gcc``、``g++``。``CC_CG`` 是 gen_c flow 的内部
+  compiler 变量，``LD`` 负责最终链接 ``simv``。
+* L38-L52：linker flags、RPATH、PIC archive flags、system libraries 和 runtime startup 变量。
+  ``PICLDFLAGS`` 中的 ``$$ORIGIN`` 保证生成的 shared object 能相对 ``simv.daidir`` 找到依赖。
+* L53-L64：指定 shell、临时目录参数和最终 ``CC`` 命令。``VCSTMPSPECENV`` 可用于空间不足时把
+  VCS temporary 目录迁到其他磁盘，但当前默认未启用。
+* L66-L77：三组 CFLAGS 都包含 ``-DVCSMX``、``-DUVM_DPI_DO_TYPE_CHECK``、``-fPIC`` 和 VCS
+  include 路径。``CFLAGS_O0`` 与 ``CFLAGS_CG`` 额外禁用 strict aliasing，服务 debug 或 gen_c
+  场景。
+* L78-L84：``include filelist`` 引入 VCS 自动生成的 object 列表，随后把 Verilog、SystemC 和
+  VHDL object 拼成 ``OBJS``。如果 filelist 过期，链接对象集合就会和最新仿真编译不一致。
+* L86-L90：``product`` 依赖 timestamp，只打印 ``simv`` up to date；``objects`` target 依赖
+  object、DPI stub 和 PLI stub，供增量构建确认 object 是否齐备。
+* L91-L99：``clean`` 删除 VCS/CU object，``clobber`` 在 clean 后删除产品和 timestamp，
+  ``picclean`` 清理 VCS 生成的 shared object archive。它们只清 csrc 生成物，不清 CSR unit
+  源码。
+* L101-L106：``product_clean_order`` 先调用 ``picclean``，再调用 ``product_order``；后者依赖
+  ``$(PRODUCT)``，用于把 shared object 清理和可执行文件链接串成固定顺序。
+* L107-L113：timestamp target 真正执行最终链接。它先移除旧 ``simv`` 的可执行权限，再用
+  ``$(LD)`` 把所有 object、runtime library、UCLI library、DPI/PLI stub 和 system libraries
+  链接成 ``../out/simv``，随后删除临时 ``csrc*.o``、touch timestamp，并清理空 ``objs`` 目录。
+* L114-L116：``$(PRODUCT)`` target 依赖 object、dotlibs、DPI/PLI stub、VCS runtime shared libs
+  和 save/restore object，最后 touch 产品文件。真实链接已经由 timestamp target 完成，这个 target
+  更像 VCS 生成依赖图的收尾节点。
+
+接口关系：
+
+* 被调用：VCS 生成的 csrc 构建过程，通常由 CSR unit 上层编译 target 间接调用。
+* 调用：``gcc``、``g++``、``ld``、``rm``、``chmod``、``touch``、``find`` 和递归 ``make``。
+* 共享状态：读取 VCS 生成的 ``filelist``、object/stub/runtime library；写
+  ``dv/uvm/cs_registers_eh2/out/simv``、``product_timestamp`` 和 ``simv.daidir`` 相关生成物。
+
+§14.2  ``cs_registers_seq_lib.sv`` — CSR unit sequence library
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/cs_registers_eh2/env/cs_registers_seq_lib.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/cs_registers_eh2/env/cs_registers_seq_lib.sv:全文
+
+逐段精读：
+
+* L1-L17：文件头说明本库通过 DPI 对真实 DUT CSR shell 发起读写，不再使用 placeholder
+  ``32'h0`` 返回值。它 include ``csr_dpi_imports.svh`` 和 UVM macros，并导入 ``uvm_pkg`` 与
+  ``csr_dpi_pkg``。
+* L18-L60：``csr_reset_seq`` 遍历 ``reg_block.reg_names``，按名称查找每个 ``eh2_csr_reg``，
+  通过 ``r.read_dut()`` 读真实 DUT reset 值，再与 ``r.get_reset_val()`` 交给 scoreboard 比较。
+  这让 reset 表错误能在 CSR unit 层暴露，不必等 full-core directed test。
+* L62-L127：``csr_warl_seq`` 对非只读、WARL mask 非零的 CSR 做多轮随机写入。预期值来自
+  ``r.get_warl_value(written)``，真实值来自 DUT readback；比较时只看 mask 覆盖的合法位。
+* L101-L118：WARL 段的注释强调预期值由 reg model 本地计算，不从 DUT DPI oracle 获取。
+  这是关键设计动因：scoreboard 必须独立于 DUT，否则 DUT 和 oracle 同错会被误判为通过。
+* L129-L170：``csr_permission_seq`` 枚举 CSR 并读取当前 DUT 值，当前实现只确认 M-mode 可访问性并
+  打高等级日志。它没有真正切到 U/S mode 注入 trap，因此文档中应把它称为 permission enumeration，
+  不夸大为完整 privilege trap proof。
+* L172-L249：``csr_access_matrix_seq`` 针对每个可写 CSR 和 5 组随机写数据，依次执行 CSRRW、
+  CSRRS、CSRRC、CSRRSI、CSRRCI。当前只有 CSRRW 后的 readback 做显式 mask 比较，其余操作主要
+  覆盖 DPI op path 和 storage update path。
+* L203-L221：access matrix 每次先查 name、跳过 null 和只读 CSR，再取 WARL mask。CSRRW 写后读回
+  若 ``readback & mask`` 与 ``wv & mask`` 不一致，就调用 ``scoreboard.check_warl`` 并增加
+  ``errors``。
+* L223-L241：CSRRS/CSRRC 与 immediate set/clear 操作都执行写后读，但当前没有逐项比较。
+  这适合证明操作通道能跑通；若未来要把 set/clear 语义纳入强 gate，应在这里补对应 expected
+  model。
+* L251-L307：``csr_illegal_seq`` 只挑战只读 CSR。它先读原值，再通过 DPI bypass 写随机噪声并读回；
+  如果只读值发生变化，会记录 ``dpi_bypass_changes`` 并打印信息。
+* L285-L299：该 illegal sequence 的注释写着期待 trap，但实现实际是通过读回不变性观察只读 CSR。
+  因为 DPI wrapper 可能绕过真实指令 trap path，所以它适合发现 storage 保护问题，不等同于完整
+  illegal instruction trap 验证。
+* L309-L364：``csr_hazard_seq`` 对每个可写 CSR 做 ``rounds`` 次 back-to-back write/read。读回的
+  mask 位若不等于写入 mask 位，直接发 ``uvm_error``。它覆盖 CSR unit shell 的无气泡写后读行为，
+  full-core pipeline forwarding 仍需 directed ASM 或 decode/TLU 级检查补充。
+
+接口关系：
+
+* 被调用：CSR unit test class 在 run phase 中创建并启动这些 sequence。
+* 调用：``eh2_csr_reg_block`` 查表、``eh2_csr_reg`` 的 ``read_dut``/``write_dut``/
+  ``get_warl_*`` helper、``cs_registers_scoreboard`` 和 UVM report macros。
+* 共享状态：读取 reg model 的 CSR 表、reset 值、WARL mask 和只读属性；通过 DPI 读写 CSR unit
+  DUT shell；把 reset/WARL/hazard 错误写入 UVM log 与 scoreboard 计数。
