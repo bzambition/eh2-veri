@@ -1586,3 +1586,76 @@ Makefile 中直接声明的可再生输出主要位于 `build/`、`out/` 或 `$(
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§15  v2-19 顶层 ``Makefile`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-19 开始把“引用过源码”升级为“全文源码能被审计到”。顶层 ``Makefile`` 是
+EH2 验证平台的总调度入口，不能只看 ``compile``、``smoke`` 或 ``signoff`` 的局部
+片段；否则会漏掉 staged regression、coverage 配置、NC 备选路径、demo、clean
+安全网和 deprecated alias 的真实行为。
+
+.. literalinclude:: ../../../../Makefile
+   :language: text
+   :linenos:
+   :caption: Makefile:全文
+
+逐段精读：
+
+* L1-L22：文件头说明这是顶层调度 Makefile，并在最前面包含 ``env.mk``。
+  这一段建立全局语义：默认 simulator 是 VCS，核心 target 分组管理，clean 有
+  保留策略，用户通过 ``make help`` 查看入口。
+* L23-L76：Ibex-style staged entry。只要 ``GOAL`` 非空，Make 就创建
+  ``OUT-DIR``、``METADATA-DIR``，导出 ``PYTHONPATH``，调用 ``metadata.py`` 后
+  委托 ``dv/uvm/core_eh2/wrapper.mk``。这是保留给分阶段回归框架的入口，与后面
+  人工 target 分支互斥。
+* L78-L120：普通 target 分支的目录、filelist 和 clean preserve 集合。``TB_DIR``、
+  ``SCRIPTS_DIR``、``RTL_F``、``TB_F`` 等变量把顶层命令映射到 UVM 工程树；
+  ``CLEAN_PRESERVE_BUILD`` 和 ``CLEAN_PRESERVE_FIND`` 防止误删长耗时证据目录。
+* L121-L173：用户可覆盖变量。``CONFIG``、``SEED``、``TESTLIST``、``SIMULATOR``、
+  ``COV``、``PROFILE``、``SIGNOFF_OUT``、``LEC_BLOCKLEVEL``、``SCOPE`` 等都是
+  命令行契约；文档中的命令示例必须使用这些真实名字。
+* L174-L217：仿真器与覆盖率配置。VCS 采用 ``line+tgl+assert+fsm+branch`` 五维
+  coverage、``cover.cfg`` DUT-only scope、``cov_fsm.cfg`` 和 reset filter；NC 路径
+  使用 ``cov_full_nc.ccf`` 与 ``cov_work``，作为完整备选 simulator 和 waveform
+  debug 通道。
+* L218-L245：testlist 路由与 ``.PHONY`` 列表。``TESTLIST=directed`` 选择
+  ``directed_testlist.yaml``，否则默认 riscv-dv extension testlist；``.PHONY``
+  明确暴露 help/asm/cosim/compile/smoke/regress/compliance/formal/synth/signoff/demo
+  等核心入口。
+* L246-L945：中文 ``HELP_TEXT``。这一大段不是注释垃圾，而是用户界面：它解释 15 个
+  核心 target、常用变量、VCS/NC 产物隔离、signoff 与 demo 差异、formal/syn 数据来源、
+  clean safety net 和 deprecated alias。任何修改 target 名时都必须同步这段帮助文本。
+* L946-L985：``help`` target 和 cosim 编译变量。``LIBCOSIM``、``SPIKE_*``、
+  ``SVDPI_INCLUDE`` 决定 Spike DPI shared library 如何编译；``NO_COSIM=1`` 只影响
+  cosim library 依赖，不应改变其它 regression 的 Make 语义。
+* L986-L1022：``cosim`` recipe。该段创建 build 目录、收集 Spike include/lib 路径、
+  调用 C++ 编译器并链接 ``libcosim.so``。失败时先看 ``build/libcosim.so`` 生成日志和
+  Spike 安装路径，而不是改 UVM scoreboard。
+* L1023-L1114：``asm``、``compile_vcs``、``compile_nc``、``compile_xlm``。VCS 编译
+  读取 ``eh2_rtl.f``、``eh2_shared.f``、``eh2_tb.f``，加上 UVM、DPI 和 coverage
+  option；NC/Xcelium 路径用各自命令模板保持兼容。
+* L1115-L1152：``smoke``、``regress``、``compliance``。``smoke`` 先编译 asm，再跑
+  单测；``regress`` 调用 ``run_regress.py``；``compliance`` 下钻到
+  ``dv/uvm/riscv_compliance``，不在顶层重复实现 compliance framework。
+* L1153-L1201：``wave_nc`` 交互式波形 debug。该 target 针对单个测试启动 NC/SimVision
+  交互调试，输出语义与 batch smoke/regress 分开，不能把它当作 release gate。
+* L1202-L1232：``lint``、``formal``、``synth``。顶层只做编排，下游分别进入
+  ``lint``、``dv/formal``、``syn``；这保证 Verible/Verilator、IFV/Symbiyosys、
+  DC/Formality 的工具边界不混杂。
+* L1233-L1295：``signoff`` 和 ``signoff_replay``。``SIGNOFF_LEC_OPTS`` 根据
+  ``syn/build/lec_summary.txt`` 是否存在选择 block-level LEC 证据或 limited 标记；
+  ``signoff.py`` 负责 9-stage gate、25% fail-rate ceiling、coverage 和 waiver 判断。
+* L1296-L1337：``demo``。demo 先运行 signoff，再显式调用 synth/DC/LEC，为
+  2026-05-19 01:02 那次 9/9 PASS、102/104、LEC 31635/31635 的端到端证据提供
+  Make 层入口。
+* L1338-L1349：``manual``。该 target 下钻到 ``docs/sphinx_cn`` 构建中文 Sphinx 手册，
+  本章本身就是该 target 的主要维护对象。
+* L1350-L1434：``clean``。默认 clean 会根据 ``SCOPE``、``MODE``、``DRY_RUN`` 和
+  ``FORCE`` 控制删除范围；没有 ``FORCE=1`` 时会保留 sign-off 证据、cosim library、
+  archive links 和其它长耗时产物。
+* L1435-L1569：deprecated alias。``run``、``gen``、``nightly``、``signoff_quick``、
+  ``html_report``、``cov``、``syn_dc``、``block_lec``、``run-csr-unit``、``ci_*``
+  等旧入口会打印提示并转发到新 target，保证旧 CI 或旧文档命令仍可定位到当前流程。
+* L1570：普通 target 分支结束。这个 ``endif`` 与 L30 的 staged ``ifneq`` 配对，
+  是顶层 Makefile 两套入口不会互相执行的结构边界。

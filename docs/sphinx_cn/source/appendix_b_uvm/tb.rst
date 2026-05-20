@@ -1781,3 +1781,63 @@ dual-issue 状态交给 instruction monitor interface。
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§14  v2-19 ``core_eh2_tb_top.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+``core_eh2_tb_top.sv`` 是 UVM testbench 的硬件世界入口：它不创建 UVM component，
+但负责实例化 DUT、interface、coverage、RVFI converter、probe 连接和 config DB
+发布。v2-19 将该文件全文纳入 literalinclude，确保 mailbox、trace、AXI、IRQ、JTAG、
+halt/run、functional coverage 和 CSR monitor 的每一段连接都有源码证据。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tb/core_eh2_tb_top.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/tb/core_eh2_tb_top.sv:全文
+
+逐段精读：
+
+* L1-L36：文件头、UVM import、EH2 package import 和 module 声明。这里固定了
+  ``core_eh2_test_pkg`` 是测试包入口，TB 顶层作为 SystemVerilog module 驱动
+  UVM run_test。
+* L37-L68：时钟、复位、参数和 ``core_eh2_dut_signals.svh`` 引入。include 文件展开
+  DUT 端口信号，避免在 TB 顶层手写几百个重复声明。
+* L69-L90：mailbox 信号和 ``core_eh2_tb_intf``。LSU AXI write handshake 被解释成
+  mailbox write，``mailbox_test_done``、``early_bin_loaded`` 通过 virtual interface
+  暴露给 UVM base test。
+* L91-L131：backdoor memory write、trace display 和 mailbox PASS/FAIL monitor。
+  这段是 smoke/directd 测试最早可见的退出路径；``32'hD0580000`` 是测试完成地址。
+* L132-L178：clock/reset 初始块和 early binary plusarg 处理。TB 支持在 reset 前通过
+  ``+bin=`` 加载 ELF/hex，加载状态反馈给 base test，防止 UVM phase 与内存初始化竞态。
+* L179-L547：``eh2_veer_wrapper dut`` 实例。该段连接 core clock/reset、trace、AXI、
+  DMA、DMI/JTAG、PIC、timer/software interrupt、halt/run、debug 和 scan 信号，是
+  testbench 到上游 EH2 wrapper 的主边界。
+* L548-L575：DMA AXI tied-off。当前 UVM 主环境不主动驱动外部 DMA master，因此将 DMA
+  request 侧固定为 idle；如果未来增加 DMA active agent，应从这里开始改连接。
+* L576-L612：trace dump 辅助逻辑。该段按 ``trace_rv_i_valid_ip`` 打印 retire trace，
+  服务手工 debug 和 cosim triage，不改变 scoreboard 数据结构。
+* L613-L733：LSU、IFU、SB 三组 AXI interface 逐字段连接。每个 channel 的 valid/ready、
+  id、addr、data、resp 都被映射到 UVM AXI4 agent 的 virtual interface，三组 agent
+  因此能被动监控总线事务。
+* L734-L755：trace interface 连接。``eh2_trace_if`` 直接接收 DUT trace packet 字段，
+  trace monitor 和 cosim scoreboard 用它恢复 retire instruction、PC、exception、
+  interrupt 和 GPR writeback。
+* L756-L824：RVFI interface 与 ``eh2_veer_wrapper_rvfi`` converter。该段把 trace、
+  LSU bus activity 和 reset/clock 转换为 RVFI-like 观察面，服务 smoke、formal-like
+  debug 和后续可扩展 checker。
+* L825-L907：DUT probe interface。这里用 hierarchy reference 暴露 divide cancel、
+  nonblocking load、CSR、debug、exception、interrupt 等内部状态；cosim scoreboard
+  依赖这些信号判断 Spike step 前后的副作用。
+* L908-L945：IRQ、JTAG、halt/run 和 fetch enable interface。TB 顶层只连线并发布
+  virtual interface；真正的 active driving 由 env 中的对应 agent 完成。
+* L946-L1065：``eh2_fcov_if`` 实例。该段把 decode、EXU、TLU、LSU、IFU、debug 和
+  interrupt 信号接到 functional coverage interface；coverage group 69.42% 的入口
+  就是这组采样连接。
+* L1066-L1085：CSR monitor interface。``eh2_csr_if`` 观察 CSR access、addr、rdata、
+  write enable 和操作类型，用于 CSR 子环境或 coverage 侧验证。
+* L1086-L1111：instruction monitor interface。该段暴露 I0/I1 decode valid、instruction、
+  compressed、branch、stall、flush 和 dual issue 状态，支撑指令级 functional coverage。
+* L1112-L1156：``uvm_config_db`` 发布。TB 将 tb/axi/irq/jtag/halt-run/trace/rvfi/probe/
+  coverage/csr/instr interface 注入 ``uvm_test_top``，env build phase 从这里取 handle。
+* L1157-L1161：``run_test()`` 与 module 结束。UVM 测试名来自 plusarg 或默认 test；
+  TB 顶层在这里把 SystemVerilog module 世界交给 UVM phase 调度。

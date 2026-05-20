@@ -1561,3 +1561,73 @@ EH2 仅支持 M-mode（Machine mode），不支持 U/S 模式。
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§16  v2-19 顶层 RTL 全文段落级精读
+--------------------------------------------------------------------------------
+
+本节补齐上游 ``eh2_veer.sv`` 与 ``eh2_veer_wrapper.sv`` 的全文 literalinclude。
+二者是不同层级：``eh2_veer.sv`` 是 core 集成顶层，实例化 DEC/EXU/IFU/LSU/DMA/DBG/PIC
+等子系统；``eh2_veer_wrapper.sv`` 是 SoC/TB 边界 wrapper，补齐 JTAG/DMI、tie-off、
+外部 SRAM packet 和上层端口整理。
+
+§16.1  ``eh2_veer.sv`` — core 集成顶层全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/eh2_veer.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/eh2_veer.sv:全文
+
+逐段精读：
+
+* L1-L22：版权、include guard 和 package import。``eh2_param.vh``、``eh2_def.sv`` 与
+  ``eh2_pkg::*`` 共同提供参数、packet typedef 和 packed struct。
+* L23-L156：模块头、clock/reset、trace、debug/halt/run、DCCM/ICCM/I-cache/BTB 端口。
+  这是 core 与 wrapper/TB 的前半个边界，尤其 trace 端口直接进入 UVM trace/RVFI 适配层。
+* L157-L407：LSU/IFU/SB/DMA AXI、AHB、DMI、PIC/timer/software interrupt 和 scan 端口。
+  EH2 同时保留 AXI 与 AHB-Lite build 选项，后续通过 internal mux 和 bridge 选择。
+* L408-L786：内部 wire/logic 声明。该大段按 bus bridge、memory、IFU/DEC/EXU/LSU、DMA、
+  branch prediction、PIC、CSR clock override、debug 和 PMU 分组，连接后续所有子模块。
+* L787-L991：结果、异常、branch prediction、PIC、clock gating、active/free clock 相关
+  派生信号。``active_thread``、``active_state`` 和 ``rvoclkhdr`` 决定双线程下 clock gate
+  何时打开。
+* L992-L1051：per-thread clock gating、global clock、clock override、debug command merge
+  与 ``core_rst_l``。debug reset 与 scan mode 在这里影响 core reset 边界。
+* L1052-L1142：主要子模块实例前半段，连接 DEC、EXU、IFU、LSU、memory 或相关 glue。
+  这一段把 decode/execute/load-store/fetch 的 packet 和 flush 数据流接成 core pipeline。
+* L1143-L1391：``BUILD_AHB_LITE`` generate 与 AXI-to-AHB bridge。启用 AHB build 时，
+  LSU/IFU/SB/DMA AXI internal channel 通过 bridge 转换；否则直接使用外部 AXI 端口。
+* L1392-L1451：AXI/AHB build 选择 mux。每个 LSU/IFU/SB/DMA channel 都按
+  ``pt.BUILD_AHB_LITE`` 选择 bridge 信号或原生 AXI 信号，避免两套 build 共享不一致路径。
+* L1452-L1477：DMA、DMI、debug、PIC 或 memory 边界的剩余实例和连接收尾。该区域通常是
+  SoC 集成问题与 debug access 问题的下钻入口。
+* L1478-L1493：``trace_rewire`` generate 与 ``endmodule``。``eh2_trace_pkt_t`` 被展开成
+  legacy trace arrays，供 wrapper、testbench、RVFI converter 和 cosim scoreboard 消费。
+
+§16.2  ``eh2_veer_wrapper.sv`` — SoC/TB 边界 wrapper 全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/eh2_veer_wrapper.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/eh2_veer_wrapper.sv:全文
+
+逐段精读：
+
+* L1-L22：文件头、include 和 package import。wrapper 与 core 顶层共享同一套参数和
+  typedef，保证端口宽度与 ``eh2_veer`` 一致。
+* L23-L349：wrapper module 端口。对外暴露 trace、LSU/IFU/SB/DMA AXI、AHB、SRAM repair
+  packet、interrupt、JTAG、halt/run、debug、scan/mbist；这是 SoC 集成和 UVM TB 实例化的
+  最外层接口。
+* L350-L497：内部 memory、ICache/ICCM/BTB、clock、DMI、AHB 和 DMA wrapper 信号声明。
+  这些信号把外部端口、内部 memory macro wrapper 和 ``eh2_veer`` core 顶层拆开。
+* L499-L522：AHB 默认 tie-off。当前 wrapper 默认使用 AXI 主路径时，将未使用 AHB response
+  侧固定为零，避免悬空输入污染仿真。
+* L527-L704：AXI channel mirror 声明。wrapper 先声明 internal AXI wire，再在后续
+  ``eh2_veer`` 实例和外部端口之间整理方向，便于 DMI/JTAG wrapper 或 tie-off 插入。
+* L707-L772：AXI 与 DMA 默认 tie-off。未由 wrapper 内部消费的 ready/valid/data/resp
+  信号固定为 idle，保证未启用路径不会产生 X 传播。
+* L776-L810：``dmi_wrapper`` 实例。JTAG pins 进入 DMI wrapper，生成 ``dmi_reg_*`` 与
+  ``jtag_tdo``，再由 core debug/DMI 子系统消费。
+* L811-L818：initial 检查和 module 结束。该段在仿真开始时给出必要提示或配置检查，是
+  wrapper 源码的收尾边界。

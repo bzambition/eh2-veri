@@ -3363,3 +3363,36 @@ generator 绑定到 EH2 debug ROM 生成策略。
 * L371-L399：``eh2_exception_stream`` 生成异常触发指令，覆盖 illegal/trap 类路径。
 * L405-L460：``eh2_csr_hazard_stream`` 生成 back-to-back CSR hazard 序列，验证 CSR
   forwarding、serialization 和 pipeline hazard 行为。
+
+§15  v2-19 ``eh2_log_to_trace_csv.py`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+``eh2_log_to_trace_csv.py`` 负责把 EH2 仿真日志转换成 riscv-dv 可消费的 trace CSV。
+v2-17 只纳入了 L1-L120，本节补齐全文，尤其是 ABI operand 转换、branch immediate
+处理、UVM log checker 和 CLI 入口，避免读者只看到 retire 正则而漏掉比较前的规范化。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/riscv_dv_extension/eh2_log_to_trace_csv.py
+   :language: python
+   :linenos:
+   :caption: dv/uvm/core_eh2/riscv_dv_extension/eh2_log_to_trace_csv.py:全文
+
+逐段精读：
+
+* L1-L20：脚本头、import 和 riscv-dv script path 注入。该段把仓库根目录下的
+  ``vendor/google_riscv-dv/scripts`` 加入 ``sys.path``，以复用官方 trace CSV helper。
+* L21-L47：CSV 字段、默认 full trace、retire trace 正则和寄存器/operand 正则。
+  ``INSTR_RE`` 是 EH2 日志格式到 CSV 的第一道契约，字段包含 time、cycle、PC、binary、
+  instruction、operand 和可选 comment。
+* L48-L95：``_process_eh2_sim_log_fd``。函数逐行扫描仿真日志，跳过 ecall 行，匹配
+  retire 记录，解析 rd writeback、输出 full trace 或简化 trace，并累计 instruction count。
+* L96-L115：``process_eh2_sim_log``。该 wrapper 负责打开输入/输出文件、写 CSV header、
+  调用底层解析函数，并在零指令时抛异常，避免空 trace 被误认为通过。
+* L117-L142：``convert_operands_to_abi``。函数把 ``xN`` register 名改成 ABI 名，
+  让 EH2 trace 与 riscv-dv/spike trace 使用同一 operand 表示。
+* L144-L181：``expand_trace_entry`` 和 ``process_imm``。前者展开 trace operand，
+  后者把 branch/jump immediate 从绝对 PC 语义转换为 riscv-dv 期望的 offset 语义。
+* L184-L258：``check_eh2_uvm_log``。该函数读取 UVM log，识别 UVM error/fatal、显式
+  PASS/FAIL、timeout 和上下文行，返回 passed、log_out、failure_mode 三元组，供外部
+  regression 或比较脚本分类失败。
+* L259-L278：CLI ``main``。参数包括 ``--log``、``--csv`` 和 ``--full_trace``，执行路径
+  只做日志到 CSV 的转换；是否运行 Spike 或 compare 由上层 riscv-dv flow 决定。
