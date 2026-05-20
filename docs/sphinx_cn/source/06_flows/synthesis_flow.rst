@@ -1000,3 +1000,126 @@ O-2018.06-SP1 packed-array 处理选项。它不是默认 ``syn-dc`` 入口。
 3. VCS/URG 路径和 NC/IMC 备选路径在本页中是否被分开解释？
 4. 失败时第一份应打开的日志是哪一个，第二步应检查哪个变量或 YAML 配置？
 5. 本页中的 sign-off 数字是否仍为 9/9 PASS、102/104、LEC 31635/31635 和 LINE 95.05%？
+
+§11  v2-49 synthesis 顶层入口全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 synthesis 顶层控制面和两个综合脚本入口的全文源码。这里先覆盖
+``syn/Makefile``、``syn/scripts/dc_synth_block.tcl`` 与 ``syn/yosys/eh2_synth.tcl``；
+LEC block/top Tcl 脚本族另按独立阶段处理，避免把综合入口、Formality 比对策略和历史诊断脚本
+混在同一个提交里。
+
+§11.1  ``syn/Makefile`` — synthesis/LEC make 控制面全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/Makefile
+   :language: make
+   :linenos:
+   :caption: syn/Makefile:全文
+
+逐段精读：
+
+* L1-L18：文件头列出 ``syn-yosys``、``syn-dc``、``lec``、``syn-full`` 和 ``clean``，并把
+  Yosys 0.55 的 SystemVerilog 解析限制写成 known limitation。当前商业路径是 ``make syn-dc``。
+* L19-L32：变量区定位 ``SYN_DIR``、``EH2_ROOT``、``BUILD_DIR``、Yosys binary、netlist/report/log
+  路径。``YOSYS ?=`` 允许调用者覆盖 open-source synthesis 工具位置。
+* L34-L42：DC/Formality wrapper 是 ``syn/build/eh2_dc_wrapper.sv``，由
+  ``scripts/gen_dc_wrapper.sh`` 重新生成。注释明确 wrapper 是可再生 build artifact，不应提交。
+* L44-L59：``BLOCK_LEC_TOPS`` 和 ``BLOCK_LEC_LABELS`` 定义 9 个 block-level LEC 对象：
+  DEC、EXU ALU/MUL/DIV、LSU、PIC、DMA、DBG 和 IFU。run 目录分成 DC 与 FM 两类，``BLOCK_LEC_RESYNTH``
+  控制是否强制重综合 block netlist。
+* L61-L75：``check-yosys`` 检查 Yosys 是否可执行，``check-prep`` 创建 build 目录并检查
+  ``syn/bin/yosys`` 与 ``beh_lib_syn.sv``。这只是 open-source path 的 pre-flight，不证明 EH2 已可被
+  Yosys 综合。
+* L76-L86：``$(WRAPPER)`` 依赖 wrapper generator 和上游 design ``flist``，缺失或依赖更新时执行
+  ``bash scripts/gen_dc_wrapper.sh``。``wrapper`` target 只打印 wrapper ready。
+* L88-L104：``syn-yosys`` 运行 ``yosys -Q < syn/yosys/eh2_synth.tcl``，stdout/stderr 写入
+  ``syn/build/syn_yosys.log``，随后打印错误/成功摘要和输出文件状态。由于当前 Tcl 是 error sentinel，
+  该 target 的价值是产生可审计失败日志。
+* L106-L118：``syn-dc`` 依赖 wrapper，检查 ``dc_shell`` 后进入 ``syn/build/dc_run`` 执行
+  ``syn/scripts/dc_synth.tcl``。缺少 Design Compiler 时直接打印错误和 SDC 路径并退出 1。
+* L120-L159：``block_lec`` 先检查 ``dc_shell`` 和 ``fm_shell``，再遍历
+  ``BLOCK_LEC_TOPS`` 做 per-block DC 综合；IFU 额外设置 ``R3C_SIMPLE_COMPILE=1``。第二个循环按
+  label 调用 ``lec_blocklevel/lec_<label>.tcl``，最后运行 ``lec_summary.py``。
+* L161-L172：``lec`` 是旧 Yosys equivalence path，调用 ``syn/lec/eh2_lec.tcl`` 并把 log 写入
+  ``syn/build/lec.log``。当前 release 口径使用 block-level Formality，不把这里当主 LEC 证据。
+* L174-L183：``syn-full`` 依赖 ``syn-yosys`` 和 ``lec``。因为 ``syn-yosys`` 当前是 explicit
+  failure sentinel，所以该组合 target 保留历史语义，不等同于当前商业 sign-off 主路径。
+* L185-L188：``clean`` 删除整个 ``syn/build``，包括 wrapper、Yosys/DC/LEC logs 和 block-level
+  run/report 目录；源 Tcl、RTL 和 SDC 不在删除范围内。
+
+接口关系：
+
+* 被调用：顶层 ``make synth``、``make syn_yosys``、``make syn_dc``、``make lec``、
+  ``make block_lec`` 会委托到本文件。
+* 调用：``bash scripts/gen_dc_wrapper.sh``、Yosys、Design Compiler、Formality 和
+  ``syn/scripts/lec_summary.py``。
+* 共享状态：读取上游 design flist、``syn/scripts``、``syn/yosys``、``syn/lec``；
+  写 ``syn/build`` 下的 wrapper、netlist、report、log、SVF、DDC 和 LEC summary。
+
+§11.2  ``dc_synth_block.tcl`` — R3-C per-block DC synthesis 全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/dc_synth_block.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/dc_synth_block.tcl:全文
+
+逐段精读：
+
+* L1-L7：脚本头说明它服务 R3-C block-level LEC，并要求调用前设置 ``R3C_BLOCK_TOP``。
+  环境变量缺失时打印错误并 ``exit 1``，避免 DC 在空 top 上生成无意义报告。
+* L9-L16：``TOP`` 来自环境变量，target/link library 指向 Synopsys O-2018.06-SP1 的
+  ``class.db`` 与 ``gtech.db``，并设置 SystemVerilog 2012 与 keep port names。该工具版本与
+  ADR-0013/0019/0020 的商业路径一致。
+* L17-L30：输出根在 ``syn/build/lec_blocklevel``，run 目录按 top 拆分到 ``run/dc/$TOP``。
+  ``set_svf`` 写每个 block 独立 SVF，供后续 Formality 对齐综合变换。
+* L31-L35：抑制一组 lint、VER、UID 和 ELAB message。这里是降低 DC log 噪音，不是 waiver
+  设计错误；真正失败仍会由 ``check_design``、compile 或后续 LEC 报告暴露。
+* L36-L43：search path 包含 run dir、block synth dir、本仓库 ``syn/include``、上游 snapshot
+  和 design include/lib。这个设置专门解决 ``include "eh2_param.vh"`` 与 package typedef 可见性。
+* L45-L50：脚本分析 ``syn/build/eh2_dc_wrapper.sv``，elaborate 当前 block top，随后 link、uniquify
+  和 check_design。wrapper 单编译单元让 EH2 package/parameter typedef 对所有 include 源可见。
+* L52-L55：``R3C_VERIFY_PRIORITY=1`` 时对所有对象设置 high verification priority，用于 LEC-oriented
+  datapath preservation；默认不启用。
+* L57-L62：如果 top 有 ``clk`` 端口，则创建 2.0 ns clock；没有 top-level clk 时只打印提示并继续。
+  这允许某些组合或特殊 wrapper block 仍可走同一脚本骨架。
+* L64-L72：设置 fanout/transition 约束；``R3C_SIMPLE_COMPILE=1`` 时使用 ``compile -map_effort
+  medium``，否则使用 ``compile_ultra -no_autoungroup -no_boundary_optimization``。IFU 在 Makefile
+  里走 simple compile，是为了提高 LEC-oriented netlist 的可比性。
+* L74-L80：生成 area、timing、QoR report，执行 Verilog 命名规则，然后写 DDC 与 Verilog netlist 到
+  ``lec_blocklevel/synth``。
+* L81-L87：关闭 SVF，打印生成的 netlist、DDC、SVF 路径并以 0 退出。后续 Formality 脚本按同名
+  top/label 读取这些产物。
+
+接口关系：
+
+* 被调用：``syn/Makefile:block_lec`` 的 DC loop 通过 ``dc_shell -f`` 调用。
+* 调用：Design Compiler ``analyze``、``elaborate``、``link``、``compile``/``compile_ultra``、
+  ``write`` 和 report 命令。
+* 共享状态：读取 ``syn/build/eh2_dc_wrapper.sv`` 与库文件；写
+  ``syn/build/lec_blocklevel/synth/<TOP>.v``、``.ddc``、``.svf`` 和 report。
+
+§11.3  ``eh2_synth.tcl`` — Yosys explicit failure sentinel 全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/yosys/eh2_synth.tcl
+   :language: tcl
+   :linenos:
+   :caption: syn/yosys/eh2_synth.tcl:全文
+
+逐段精读：
+
+* L1-L4：脚本标题标明状态是 open-source-incompatible，目标原本是 ``eh2_veer`` core wrapper。
+* L5-L10：blocker 列出 Yosys 0.55 无法解析 module header 中的 ``import eh2_pkg::*``、
+  ``eh2_param.vh`` 中的 struct literal 参数默认值，以及 sv2v binary 的 GLIBC 版本限制。
+* L11-L19：注释记录未来可行路径：先用 sv2v 或 DC elaboration 生成 flat Verilog-2001，再由
+  Yosys 读取 flat file 并 synth。旧 ``rvjtag_tap`` 假综合已经移除。
+* L21-L24：脚本运行时只打印 explicit error、ADR/syn README 提示和商业工具建议，然后
+  ``exit 1``。这让 ``make syn-yosys`` 的失败可重复、可解释，不会伪造一个非 EH2 core 的成功结果。
+
+接口关系：
+
+* 被调用：``syn/Makefile:syn-yosys`` 通过 stdin 把该 Tcl 传给 Yosys。
+* 调用：只使用 Tcl ``puts`` 和 ``exit``，不读取 RTL。
+* 共享状态：错误文本写入 ``syn/build/syn_yosys.log``；不生成 netlist 或 report。

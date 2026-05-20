@@ -1341,3 +1341,57 @@ NC CCF 内部存在 block/expr/toggle/fsm/covergroup 选择规则，文档中只
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§26  v2-49 ``syn/include/eh2_param.vh`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``syn/include/eh2_param.vh`` 是综合/LEC wrapper 使用的 EH2 参数快照。它不是 YAML profile
+的简单镜像，而是把 ``eh2_param_t pt`` 结构体一次性初始化为具体位宽、地址、cache、memory、
+bus、PIC 和 timer 参数。许多 RTL 模块通过 ``#(`include "eh2_param.vh")`` 获得同一个
+``pt``，因此该文件决定 elaboration 阶段的端口宽度、bank 数、region 地址和 feature enable。
+
+.. literalinclude:: ../../../../syn/include/eh2_param.vh
+   :language: systemverilog
+   :linenos:
+   :caption: syn/include/eh2_param.vh:全文
+
+逐段精读：
+
+* L1-L8：文件以 ``parameter eh2_param_t pt = '{`` 开始，随后给出 atomic、BHT 地址范围、BHT
+  depth、GHR hash/size 和 BHT 总 size。这里已经使用 SystemVerilog struct literal，这正是
+  Yosys 0.55 当前无法直接解析的 blocker 之一。
+* L9-L17：bitmanip feature enable。Zba、Zbb、Zbc、Zbs 打开，Zbe/Zbf/Zbp/Zbr 关闭；这些参数影响
+  decode/EXU 支持的扩展集合，不等同于 ``misa`` 中所有位。
+* L17-L35：BTB 参数包括 index bit、tag size、bypass、fold/hash、array depth、offset size 和是否
+  使用 SRAM。IFU/branch predictor 相关 RTL 通过这些字段决定 BTB 结构和位切片。
+* L36-L39：bus build 选择当前启用 AXI4/native，``BUILD_AHB_LITE`` 为 0；``BUS_PRTY_DEFAULT`` 给
+  bus priority 默认值。SoC/TB 和 LEC shim 中同时存在 AXI/AHB 端口，但当前参数选择 AXI 主路径。
+* L40-L63：data access region 地址、enable 和 mask 共 8 组。前 4 组 enable 为 1，后 4 组关闭；
+  mask 决定地址匹配窗口大小。
+* L64-L76：DCCM 参数定义 bank bits、地址 bits、byte/data/ECC/fdata width、enable、index bits、
+  bank 数、region、start address、size 和 width bits。DCCM wrapper、LSU 和 integrity tests 都依赖
+  这些字段。
+* L77-L83：DIV、DMA 和 fast interrupt redirect 参数。``DIV_NEW`` 打开；DMA buffer depth、bus id、
+  priority 和 tag 决定 DMA controller 与 bus glue 的宽度。
+* L84-L115：ICache 参数覆盖 bank、beat、bypass、data/tag depth、ECC、enable、line size、ways、
+  status bits、waypack 等。ICache/ICCM 相关章节引用这些值来解释 tag/data array 和 line fill。
+* L116-L127：ICCM 参数定义 bank、bits、enable、ICCM+ICache 组合、index、bank 数、region、start
+  address 和 size。当前 ICCM 与 ICache 都启用。
+* L128-L130：IFU bus id、priority 和 tag 宽度。它们影响 IFU AXI/AHB transaction tag 及 wrapper
+  端口宽度。
+* L131-L154：instruction access region 地址、enable 和 mask，同 data access 一样提供 8 组窗口。
+  前 4 组 enable，后 4 组关闭。
+* L155-L164：load-to-use、LSU bus、non-blocking load 数量、store buffer depth 和 no-ICCM/no-ICache
+  配置。``NO_ICCM_NO_ICACHE`` 为 0，说明当前配置不是无 ICCM/ICache profile。
+* L165-L179：secondary ALU、thread 数、PIC、return stack、system bus 和 timer legal enable。当前
+  ``NUM_THREADS`` 为 1，``PIC_TOTAL_INT`` 为 127，``TIMER_LEGAL_EN`` 打开。
+* L180-L181：结构体 literal 结束，随后保留一行超长注释形式的 packed 参数镜像。该注释可作为历史
+  工具或调试对照，但真正被 include 的是前面的 typed struct parameter。
+
+接口关系：
+
+* 被调用：``eh2_veer``、``eh2_veer_wrapper``、LEC shim、memory/IFU/LSU/PIC/DMA/DBG 等模块的
+  ``#(`include "eh2_param.vh")`` 参数块。
+* 调用：无运行期调用；它是 elaboration-time 参数数据。
+* 共享状态：统一定义 ``pt`` 结构体字段，影响 RTL 端口宽度、generate 展开、地址 decode、
+  memory/cache/PIC/bus 配置和 synthesis/LEC wrapper 解析。
