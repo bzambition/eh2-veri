@@ -1997,3 +1997,237 @@ SystemVerilog 侧只看见 `DPI-C` 函数，C++ 侧先把 `chandle` 还原成 `C
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§12  v2-27 cosim C++/DPI 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节用于 v2-27 行级门禁：把 ``dv/cosim`` 目录中 5 个 C++/DPI 源文件全部
+纳入 ``literalinclude``，并按源码顺序解释每一段承担的职责。前面 §2-§10 已经
+围绕关键函数讲过调用关系，本节更像源码旁注：读者可以从文件第一行一路读到
+最后一行，知道每个结构、包装函数和 fixup 分支为什么存在。
+
+§12.1  ``cosim_dpi.svh``：SystemVerilog 可见的 DPI 合约
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/cosim/cosim_dpi.svh``）：
+
+.. literalinclude:: ../../../../dv/cosim/cosim_dpi.svh
+   :language: text
+   :linenos:
+   :caption: dv/cosim/cosim_dpi.svh
+
+源码精读：
+
+* 第 1-L7 行是文件身份和约束说明：这是 SystemVerilog DPI-C import 声明层，
+  所有 per-hart API 都显式带 ``thread_id``。这避免双线程 EH2 平台在 C++ 侧
+  只能靠全局状态猜当前 hart。
+* 第 8-L23 行定义生命周期和内存映射入口。``riscv_cosim_init`` 返回
+  ``chandle``，SV 侧不理解 C++ 类型，只保存一个不透明句柄；
+  ``destroy`` 负责释放实例，``add_memory`` 负责把 testbench 加载出来的内存
+  区间告诉 Spike 侧 bus。
+* 第 25-L35 行是每条 retired instruction 的主入口。Scoreboard 把 DUT 写回寄存器、
+  写回数据、退休 PC、同步 trap 标志、被 kill 的写回标志和 hart 编号传给
+  C++，C++ 再让 Spike 走一步并做 PC、GPR、trap 状态比对。
+* 第 37-L79 行是状态同步 API。``set_mip`` 区分 pre/post MIP，供 C++ 判断
+  这条指令入口是否应该取中断；``set_nmi``、``set_nmi_int``、``set_debug_req``
+  和 ``set_mcycle`` 把 DUT 的异步状态、debug 请求和计数器采样顺序传给 Spike；
+  ``set_csr`` 用于直接把 DUT 观察到的 CSR 值灌入参考模型。
+* 第 81-L95 行是 D-side 访问通知。SV 侧把 AXI 监控得到的 store/load、数据、
+  word 对齐地址、byte enable、错误、misaligned 两半、M-mode 访问和 widened
+  load 标志全部传入 C++。这些字段会被打包成 ``DSideAccessInfo`` 并进入 per-hart
+  pending 队列。
+* 第 97-L109 行处理取指侧错误和二进制加载。``set_iside_error`` 告诉 C++ 下一次
+  Spike 取到对应 aligned PC 时应产生取指错误；``write_mem_byte`` 是最小粒度的
+  backdoor 写入口，常用于把程序镜像逐字节装入 Spike 内存。
+* 第 111-L130 行是错误通道。SV 侧先读错误数量和字符串，再调用 ``clear_errors``
+  清空本次 step 的诊断，避免旧 mismatch 污染下一条指令。
+* 第 132-L152 行是统计和 trap CSR 查询。``get_insn_cnt`` 给 scoreboard 或报告层
+  读取已匹配指令数；``get_mcause``、``get_mepc``、``get_mtvec`` 用于 RISK-9
+  这类 trap CSR 对齐检查。
+
+§12.2  ``cosim.h``：SV/C++ 之间的抽象接口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/cosim/cosim.h``）：
+
+.. literalinclude:: ../../../../dv/cosim/cosim.h
+   :language: cpp
+   :linenos:
+   :caption: dv/cosim/cosim.h
+
+源码精读：
+
+* 第 1-L12 行说明接口定位。EH2 没有像 Ibex 那样直接拿 RVFI 的完整每指令视图，
+  而是把 trace、DUT probe 和 AXI monitor 的观测拼成比较输入，所以这个抽象层
+  必须同时覆盖 PC/写回、CSR、取指错误和 D-side 访存。
+* 第 13-L19 行是 include guard 和标准库依赖。``cstdint`` 固定跨 DPI 的位宽，
+  ``string``、``vector`` 用于错误消息集合，避免把 C++ 容器细节暴露给 SV。
+* 第 20-L32 行定义 ``DSideAccessInfo``。``store``、``data``、``addr`` 和 ``be``
+  描述 AXI word 级访问；``error``、``misaligned_first``、``misaligned_second``
+  和 ``misaligned_first_saw_error`` 描述异常/拆分访存；``m_mode_access`` 与
+  ``widened_load`` 保留 EH2 特有的权限和总线扩宽语义。
+* 第 34-L47 行是 ``Cosim`` 生命周期和 backdoor memory 接口。C++ 实现类可以是
+  Spike，也可以将来换成其他 ISS；SV 侧只通过 ``chandle`` 间接调用这些虚函数。
+* 第 49-L61 行是核心 ``step`` 合约。``write_reg=0`` 表示无 GPR 写回，``pc`` 是 DUT
+  retire PC，``sync_trap`` 区分正常退休和同步异常，``suppress_reg_write`` 表示
+  DUT 取消了原本 Spike 会看到的 load/div 写回。
+* 第 63-L90 行定义运行时状态同步合约。中断、NMI、debug、``mcycle``、CSR、D-side
+  和 I-side error 都在 ``step`` 前后按 scoreboard 既定顺序调用，因此 Spike 状态
+  可以跟 DUT 的异步边界对齐。
+* 第 92-L105 行是只读结果接口。错误列表给 SV 侧打印 UVM 报告；``clear_errors``
+  划分 step 边界；``get_insn_cnt`` 和 3 个 trap CSR getter 给统计与 trap 对比复用。
+* 第 107 行关闭 include guard。这个文件没有任何 Spike 头依赖，是刻意保留的窄接口，
+  这样 ``cosim_dpi.cc`` 可以只面向 ``Cosim`` 编译，而不需要知道 ``SpikeCosim``
+  的内部数据结构。
+
+§12.3  ``cosim_dpi.cc``：DPI C shim 和类型转换层
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/cosim/cosim_dpi.cc``）：
+
+.. literalinclude:: ../../../../dv/cosim/cosim_dpi.cc
+   :language: cpp
+   :linenos:
+   :caption: dv/cosim/cosim_dpi.cc
+
+源码精读：
+
+* 第 1-L14 行把 C++ 实现包进 ``extern "C"``。DPI import 需要 C ABI 名字，
+  不能暴露 C++ name mangling；``svdpi.h`` 提供 ``svOpenArrayHandle`` 访问函数，
+  ``stdexcept`` 用于 step 异常保护。
+* 第 16-L29 行实现销毁和内存区添加。每个函数先把 ``void*`` 转回 ``Cosim*``，
+  再检查空指针；``base_addr`` 和 ``size`` 显式转成 C++ 侧无符号地址与长度。
+* 第 31-L60 行实现 open array backdoor read/write。SV 动态数组不能直接当作 C
+  指针使用，必须通过 ``svGetArrayPtr`` 拿到底层连续存储；拿不到指针时直接返回
+  失败，避免 C++ 侧解引用无效内存。
+* 第 62-L92 行包装 ``step``。这里把 SV 的 ``int`` 参数转成 C++ 的 ``uint32_t`` 和
+  ``bool``，并捕获 ``std::exception`` 与未知异常。任何异常都转成 mismatch 返回，
+  同时打印 PC 和 thread，防止 VCS 因 C++ 异常穿过 DPI 边界而崩溃。
+* 第 94-L137 行是中断、NMI、debug、``mcycle`` 和 CSR 的薄包装。每个函数只做空句柄
+  检查与类型转换，真正语义都在 ``Cosim`` 实现里。这种分层让 DPI 层保持机械、可审计。
+* 第 139-L163 行把 12 个 SV 标量参数组装为 ``DSideAccessInfo``。这一步是 D-side
+  比对的关键边界：SV 看到的是 AXI/scoreboard 字段，C++ 看到的是一个结构化 pending
+  access，后续 ``check_mem_access`` 只消费这个结构。
+* 第 165-L178 行处理取指错误和逐字节写内存。``write_mem_byte`` 把 ``data & 0xFF``
+  截断为 ``uint8_t``，保证 SV 传入的 ``int`` 不会把高位误写进 Spike 内存。
+* 第 180-L225 行是错误读取、结果查询和清错。这里把 C++ vector size 映射为 SV ``int``，
+  把字符串返回为 ``const char*``，并在越界或异常时返回空字符串/失败码。
+* 第 227-L255 行暴露指令计数和 trap CSR getter。getter 不捕获异常，依赖上层在合法
+  handle 和合法 thread 下调用；返回类型为 32-bit，正好匹配 EH2 RV32 CSR 宽度。
+* 第 257 行关闭 ``extern "C"``。本文件没有定义 ``riscv_cosim_init``，因为 factory
+  位于 ``spike_cosim.cc``，那里才知道该构造哪个具体 ``Cosim`` 实现。
+
+§12.4  ``spike_cosim.h``：Spike 适配器的状态模型
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/cosim/spike_cosim.h``）：
+
+.. literalinclude:: ../../../../dv/cosim/spike_cosim.h
+   :language: cpp
+   :linenos:
+   :caption: dv/cosim/spike_cosim.h
+
+源码精读：
+
+* 第 1-L23 行声明文件身份、include guard、标准库依赖和 Spike 头文件。这里首次引入
+  ``processor_t``、``bus_t``、``mem_t``、``simif_t`` 等 Spike 类型，因此它属于具体
+  实现层，而不是通用 DPI 合约层。
+* 第 24-L28 行定义 EH2 ``marchid`` 和最大线程数。``0x56524545`` 对应 ``VEER``，
+  ``COSIM_MAX_THREADS=2`` 与 EH2 双硬件线程配置对齐。
+* 第 30-L44 行声明 ``SpikeCosim`` 的双重继承：它既是 Spike 需要的 ``simif_t``，
+  负责处理 MMIO/load/store 回调；也是 SV 侧需要的 ``Cosim``，负责 step 和状态同步。
+* 第 45-L72 行列出对 ``Cosim`` 的全部实现。这里与 ``cosim.h`` 一一对应，读者可以
+  用这段确认 SV import、DPI shim、抽象接口和 Spike 实现没有漏接。
+* 第 74-L91 行是全局共享状态：线程数、ISA parser、每个 hart 的 Spike processor、
+  可选 commit log、当前 MMIO 回调对应的 ``active_thread``、共享 memory bus 以及
+  错误列表。
+* 第 93-L99 行定义 ``PendingMemAccess``。它保存 DUT 侧 D-side 访问、Spike 已经看过
+  的 byte enable，以及 atomic store 标志；这是把 AXI monitor 时序和 Spike MMIO
+  时序解耦的缓冲节点。
+* 第 100-L125 行定义 per-hart 状态。NMI mode、pending I-side error、指令计数、
+  NMI ``mstack``、pending D-side 队列、LR/SC reservation 和上一条 step PC 都按 hart
+  分开，避免双线程运行时状态串扰。
+* 第 127-L131 行是 ``get_processor`` 辅助函数。它用断言保护 thread 范围，并返回
+  对应 ``processor_t``，后续所有 helper 都从这里取得 Spike hart。
+* 第 133-L165 行是内部 helper 清单。初始化、CSR fixup、PMP misaligned 修正、atomic
+  修正、指令分类、retire 比对、GPR 写回比对、suppress 写回、CSR 写回、NMI 退出、
+  中断/debug 处理和 widened load pair 判断都在这里列清楚。
+* 第 167-L174 行定义 D-side 比对结果枚举和 ``check_mem_access``。返回值区分普通通过、
+  比对失败和 bus error，调用方可以决定是记录错误、让 Spike trap，还是把错误作为
+  DUT 已知异常消费掉。
+
+§12.5  ``spike_cosim.cc``：Spike 驱动、比对和 EH2 语义修正
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/cosim/spike_cosim.cc``）：
+
+.. literalinclude:: ../../../../dv/cosim/spike_cosim.cc
+   :language: cpp
+   :linenos:
+   :caption: dv/cosim/spike_cosim.cc
+
+源码精读：
+
+* 第 1-L23 行引入实现依赖。除了本地头文件，还需要 Spike 的 config、CSR、decode、
+  device、MMU、processor 和 simif API；这说明本文件直接站在 ISS 内部接口上工作。
+* 第 24-L54 行是构造函数。它创建可选 trace log、解析 ISA 字符串，为每个 hart 创建
+  ``processor_t``，配置 PMP region、MHPM counter、PMP granularity，再调用
+  ``initial_proc_setup`` 填入 EH2 特有 CSR 和初始 PC/mtvec。
+* 第 56-L71 行实现 ``addr_to_mem``。普通访存保持走 MMIO 回调，方便和 DUT D-side
+  通知比较；只有 atomic memory instruction 需要 host-backed memory 时才返回
+  ``mem_t`` 指针，绕开 Spike 对纯 MMIO LR/SC 的限制。
+* 第 73-L111 行实现 ``mmio_load``。它先让 Spike bus 读数据，再用当前 PC 区分取指
+  范围和 D-side 访问；若命中 pending I-side error，就把这次 load 变成 bus error；
+  若不是取指范围，则调用 ``check_mem_access`` 做 D-side load 诊断。
+* 第 113-L138 行实现 ``mmio_store``。store 先写入 Spike bus，让参考模型内存保持
+  ISA 结果；随后调用 ``check_mem_access`` 记录诊断，但不让 store 比对失败直接让
+  Spike trap，避免 EH2 store buffer 合并造成后续指令级联失配。
+* 第 140-L158 行是 simif 的剩余基础接口与 backdoor memory。``proc_reset`` 和
+  ``get_symbol`` 在当前集成中为空实现；``add_memory`` 创建 ``mem_t`` 并挂到 bus；
+  backdoor read/write 直接调用 bus。
+* 第 160-L272 行是指令分类 helper。``pc_is_mret``、``pc_is_debug_ebreak``、
+  ``pc_is_load`` 和 ``pc_is_div_or_rem`` 都通过 backdoor 从 Spike memory 取当前 PC
+  处指令，服务于 NMI 退出、debug ebreak 快路径、suppress load/div 写回判断。
+* 第 278-L297 行实现早期中断处理。它让 Spike 在「应该只改变 trap 状态、不退休新指令」
+  的假设下 step 一次，如果 ``last_inst_pc`` 不是 ``PC_INVALID``，就说明 Spike 意外
+  执行了指令，需要记录错误。
+* 第 303-L454 行是 ``step`` 主循环。它先处理 debug ebreak 特例，再在 suppress 写回
+  时保存 Spike 原寄存器值，记录初始 PC 并执行 ``proc->step(1)``；随后区分同步 trap、
+  异步 trap 进入 ISR 和正常 retired instruction，最后做 mret/NMI 退出、I-side error
+  消费、寄存器恢复、retire 比对、atomic TLB flush、诊断错误清理和指令计数递增。
+* 第 456-L557 行处理 retired instruction 与同步 trap。PC 必须与 DUT retire PC 匹配；
+  GPR 写回只能有一个，CSR 写回进入 ``on_csr_write``；同步 trap 要求 DUT 不写 GPR，
+  并在 load/store access fault 或内部 NMI cause 下修正 pending D-side 队列。
+* 第 559-L657 行处理 GPR 数据和 suppress 写回。SC.W 的 rd 结果以 DUT 为准，必要时
+  写回 Spike GPR 保持后续同步；非阻塞 load 的数据差异被当作 EH2 store-forwarding
+  时序容忍；suppress 写回只允许 load 或 div/rem，并从压缩/非压缩指令中解出目标 rd。
+* 第 659-L683 行处理 CSR 写回和 NMI 退出。CSR 写回统一进入 ``fixup_csr``，把 Spike
+  的标准 WARL 行为调整到 EH2；``leave_nmi_mode`` 从保存的 ``mstack`` 恢复 ``mstatus``、
+  ``mepc`` 和 ``mcause``。
+* 第 685-L753 行初始化每个 Spike hart。除了 PC、``mtvec``、``marchid`` 和 MMU 能力，
+  还初始化 trigger module、MHPM event CSR，以及 Spike 原生不认识的 EH2 custom CSR。
+* 第 755-L872 行是 DUT 状态通知入口。``set_mip`` 用 pre/post MIP 决定是否提前触发
+  interrupt；``set_nmi`` 和 ``set_nmi_int`` 保存 NMI 入口前 CSR；``set_debug_req``
+  控制 halt request；``set_mcycle`` 只消费顺序元数据；``set_csr`` 直接写 CSR；
+  ``notify_dside_access`` 把 DUT 访存压入 per-hart 队列。
+* 第 874-L908 行处理 widened load、取指错误、错误列表和指令计数。widened load pair
+  必须是两个连续 full-word load，地址相差 4，错误标志一致；取指错误保存 aligned
+  地址，等待下一次 Spike fetch 消费。
+* 第 910-L974 行是 PMP misaligned fixup。它只在 PMP region 启用后工作，扫描 pending
+  D-side 队列并移除已经标记 error 的半边，保留未出错半边给后续比对消费。
+* 第 976-L1068 行是 atomic 辅助。``pc_is_atomic_mem_instr``、``is_sc_instr`` 和
+  ``is_lr_instr`` 识别 RV32A 指令；``atomic_store_fixup`` 追踪 LR reservation，并在
+  SC/AMO store 半边接受 EH2 LSU 级 reservation 与 Spike 内部 reservation 的差异。
+* 第 1070-L1339 行是 ``fixup_csr``。它对 ``mstatus``、``misa``、``mtvec``、``mcause``、
+  ``mrac``、``mpmc``、PIC 相关 CSR、``mscause``、``mfdc``、``mcgc``、ECC threshold、
+  debug CSR、PMP CSR 和剩余 EH2 custom CSR 分别应用 EH2 WARL 或只读/写零行为。
+* 第 1345-L1586 行是 ``check_mem_access``。它先处理无 pending access 的 load/store
+  容忍，再处理 widened load pair 选择、地址/类型比对、byte enable 比对、数据比对、
+  misaligned 两半一致性、bus error 返回和 pending 队列弹出，是 D-side AXI 观测与
+  Spike MMIO 访问真正汇合的地方。
+* 第 1588-L1602 行暴露 trap CSR getter。每个 getter 直接读 Spike state 并截成
+  32-bit，供 SV 侧在 trap 比对点读取 ``mcause``、``mepc`` 和 ``mtvec``。
+* 第 1604-L1661 行是 DPI factory。它解析 ``isa``、``pc``、``mtvec``、PMP、MHPM、
+  trace 和 ``num_threads`` 配置，限制线程数到 1 到 ``COSIM_MAX_THREADS``，创建
+  ``SpikeCosim``，最后返回调整后的 ``Cosim`` 子对象指针；这是双重继承场景下避免
+  DPI wrapper 把 ``simif_t`` vtable 当作 ``Cosim`` vtable 的关键细节。
