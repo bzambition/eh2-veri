@@ -2188,3 +2188,155 @@ implementation netlist，加载同名 SVF，执行 ``match``/``verify``，最后
   ``report_status``。
 * 共享状态：读取 ``eh2_exu`` netlist/SVF；写 ``lec_exu_matched_last.rpt``、
   ``lec_exu_unmatched_points.rpt`` 和 ``lec_exu_match_status.rpt``。
+
+§17  v2-51 DEC/IFU/LSU block-level LEC 主脚本全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐剩余 4 个 block-level 主路径脚本全文：``lec_dec.tcl``、``lec_ifu.tcl``、
+``lec_lsu.tcl`` 和 ``lec_lsu_analyze.tcl``。DEC、IFU、LSU 的共同问题不是缺少
+reference/implementation 读入骨架，而是 RTL 侧 packed struct/2D packed array 在综合 netlist
+侧被 flatten 后，Formality 需要显式 ``set_user_match`` 才能把 compare point 对齐。因此本节按
+「公共加载 → user match 映射族 → match/verify/report」的顺序解释源码。
+
+§17.1  ``lec_dec.tcl`` — DEC packed packet 与 trace 映射全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_blocklevel/lec_dec.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_blocklevel/lec_dec.tcl:全文
+
+逐段精读：
+
+* L1-L9：关闭错误后继续，加载 ``lec_common.tcl``，选择 ``eh2_dec`` 为 reference top，随后读入
+  implementation、设置 implementation top 并加载 ``eh2_dec`` SVF。到 L9 为止，脚本仍是标准
+  block-level LEC 入口。
+* L11-L14：定义 reference path ``r:/WORK/eh2_dec``、implementation path ``i:/WORK/eh2_dec``，
+  并初始化 ``user_match_count``。后续每个 ``set_user_match`` 都会递增这个计数，最终写入审计文件。
+* L15-L28：处理 ``dec_tlu_ic_diag_pkt``。``icache_wrdata[0:70]`` 映射到 flatten 后的 bit 19..89，
+  ``icache_dicawics[0:16]`` 映射到 bit 2..18，``icache_rd_valid`` 和 ``icache_wr_valid`` 分别映射
+  到 bit 1 和 bit 0。这里把 ICache 诊断包从结构字段重新对齐为 packed bit vector。
+* L29-L55：对 ``i0_predict_p_d`` 和 ``i1_predict_p_d`` 两组 branch prediction packet 做同构映射。
+  ``prett[1:31]`` 被移到 bit 14..44，``hist[0:1]`` 被移到 bit 11..12，随后把 ``boffset``、
+  ``bank``、``way``、``ataken``、``valid``、``pc4``、``misp``、``br_error``、``br_start_error``、
+  ``pcall``、``pret`` 和 ``pja`` 对齐到固定 bit index。两个 issue slot 复用同一张字段表。
+* L57-L83：映射 LSU request packet ``lsu_p`` 的单 bit 字段，覆盖 atomic、barrier、load/store、
+  size、pipe、sign、stack、thread id 和 bypass 标志。字段表中的 index 是 implementation flatten 后的
+  bit 位置。
+* L84-L95：继续处理 ``lsu_p`` 中的 multi-bit 字段：``atomic_instr[0:4]`` 映射到 bit 22..26，
+  三组 ``store_data_bypass_e4_c*`` 各 2 bit 分别映射到 bit 5..6、3..4、1..2。
+* L97-L108：映射 trace packet 中 instruction valid、exception、interrupt 和 64-bit address。
+  这段只覆盖 ``trace_rv_trace_pkt[0]``，说明当前单 thread 配置下 trace compare point 的显式映射集中
+  在 thread 0。
+* L110-L123：把 user match 总数写入 ``lec_dec_user_match_count.txt``，随后执行 ``match``、
+  默认 ``verify``、``r3c_write_reports dec`` 和 ``exit 0``。该 count 文件是解释 DEC 人工匹配范围的
+  直接证据。
+
+接口关系：
+
+* 被调用：``syn/Makefile:block_lec`` 中 label 为 ``dec`` 的 Formality 子任务。
+* 调用：``lec_common.tcl`` helper、Formality ``set_user_match``、``match``、``verify`` 和 report
+  命令。
+* 共享状态：读取 ``eh2_dec`` netlist/SVF；写 ``dec`` report 和
+  ``lec_dec_user_match_count.txt``。
+
+§17.2  ``lec_ifu.tcl`` — IFU 2D packed array 与 branch packet 映射全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_blocklevel/lec_ifu.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_blocklevel/lec_ifu.tcl:全文
+
+逐段精读：
+
+* L1-L10：先设置 ``R3C_PRELOAD_SVF_TOP=eh2_ifu``，再加载公共脚本并完成 ``eh2_ifu`` 的
+  reference/implementation top 对齐。IFU 在 DC 侧使用 simple compile，因此提前加载 SVF 有助于保留
+  可匹配的综合变换上下文。
+* L12-L14：在添加显式 packed-array match 之前先执行一次 ``match``。这一步给 Formality 自动匹配一个
+  机会，也让后续报告能区分自动匹配与人工匹配的增量效果。
+* L15-L25：根据 ``R3C_FORCE_TOP_CONTEXT_IMPL`` 或 synthesized netlist 是否存在，选择 reference 和
+  implementation top path。implementation 有时是 ``eh2_ifu_``，这反映了 top context wrapper 或
+  elaboration 后名字带下划线的差异。
+* L27-L34：映射 ``ic_wr_data[way][bit]``。两路 way、每路 71 bit 被 flatten 成 ``way * 71 + bit``，
+  这是典型 2D packed array 到 1D vector 的线性化规则。
+* L36-L52：映射 ``btb_rw_addr`` 与 ``btb_rw_addr_f1``。每路只映射 bit 1..9，flatten index 是
+  ``way * 9 + (bit - 1)``；bit 0 不在该循环内，说明 reference 侧有效字段从 1 开始。
+* L54-L61：映射 ``btb_sram_rd_tag_f1``，两路 way、每路 5 bit，flatten index 是 ``way * 5 + bit``。
+  这段与 BTB SRAM tag readback 的 packed-array 形态直接相关。
+* L63-L86：定义 ``r3c_ifu_add_brp_matches`` helper，把 branch prediction packet 中 ``way``、
+  ``hist``、``valid``、``bank``、branch error、``prett[1:31]`` 和 ``ret`` 映射到 flatten bit 0..38。
+  该 proc 用 ``upvar`` 递增外层 ``user_match_count``，避免两组 packet 重复写映射代码。
+* L88-L98：对 ``i0_brp``、``i1_brp`` 调用 branch packet helper，并映射 ``ifu_i0_bp_fa_index`` 与
+  ``ifu_i1_bp_fa_index`` 的 9 bit FA index。这里覆盖 IFU branch predictor 两条 issue lane 的核心
+  compare point。
+* L100-L113：写 ``lec_ifu_user_match_count.txt``，再次 ``match``，然后 ``verify``、写 ``ifu``
+  report 并退出。第二次 match 是实际带人工映射的匹配结果，才应作为本脚本后续 verify 的基础。
+
+接口关系：
+
+* 被调用：``syn/Makefile:block_lec`` 中 label 为 ``ifu`` 的 Formality 子任务。
+* 调用：``lec_common.tcl`` helper、局部 proc ``r3c_ifu_add_brp_matches``、Formality
+  ``set_user_match``、``match`` 和 ``verify``。
+* 共享状态：读取 ``eh2_ifu`` netlist/SVF；写 ``ifu`` report 与
+  ``lec_ifu_user_match_count.txt``。
+
+§17.3  ``lec_lsu.tcl`` — LSU error/trigger packet 映射全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_blocklevel/lec_lsu.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_blocklevel/lec_lsu.tcl:全文
+
+逐段精读：
+
+* L1-L9：加载公共脚本，选择 ``eh2_lsu`` 为 reference top，读入 implementation，设置 implementation
+  top 并加载 SVF。LSU 与 DEC 一样，真正的差异集中在 packet flatten 后的字段匹配。
+* L11-L13：定义 LSU reference/implementation path 并初始化 user match 计数。
+* L15-L33：映射 ``lsu_error_pkt_dc3``。``addr[0:31]`` 直接映射到 bit 0..31，
+  ``mscause[0:3]`` 映射到 bit 32..35，``exc_type``、``amo_valid``、``inst_type``、
+  ``single_ecc_error`` 和 ``exc_valid`` 映射到 bit 36..40。该 packet 影响 load/store exception
+  compare point。
+* L35-L53：映射 ``trigger_pkt_any`` 的 4 个 trigger entry。每个 entry 宽 38 bit，``tdata2[0:31]``
+  位于 entry base 后 0..31，``m``、``execute``、``load``、``store``、``match``、``select`` 位于
+  32..37。脚本按 ``trig * 38`` 计算 base，说明 implementation 侧是 4 个 trigger packet 串接后的
+  flat vector。
+* L55-L68：写 ``lec_lsu_user_match_count.txt``，执行 ``match``、默认 ``verify``、写 ``lsu``
+  report 并退出。LSU 主脚本产出的 report 是 sign-off summary 可消费的证明结果。
+
+接口关系：
+
+* 被调用：``syn/Makefile:block_lec`` 中 label 为 ``lsu`` 的 Formality 子任务。
+* 调用：``lec_common.tcl`` helper、Formality ``set_user_match``、``match`` 和 ``verify``。
+* 共享状态：读取 ``eh2_lsu`` netlist/SVF；写 ``lsu`` report 和
+  ``lec_lsu_user_match_count.txt``。
+
+§17.4  ``lec_lsu_analyze.tcl`` — LSU failure analysis 诊断全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_blocklevel/lec_lsu_analyze.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_blocklevel/lec_lsu_analyze.tcl:全文
+
+逐段精读：
+
+* L1-L9：使用与 ``lec_lsu.tcl`` 相同的公共读入流程，目标仍是 ``eh2_lsu``。这保证 analysis 脚本观察
+  的 reference、implementation 和 SVF 与主 LSU LEC 脚本一致。
+* L11-L32：重复 ``lsu_error_pkt_dc3`` 的 user match 映射。诊断脚本不复用主脚本源码，而是复制同一组
+  匹配规则，避免主脚本 verify 失败时还需要改动 sign-off 入口才能做 failure analysis。
+* L34-L51：重复 ``trigger_pkt_any`` 四个 trigger entry 的 flatten 映射。映射与主脚本一致，保证
+  failing point 分析不会因为匹配规则不同而偏离主 LEC 结果。
+* L53-L59：打印 user match 总数，执行 ``match`` 和 ``verify``，随后用
+  ``analyze_points -failing -effort low -limit 20`` 输出最多 20 个 failing point 的低开销分析，再写
+  ``lec_lsu_analysis_results.rpt`` 和标准 ``lsu`` report。该脚本是诊断入口，不应替代主
+  ``lec_lsu.tcl`` 的 sign-off 语义。
+
+接口关系：
+
+* 被调用：人工调试 LSU LEC failing point 时单独运行。
+* 调用：``set_user_match``、``match``、``verify``、``analyze_points``、
+  ``report_analysis_results`` 和 ``r3c_write_reports``。
+* 共享状态：读取 ``eh2_lsu`` netlist/SVF；写 ``lec_lsu_analyze_points.rpt``、
+  ``lec_lsu_analysis_results.rpt`` 与 ``lsu`` report。
