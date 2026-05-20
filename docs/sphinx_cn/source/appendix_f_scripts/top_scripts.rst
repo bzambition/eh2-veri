@@ -1552,3 +1552,45 @@ sign-off gate 阈值文本，并打印仍需额外工具运行时间的项目。
 * L193-L241：``print_summary`` 按 area 汇总统计，并打印缺口列表。
 * L244-L277：CLI 支持 ``--strict``。当前 v2-15/v2-16 先用默认模式暴露缺口，待缺口清零后
   可把 ``--strict`` 接入 release 文档门禁。
+
+§12  v2-35 UVM 输出后处理 Shell 脚本全文行段级精读
+--------------------------------------------------------------------------------
+
+本节把前文摘录式解释升级为全文 ``literalinclude``。``objdump.sh`` 和 ``prettify.sh``
+都属于仿真输出后处理：它们遍历已有输出目录并生成派生文件，不编译 RTL，也不改变
+``result.pkl`` 或 sign-off 判定。
+
+§12.1  ``objdump.sh`` — test object 反汇编
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/objdump.sh
+   :language: bash
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/objdump.sh:全文
+
+逐段精读：
+
+* L1-L4：脚本头说明用途、用法和默认 search root。用户不传参数时扫描 ``./out/run``。
+* L6-L7：``_SEARCH_ROOT`` 取第一个命令行参数或默认值；``find`` 查找所有名字匹配
+  ``test.o`` 的普通文件，并把列表保存到 ``_GET_OBJS``。
+* L9-L12：脚本要求 ``RISCV_TOOLCHAIN`` 已设置。变量缺失时直接打印提示并 exit 1，避免
+  后续调用系统里错误版本的 objdump。
+* L14-L16：对每个 object 调用
+  ``$RISCV_TOOLCHAIN/bin/riscv32-unknown-elf-objdump -d``，输出到 object 同目录的
+  ``test.dump``。这一步只生成反汇编文本，不修改 ELF/object 本身。
+
+§12.2  ``prettify.sh`` — trace log 对齐排版
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/scripts/prettify.sh
+   :language: bash
+   :linenos:
+   :caption: dv/uvm/core_eh2/scripts/prettify.sh:全文
+
+逐段精读：
+
+* L1-L4：脚本头说明用途、用法和默认 search root。不传参数时扫描当前目录。
+* L6-L7：``_SEARCH_ROOT`` 取第一个参数或 ``.``；``find`` 查找匹配
+  ``trace_core*.log`` 的普通文件。
+* L9-L11：对每个 trace log 调用 ``column``，以 tab 为输入分隔符、单个空格为输出分隔符，
+  并把前 5 列右对齐。结果写到同目录 ``trace_pretty.log``，便于人工阅读 retire trace。
