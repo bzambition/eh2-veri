@@ -2340,3 +2340,145 @@ reference/implementation 读入骨架，而是 RTL 侧 packed struct/2D packed a
   ``report_analysis_results`` 和 ``r3c_write_reports``。
 * 共享状态：读取 ``eh2_lsu`` netlist/SVF；写 ``lec_lsu_analyze_points.rpt``、
   ``lec_lsu_analysis_results.rpt`` 与 ``lsu`` report。
+
+§18  v2-52 top-level LEC 基础与诊断 Tcl 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 5 个早期 top-level Formality Tcl 的全文源码：``lec_run.tcl``、
+``lec_svf.tcl``、``lec_p0a.tcl``、``lec_diag.tcl`` 和 ``lec_diag2.tcl``。这些脚本共同读取
+``eh2_dc_wrapper.sv`` 作为 reference、读取 ``eh2_synth.v`` 作为 implementation，并把 top 设置为
+``eh2_veer``。它们记录了从基础 top-level LEC、SVF 引导、P0-A user match 到失败诊断的演进过程；
+当前 release gate 已转向 block-level LEC，因此本节把它们解释为历史/诊断资产，而不是主签核入口。
+
+§18.1  ``lec_run.tcl`` — 基础 top-level Formality 骨架全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_run.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_run.tcl:全文
+
+逐段精读：
+
+* L1-L9：脚本头说明 RC3 v4 加入 ``class.db`` link library；随后设置 ``BUILD_DIR``，把 Formality
+  working files 重定向到 ``syn/build/lec_run``，并尝试设置 ``hdlin_temporary_dir``。这避免临时文件
+  污染主 build 根目录。
+* L11-L21：放宽 elaboration error、设置 relaxed verification mode、抑制常见 SV/ELAB message，并把
+  SV 标准设为 2012。search path 同时包含本仓库 ``syn/include``、上游 snapshot/default、design
+  include 和 design lib。
+* L23-L26：读取 Synopsys O-2018.06-SP1 的 ``class.db`` 与 ``gtech.db``，用于解析综合 netlist 中的
+  standard cell 和 GTECH cell reference。
+* L28-L38：读取 reference wrapper ``eh2_dc_wrapper.sv``，设置 reference top 为
+  ``r:/WORK/eh2_veer``；再读取 implementation netlist ``eh2_synth.v``，设置 implementation top 为
+  ``i:/WORK/eh2_veer``。
+* L40-L48：执行 ``match``、``verify``，把 ``report_status`` 写到 ``lec_report.txt`` 并退出。该脚本
+  没有 SVF 或 user match，因此适合描述 top-level baseline，但不足以解决 packed-array flatten 问题。
+
+接口关系：
+
+* 被调用：人工运行 ``fm_shell -f syn/scripts/lec_run.tcl`` 或旧 ``syn/Makefile:lec`` 路径。
+* 调用：Formality ``read_db``、``read_sverilog``、``read_verilog``、``set_top``、``match``、
+  ``verify`` 和 ``report_status``。
+* 共享状态：读取 ``syn/build/eh2_dc_wrapper.sv``、``syn/build/eh2_synth.v`` 和 Synopsys library；
+  写 ``syn/build/lec_report.txt``。
+
+§18.2  ``lec_svf.tcl`` — SVF-guided top-level 尝试全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_svf.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_svf.tcl:全文
+
+逐段精读：
+
+* L1-L9：脚本头说明目标是用 ``set_svf`` 引导 2D packed array port matching；基础设置与
+  ``lec_run.tcl`` 类似，但没有单独创建 run dir。
+* L11-L21：设置相同的 search path，并读取 ``class.db`` 与 ``gtech.db``。这保证 reference 读入和
+  implementation netlist cell 解析环境与基础脚本一致。
+* L23-L25：在读取 design 前加载 ``/home/host/eh2-veri/default.svf``。SVF 保存综合优化历史，是本脚本
+  与基础 ``lec_run.tcl`` 的关键差异。
+* L27-L37：读取 reference wrapper 和 implementation netlist，并设置两侧 top 为 ``eh2_veer``。
+* L39-L48：执行 SVF-guided ``match`` 和 ``verify``，把状态写入 ``lec_p0a_svf.log``，把 failing
+  points 写入 ``lec_p0a_svf_failing.rpt``。它仍是 top-level 尝试，不能替代后来的 per-block SVF flow。
+
+接口关系：
+
+* 被调用：人工评估 SVF 能否改善 top-level matching 时运行。
+* 调用：Formality ``set_svf``、读入、match/verify 和 failing point report 命令。
+* 共享状态：读取 ``default.svf``、wrapper/netlist/library；写 SVF-guided log 和 failing report。
+
+§18.3  ``lec_p0a.tcl`` — P0-A user-match top-level 尝试全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_p0a.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_p0a.tcl:全文
+
+逐段精读：
+
+* L1-L9：脚本头说明 P0-A Option C 使用 ``set_user_match`` 处理 194 个 unmatched 2D ports，并记录
+  生成日期。基础 hdlin/verification/suppression 设置与其他 top-level 脚本一致，额外抑制 ``FM-036``。
+* L11-L20：设置 search path 并读取 ``class.db``/``gtech.db``，为 reference RTL 和 implementation
+  netlist 提供一致解析环境。
+* L22-L30：读取 ``eh2_dc_wrapper.sv`` 和 ``eh2_synth.v``，两侧 top 都设为 ``eh2_veer``。
+* L32-L36：通过 ``source syn/scripts/lec_user_match.tcl`` 加载手工 port mapping。这里不直接写
+  ``set_user_match``，而是把 194 个匹配规则集中到独立文件，便于重新生成和审计。
+* L38-L46：执行 ``match``、``verify``，输出 ``lec_p0a_final.log`` 和 ``lec_p0a_failing.rpt``。该脚本
+  是 top-level packed-array repair 尝试，后来被 block-level LEC 策略取代。
+
+接口关系：
+
+* 被调用：人工运行 P0-A top-level matching 实验时使用。
+* 调用：``lec_user_match.tcl``，以及 Formality read/match/verify/report 命令。
+* 共享状态：读取 wrapper/netlist/library 和 user-match 表；写 P0-A final/failing report。
+
+§18.4  ``lec_diag.tcl`` — top-level failing point 分析全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_diag.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_diag.tcl:全文
+
+逐段精读：
+
+* L1-L9：脚本头标为 RC5 诊断，目标是用 ``analyze_points`` 做自动根因分析；设置 relaxed mode、
+  SV 2012，并把 undriven signals 固定为 0，降低未驱动信号对诊断报告的干扰。
+* L11-L19：设置 include/search path 并读取 Synopsys technology libraries。
+* L21-L28：读取 reference wrapper 与 implementation netlist，设置 top 后执行 ``match`` 与
+  ``verify``。这一步先复现 top-level LEC 失败，再进入报告阶段。
+* L30-L38：输出 failing points、``analyze_points -all`` 和 status report。该脚本关注失败原因分析，
+  不对 release pass/fail 做最终裁决。
+
+接口关系：
+
+* 被调用：top-level LEC 失败后人工诊断时运行。
+* 调用：Formality ``report_failing_points``、``analyze_points`` 和 ``report_status``。
+* 共享状态：读取 wrapper/netlist/library；写 ``lec_failing.rpt``、``lec_analyze.rpt`` 和
+  ``lec_status.rpt``。
+
+§18.5  ``lec_diag2.tcl`` — top-level unmatched port 列表诊断全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../syn/scripts/lec_diag2.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_diag2.tcl:全文
+
+逐段精读：
+
+* L1-L7：脚本目标是列出 unmatched ports，以便修复 matching；基础 suppression、SV 标准、relaxed
+  mode 和 undriven 设置与 ``lec_diag.tcl`` 保持一致。
+* L9-L17：配置 search path 并读取 ``class.db``/``gtech.db``。
+* L19-L25：读取 reference wrapper、implementation netlist，设置两侧 top 并执行 ``match``。这里不跑
+  ``verify``，因为诊断目标是 match 阶段产生的 unmatched port 列表。
+* L27-L34：分别打印前 30 个 reference output ports 和 implementation output ports 的 unmatched
+  列表。输出走 Formality stdout/log，而不是写独立 rpt 文件，适合作为快速交互诊断入口。
+
+接口关系：
+
+* 被调用：人工定位 top-level port matching 缺口时运行。
+* 调用：Formality ``report_unmatched_points -ref/-impl -port -max 30``。
+* 共享状态：读取 wrapper/netlist/library；输出 unmatched port 列表到运行日志。
