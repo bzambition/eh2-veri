@@ -1527,3 +1527,161 @@ ALU、MUL/DIV、flush 和 cover property 的意图；这里补充同一文件的
   ALU valid、MUL/DIV mutual exclusion 和 flush behavior 是 EXU proof 的核心。
 * L68-L131：cover property 给 formal 收敛和可达性提供观察点，不替代 sign-off
   中的 VCS coverage；它们说明 proof engine 已经看见关键 EXU 场景。
+
+§12  v2-28 Formal property 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 v2-28 formal property 行级门禁。``eh2_exu_assert.sv`` 已在 §11 用全文
+``literalinclude`` 覆盖；这里补齐其余 6 个 property 文件，并按源码顺序解释端口、
+局部解码、assertion 和 cover 的含义。
+
+§12.1  ``eh2_dbg_assert.sv``：debug module protocol
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/properties/eh2_dbg_assert.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/properties/eh2_dbg_assert.sv
+
+源码精读：
+
+* 第 1-L17 行列出目标：RISC-V Debug Module 0.13 的 halt/resume FSM、互斥关系、
+  resume ack、abstract command completion 和 ``dmactive`` reset-like 行为。
+* 第 19-L56 行声明 checker module 与输入端口。端口按 debug FSM、halt/resume、
+  DM control/status、abstract command 和 DMI interface 分组。
+* 第 58-L72 行定义 FSM 编码并选择 thread 0 作为当前 proof 的观测线程。
+* 第 73-L89 行检查 halt request：``dmcontrol_reg[31]`` 置位且当前 IDLE 时，下周期
+  FSM 应进入 HALTING。
+* 第 90-L112 行检查 resume 与 halt/resume 互斥：HALTED 状态接收 resume request 后
+  转向 RESUMING，同时 halt 和 resume request 不能同周期同时为 1。
+* 第 114-L143 行检查 abstract command done 清 busy，以及 ``dmactive=0`` 时 FSM 保持
+  IDLE。
+* 第 145-L162 行给出 halt-resume roundtrip cover，证明引擎能够触达 HALTED 到 RESUMING
+  的完整路径。
+
+§12.2  ``eh2_dec_assert.sv``：decode/CSR/flush hazard
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/properties/eh2_dec_assert.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/properties/eh2_dec_assert.sv
+
+源码精读：
+
+* 第 1-L17 行说明 DEC property 关注 MRET/DRET legality、CSR decode、flush kill
+  writeback、EBREAK debug entry 和 dual-issue hazard。
+* 第 19-L67 行声明 decode、writeback、CSR、flush/debug、illegal instruction 和 thread
+  id 端口。
+* 第 69-L79 行从 32-bit 指令中抽取 opcode、funct3、CSR 地址，并定义 MRET、DRET、
+  EBREAK、SYSTEM、CSR 指令检测条件。
+* 第 81-L99 行检查 MRET decode 合法性：EH2 只有 M-mode，decode 阶段不应把 MRET
+  标成 illegal。
+* 第 101-L130 行检查 EBREAK 和 CSR 合法性：非 debug mode 下 EBREAK 应产生 debug valid；
+  CSR 写时 legal 标志、读使能和 CSR 地址应一致。
+* 第 132-L159 行检查 flush kill writeback 与 dual-issue rd 排他：flush 后 I0/I1 写回
+  必须被 kill，同周期双写不能命中同一个非零 rd。
+* 第 161-L172 行提供 MRET decode cover，作为 proof 可达性观察点。
+
+§12.3  ``eh2_ifu_assert.sv``：fetch、BTB、ICache 与 RAS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/properties/eh2_ifu_assert.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/properties/eh2_ifu_assert.sv
+
+源码精读：
+
+* 第 1-L16 行定义 IFU property 范围：fetch alignment、cache hit/miss 互斥、BTB
+  prediction consistency、compressed instruction decode、RAS push/pop 和 branch target
+  alignment。
+* 第 18-L57 行声明 IFU fetch、ICache、branch prediction、BTB/RAS、decompressor、
+  predecode 和 flush/stall 输入。
+* 第 59-L75 行检查 fetch PC 2-byte 对齐。由于 RV32C 允许 halfword 边界取指，最低位
+  必须为 0。
+* 第 77-L91 行检查 ICache hit/miss 互斥：有效 fetch 时不能同时 hit 和 miss。
+* 第 93-L108 行检查 BTB prediction target 对齐和 prediction valid 关系。
+* 第 110-L137 行检查 RAS push/pop 互斥、decompress valid 时 instruction 低位编码、
+  predecode valid 时 PC 与指令不为 X。
+* 第 139-L153 行提供 fetch、BTB predict 和 RAS push cover，证明引擎能触达关键取指路径。
+
+§12.4  ``eh2_lsu_assert.sv``：load/store、DCCM、AMO 和 bus error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/properties/eh2_lsu_assert.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/properties/eh2_lsu_assert.sv
+
+源码精读：
+
+* 第 1-L13 行列出 LSU property：bus handshake、store buffer overflow、地址对齐、
+  DCCM read data stable、AMO read-modify-write、bus error exception 和 load/store cover。
+* 第 15-L54 行声明 LSU 地址、数据、load/store/DMA/AMO、stall、DCCM、ECC、bus handshake、
+  bus error 和 exception 端口。
+* 第 56-L73 行检查 bus handshake：valid+ready 同周期必须被视为完成。
+* 第 75-L90 行检查 store buffer 深度不超过 ``pt.STORE_BUF_DEPTH``。
+* 第 92-L110 行检查地址对齐：word 访问要求 ``addr[1:0]==0``，halfword 要求
+  ``addr[0]==0``。
+* 第 112-L136 行检查 DCCM read data 在 valid window 中稳定，AMO store data 与修改后的
+  read data 匹配，以及 bus error 必须触发 exception。
+* 第 138-L150 行提供 back-to-back load/store cover，作为 LSU 基本行为可达性检查。
+
+§12.5  ``eh2_pic_assert.sv``：PIC 优先级、claim 和 threshold
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/properties/eh2_pic_assert.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/properties/eh2_pic_assert.sv
+
+源码精读：
+
+* 第 1-L17 行说明 PIC property 覆盖 interrupt priority tree、claim/complete、
+  priority threshold gating 和 wake-up。
+* 第 19-L53 行声明 interrupt request、core-facing output、threshold/current priority、
+  internal enable/priority/delegation 和 priority tree 输出端口。
+* 第 58-L73 行检查 pending interrupt 必须给出非零且在范围内的 claim id。
+* 第 75-L89 行检查 selected priority 不高于 threshold 时不得产生 external interrupt。
+* 第 91-L105 行检查最大优先级 wakeup：priority 15 且存在 request 时应触发 wakeup。
+* 第 107-L135 行检查 pending 必须有 enable gate，且 priority tree selected priority
+  不低于任一 enabled pending source。
+* 第 137-L150 行提供 request -> pending -> claim cover，验证完整 claim 序列可达。
+
+§12.6  ``eh2_pmp_assert.sv``：PMP/LSU address check
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/properties/eh2_pmp_assert.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/properties/eh2_pmp_assert.sv
+
+源码精读：
+
+* 第 1-L16 行定义 PMP/LSU address check 的 8 个 proof 目标：disabled region、
+  internal region、unmapped external、AMO in DCCM、side-effect alignment、DMA bypass、
+  fault cause 和 external address cover。
+* 第 18-L45 行声明 ``eh2_lsu_addrcheck`` 的关键输入输出：start/end address、各类 fault、
+  ``exc_mscause``、side-effect、DMA/word/atomic、DCCM/PIC/external 地址分类。
+* 第 48-L70 行检查 PMP disabled 与 internal region：没有 region 命中时不应产生 MPU
+  fault，DCCM/PIC 内部地址也不应触发 MPU fault。
+* 第 73-L96 行检查 unmapped external 和 AMO：外部未映射访问应触发 fault，DCCM 内 AMO
+  不应触发地址 fault。
+* 第 99-L126 行检查 side-effect aligned access 不产生 misaligned fault，DMA 访问不触发
+  access fault。
+* 第 128-L140 行检查 access fault 对应合法非零 ``exc_mscause``。
+* 第 142-L154 行提供 external address with valid transaction cover，证明 PMP proof 可以
+  触达外部地址场景。

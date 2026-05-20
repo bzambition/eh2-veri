@@ -1316,3 +1316,297 @@ release gate。
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§11  v2-28 Formal 基础设施全文行段级精读
+--------------------------------------------------------------------------------
+
+本节用于 v2-28 formal 行级门禁：把 ``dv/formal`` 中的 Makefile、IFV filelist、
+bootstrap、top/bind/SVA、Tcl、SBY 和 Sail 辅助脚本全部纳入全文
+``literalinclude``。前文已经按主题解释过关键片段；本节按文件源码顺序给出完整旁注，
+帮助读者从入口一路追到 proof script、diagnostic script 和 architectural bridge。
+
+§11.1  ``dv/formal/Makefile``：IFV 主入口与辅助 target
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/Makefile
+   :language: text
+   :linenos:
+   :caption: dv/formal/Makefile
+
+源码精读：
+
+* 第 1-L16 行定义 formal flow 的默认环境。``BUILD_DIR`` 固定为 ``build``，
+  ``FILELIST`` 指向 ``ifv_filelist.f``，``IFV_TOP`` 是当前真实 top ``eh2_veer``；
+  ``+loop_unroll_size+2048`` 是为 IFU/PIC 生成 mux 提高 IFV 展开上限。
+* 第 18-L27 行定义主 target。``ifv`` 先创建 build 目录，再用 ``-f ifv_filelist.f``
+  编译 elaboration，随后用 ``scripts/ifv_prove.tcl`` 运行证明，并从 run log 中截取
+  ``Assertion Summary`` 作为 ``ifv_summary.txt``。
+* 第 29-L32 行是 CEX 诊断 target。它复用 IFV shell，但脚本换成
+  ``ifv_cex_dump.tcl``，输出 ``build/cex_*.txt`` 数量，服务失败后的人工定位。
+* 第 34-L43 行统计 SVA 数量。它扫描当前目录和 ``properties`` 目录中 ``a_`` 与
+  ``c_`` label，给出 assertions、covers 和 total，不参与 sign-off 判定。
+* 第 45-L52 行清理 IFV 产物。删除日志、summary、CEX 文本、``ifv_work`` 和 ``.ifv``，
+  但不删除源文件，也不触碰上游 RTL。
+
+§11.2  ``ifv_filelist.f`` 与 ``ifv_bootstrap.sv``：编译入口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/formal/ifv_filelist.f``）：
+
+.. literalinclude:: ../../../../dv/formal/ifv_filelist.f
+   :language: text
+   :linenos:
+   :caption: dv/formal/ifv_filelist.f
+
+源码精读：
+
+* 第 1-L4 行记录 filelist 的目的和历史修复：把 bootstrap 与 formal top 兼容 IFV
+  15.20，并避免在 file scope include ``eh2_param.vh`` 触发 SV parser 错误。
+* 第 5-L11 行打开 ``FORMAL`` 和 ``RV_BUILD_AXI4`` 宏，添加 snapshot、RTL include、
+  design lib、formal properties 和 ``dv/formal`` 自身的 include path。
+* 第 13-L14 行先编译 ``ifv_bootstrap.sv``，为后续 RTL 在 ``$unit`` scope 提供宏和
+  ``eh2_param_t`` 类型。
+* 第 16-L63 行按 synthesis filelist 风格列入 upstream RTL：include/lib、DMI/DBG、
+  DEC、EXU、LSU、IFU、MEM、PIC、DMA 和顶层 ``eh2_veer.sv``。
+* 第 65-L66 行只列入 ``eh2_veer_sva.sv`` 作为当前顶层 SVA bind。这里没有列入
+  ``eh2_formal_bind.sv`` 或 ``eh2_formal_top.sv``，所以当前 IFV 主流程以
+  ``eh2_veer`` + top-level SVA 为准。
+
+完整源码（``dv/formal/ifv_bootstrap.sv``）：
+
+.. literalinclude:: ../../../../dv/formal/ifv_bootstrap.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/ifv_bootstrap.sv
+
+源码精读：
+
+* 第 1-L6 行解释 bootstrap 的存在原因：``eh2_pdef.vh`` 必须在 ``$unit`` scope 提供
+  ``eh2_param_t``，但 ``eh2_param.vh`` 不能放在 file scope。
+* 第 7-L8 行 include ``common_defines.vh`` 和 ``eh2_pdef.vh``，给后续 RTL 编译提供
+  宏和类型定义。
+* 第 10-L15 行声明一个空 ``ifv_bootstrap`` module。它不承载功能逻辑，只给 IFV
+  elaboration 一个合法设计元素，避免纯 include 编译单元造成工具兼容问题。
+
+§11.3  ``eh2_veer_sva.sv``：当前 IFV 顶层 property 入口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码：
+
+.. literalinclude:: ../../../../dv/formal/eh2_veer_sva.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/eh2_veer_sva.sv
+
+源码精读：
+
+* 第 1-L13 行声明这是绑定到 ``eh2_veer`` 的最小 SVA 模块，参数列表在 module 内部
+  include ``eh2_param.vh``，避免 file-scope 参数声明问题。
+* 第 14-L112 行列出 ``eh2_veer`` 端口和内部层级引用所需信号：reset/vector、clock
+  enables、LSU/IFU/DMA AXI、DCCM/ICCM、clock override、debug/halt 和 trace。
+* 第 114-L138 行是输入 assumptions。它约束 debug reset 跟随 reset、scan mode 为 0，
+  并要求 reset/NMI vector 在 reset 期间稳定，避免 proof 检查未约束平台输入。
+* 第 139-L170 行检查 reset/clock：core reset active-low、reset release、clock known、
+  thread 0 start 和 reset 无 X。
+* 第 172-L238 行检查 LSU AXI write/read 基本连接和响应接受。这里很多 property 是
+  hookup check，用顶层 AXI pin 与内部 ``lsu.bus_intf`` 信号相等来捕获断连。
+* 第 239-L277 行覆盖 IFU、DMA、trace/debug。IFU AR/R 接收、IFU AW valid、DMA ready
+  回连、trace PC 非 X 和 debug mode status 都在顶层边界直接检查。
+* 第 279-L358 行覆盖 DCCM/ICCM 互斥、IFU/LSU 结构属性、reset vector 稳定、clock
+  override 和 ECC disable known。
+* 第 360-L380 行是 smoke cover，用 halt/run、AXI write/read 观察 proof 是否触达关键
+  场景；它不等价于仿真 coverage。
+* 第 382-L385 行结束模块并执行 ``bind eh2_veer eh2_veer_sva ... (.*)``，这是当前
+  ``ifv_filelist.f`` 真正纳入的 SVA 入口。
+
+§11.4  ``eh2_formal_top.sv`` 与 ``eh2_formal_bind.sv``：保留 harness
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/formal/eh2_formal_top.sv``）：
+
+.. literalinclude:: ../../../../dv/formal/eh2_formal_top.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/eh2_formal_top.sv
+
+源码精读：
+
+* 第 1-L19 行声明 full-core formal testbench。它 include ``common_defines.vh``，
+  在 module parameter list 中 include ``eh2_param.vh``，并说明它用于实例化
+  ``eh2_veer`` 与 property monitor。
+* 第 21-L36 行生成自由运行 ``clk``、``free_clk`` 和 reset sequence。该写法适合仿真式
+  harness 描述，但当前 IFV 主流程没有把这个 top 放进 filelist。
+* 第 38-L114 行声明并 tie-off DUT 输入与内部观测线，包括 debug/JTAG、DCCM/ICCM、
+  ICache/BTB、perf counter 等。
+* 第 115-L200 行声明 AXI 总线并给 LSU、IFU、SB、DMA 侧从设备响应 tie-off。读写 ready
+  多数固定为 1，valid/data 多数固定为 0，用于收敛 full-core proof 环境。
+* 第 201-L214 行声明 trace 输出，供后续顶层 property 或 architectural bridge 观察退休
+  指令、异常、中断和写回。
+* 第 215-L433 行实例化 ``eh2_veer``。大量端口被连接到本地 tie-off 或空连接，因此该
+  文件必须随 RTL 端口变化维护；当前文档以 filelist 未列入为事实边界。
+* 第 435-L610 行内嵌顶层 assertions 和 covers，覆盖 reset、AXI stability、trace/debug
+  与 AXI burst reachability。它们表达历史 harness 设计意图，不是当前 46/46 IFV 主入口。
+
+完整源码（``dv/formal/eh2_formal_bind.sv``）：
+
+.. literalinclude:: ../../../../dv/formal/eh2_formal_bind.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/eh2_formal_bind.sv
+
+源码精读：
+
+* 第 1-L16 行说明该文件用于把 DEC、PIC、DBG、IFU、LSU、EXU、PMP property 模块绑定到
+  对应 RTL，并记录 RC5/RC4 的 include-scope 修复背景。
+* 第 18-L51 行把 ``eh2_dec_assert`` 绑定到 ``eh2_dec``，连接 decode、writeback、CSR、
+  flush/debug 和 thread id 信号。
+* 第 53-L74 行把 ``eh2_pic_assert`` 绑定到 ``eh2_pic_ctrl``。其中部分内部寄存器端口
+  用 ``'0`` 占位，说明这份 bind 需要结合真实 elaboration 日志确认信号可见性。
+* 第 76-L102 行把 ``eh2_dbg_assert`` 绑定到 ``eh2_dbg``，关注 DMI 读写、halt/resume、
+  abstract command 和 response。
+* 第 104-L149 行绑定 IFU 与 LSU property，目标分别是 fetch/BTB/ICache/RAS 和 load/store
+  地址、stall、ECC、AMO 相关信号。
+* 第 151-L173 行绑定 EXU property 到 ``eh2_exu``，连接双 issue valid/instr/result、
+  ALU/MUL/DIV 和 branch 信号。
+* 第 175-L192 行保留 PMP bind 模板但注释掉。注释明确 PMP 是可选配置，PMP-disabled
+  配置下直接 bind 会 elaboration 失败。
+
+§11.5  IFV Tcl 与 Symbiyosys 配置
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/formal/scripts/ifv_prove.tcl``）：
+
+.. literalinclude:: ../../../../dv/formal/scripts/ifv_prove.tcl
+   :language: text
+   :linenos:
+   :caption: dv/formal/scripts/ifv_prove.tcl
+
+源码精读：
+
+* 第 1-L5 行锁定工具假设：使用 IFV 15.20 / INCISIVE152 支持的 legacy FormalVerifier
+  shell 命令，不使用 newer ``check_formal``、``report_cex`` 或 ``write_vcd``。
+* 第 7-L13 行是完整证明序列：打印开始、添加 clock、添加 specification assertions、
+  ``prove``、输出 assertion summary、打印完成并退出。
+
+完整源码（``dv/formal/scripts/ifv_cex_dump.tcl``）：
+
+.. literalinclude:: ../../../../dv/formal/scripts/ifv_cex_dump.tcl
+   :language: text
+   :linenos:
+   :caption: dv/formal/scripts/ifv_cex_dump.tcl
+
+源码精读：
+
+* 第 1-L20 行说明诊断目的和工具限制：用 ``assertion -show <property> -verbose -list``
+  代替缺失的 ``report_cex``、``write_vcd``、``set_active`` 与 ``get_status``。
+* 第 22-L24 行添加 clock、添加 specification assertions，并先跑一次 ``prove``。
+* 第 26-L51 行列出 24 个历史 RC5 失败 property 名称，全部位于
+  ``eh2_veer.u_eh2_veer_sva``。
+* 第 53-L65 行遍历 property，生成 ``build/cex_<short>.txt``，写入诊断命令和工具限制
+  说明，并在 IFV log 中打印 verbose block 的 begin/end 标记。
+* 第 67-L68 行输出 assertion summary 并退出。
+
+完整源码（``dv/formal/scripts/sby_dbg.sby``）：
+
+.. literalinclude:: ../../../../dv/formal/scripts/sby_dbg.sby
+   :language: text
+   :linenos:
+   :caption: dv/formal/scripts/sby_dbg.sby
+
+完整源码（``dv/formal/scripts/sby_dec.sby``）：
+
+.. literalinclude:: ../../../../dv/formal/scripts/sby_dec.sby
+   :language: text
+   :linenos:
+   :caption: dv/formal/scripts/sby_dec.sby
+
+完整源码（``dv/formal/scripts/sby_pic.sby``）：
+
+.. literalinclude:: ../../../../dv/formal/scripts/sby_pic.sby
+   :language: text
+   :linenos:
+   :caption: dv/formal/scripts/sby_pic.sby
+
+完整源码（``dv/formal/scripts/sby_pmp.sby``）：
+
+.. literalinclude:: ../../../../dv/formal/scripts/sby_pmp.sby
+   :language: text
+   :linenos:
+   :caption: dv/formal/scripts/sby_pmp.sby
+
+源码精读：
+
+* 4 个 ``sby_*.sby`` 的第 1-L5 行都是入口说明：从 ``dv/formal`` 目录执行
+  ``sby -f scripts/<name>.sby``，需要 Yosys、Symbiyosys 和 SMT solver。
+* ``[tasks]``、``[options]`` 与 ``[engines]`` 段只定义 ``prove`` task，模式为
+  ``prove``，engine 为 ``smtbmc z3``；DBG/DEC/PIC depth 是 20，PMP depth 是 25。
+* ``[script]`` 段读取 FORMAL 宏、snapshot parameter/include、基础 RTL/lib、目标 RTL
+  和对应 property，然后 ``prep -top`` 到 ``eh2_dbg``、``eh2_dec``、``eh2_pic_ctrl``
+  或 ``eh2_lsu_addrcheck``。
+* ``[files]`` 段重复列出 proof 需要的源文件，供 Symbiyosys 建立工作目录。它们是开源
+  bounded proof/debug 入口，不替代当前 IFV sign-off。
+
+§11.6  Sail bridge、setup 与 trace checker
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+完整源码（``dv/formal/spec/sail_bridge.sv``）：
+
+.. literalinclude:: ../../../../dv/formal/spec/sail_bridge.sv
+   :language: text
+   :linenos:
+   :caption: dv/formal/spec/sail_bridge.sv
+
+源码精读：
+
+* 第 1-L22 行说明 bridge 目的：把 EH2 微架构信号投影成 sail-riscv 可观察的 PC、
+  GPR writeback、CSR/privilege、exception 和 debug checkpoint。
+* 第 24-L59 行声明 ``sail_bridge`` module、参数 include 和输入端口，输入来自 decode
+  writeback、TLU exception/interrupt、CSR priority/debug 状态。
+* 第 61-L99 行生成 Sail-observable projection：``sail_pc``、GPR 写使能/地址/数据、
+  machine privilege、exception cause 和 halted 状态。
+* 第 100-L139 行在 ``FORMAL`` 下声明 3 条 SAIL-REF property：x0 写回必须为 0、
+  exception cause 必须在受支持范围、EH2 privilege 始终为 M-mode。
+* 第 141 行结束模块。该 bridge 是 architectural invariant 层，不直接驱动当前 IFV
+  filelist，使用前需要绑定或实例化到真实 trace/writeback 信号。
+
+完整源码（``dv/formal/spec/sail_setup.sh``）：
+
+.. literalinclude:: ../../../../dv/formal/spec/sail_setup.sh
+   :language: text
+   :linenos:
+   :caption: dv/formal/spec/sail_setup.sh
+
+源码精读：
+
+* 第 1-L19 行说明脚本目标：clone/build ``sail-riscv``，生成 ``riscv_sim_RV32``，
+  供 ``sail_bridge.sv`` 和 ``sail_trace_check.py`` 使用。
+* 第 21-L28 行启用 ``set -euo pipefail``，定义 repo、目录和二进制路径，然后打印标题。
+* 第 30-L41 行 clone ``sail-riscv``；如果网络或 git 不可用，脚本以 0 退出并说明内建
+  SVA architectural checks 仍然可用。
+* 第 43-L52 行检查 ``opam`` 并安装 ``sail``。缺少 opam 时同样 graceful skip，不阻断
+  formal 文档或内建 proof。
+* 第 53-L67 行构建 ``c_emulator``，成功后把 ``riscv_sim_RV32`` symlink 到 spec 目录；
+  构建失败时提示继续使用 ``sail_bridge.sv`` 的 built-in checks。
+
+完整源码（``dv/formal/spec/sail_trace_check.py``）：
+
+.. literalinclude:: ../../../../dv/formal/spec/sail_trace_check.py
+   :language: text
+   :linenos:
+   :caption: dv/formal/spec/sail_trace_check.py
+
+源码精读：
+
+* 第 1-L24 行声明这是 EH2-to-Sail trace divergence checker，依赖 Python 标准库和可选
+  ``riscv_sim_RV32``。
+* 第 26-L64 行定义 RV32 指令 opcode、funct 和 ``rd`` 解码 helper，用于把 trace 中的
+  instruction 映射成最小 architectural step。
+* 第 66-L88 行定义 ``SailChecker`` 状态：GPR、PC、mstatus 和 Sail checkpoint 常量；
+  ``reset`` 把模型回到 reset vector。
+* 第 90-L130 行实现简化 ``step_instruction``。它覆盖 LUI、AUIPC、JAL、JALR 和基本
+  ALU/默认 PC 推进，生产环境可替换为 subprocess 调用 sail c_emulator。
+* 第 132-L162 行执行 EH2 trace 对比：检查 PC、x0 写回、rd index 和 write data。
+* 第 165-L213 行实现 CLI：解析 ``--trace``、``--sail`` 和 ``--max-instructions``，
+  对缺少 Sail binary 或 trace 文件给出 warning，并打印内建 SVA checks 的降级说明。
