@@ -1875,3 +1875,97 @@ review checklist。
 * 调用：读取 vendor suite 目录，写当前目录下 ``directed_testlist.yaml``。
 * 共享状态：生成内容假设 vendor path、``link.ld``、``core_eh2_base_test`` 和
   ``PMPEnable`` 参数存在；运行目录会影响输出文件位置。
+
+§13  v2-55 waiver YAML 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 3 个仍为 partial 的 waiver/config YAML 全文：两个 functional coverage waiver
+和一个 cosim-disabled waiver gate。它们都不是测试生成器，也不直接改变仿真行为；它们的作用是把
+不可覆盖或不可 lockstep cosim 的场景写成可审计、可过期复审的结构化数据。
+
+§13.1  ``dual_issue_presync_stall_cross_waiver.yaml`` — dual-issue presync stall cross
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/fcov/cov_waivers/dual_issue_presync_stall_cross_waiver.yaml
+   :language: yaml
+   :linenos:
+   :caption: dv/uvm/core_eh2/fcov/cov_waivers/dual_issue_presync_stall_cross_waiver.yaml:全文
+
+逐段精读：
+
+* L1-L6：文件头说明 waiver 对象是 ``uarch_cg`` 中 ``stall_cross`` 的
+  ``cp_i0_instr_category x cp_stall_type`` cross，目标 bins 是 dual-issue valid bins 与
+  ``StallTypePresync`` 的交集。
+* L7-L10：YAML 根键为 ``waiver``，名称解释该组合极罕见，coverage point 精确指向
+  ``uarch_cg.stall_cross``。这让 waiver 可以被工具或人工按覆盖点追踪。
+* L11-L24：原因说明 presync stall 来自 CSR 读写/set/clear 等需要流水线串行化的指令；EH2 中 CSR
+  指令只在 I0 发射，presync stall 会阻止 I1 同周期发射，因此 dual-issue 与 presync stall 的 cross
+  被架构和流水线时序共同 gate 掉。
+* L25-L28：记录 author、date、ticket 和 active 状态。``ticket`` 为空说明当前以文档化理由管理，
+  后续复审应补 issue 或关闭 waiver。
+
+接口关系：
+
+* 被调用：functional coverage waiver 收集/审查流程读取该 YAML。
+* 调用：无。
+* 共享状态：coverage point 名称必须与 ``eh2_fcov_if`` 中的 covergroup/cross 名称保持一致。
+
+§13.2  ``nmi_during_debug_cross_waiver.yaml`` — debug mode 中 NMI cross
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/fcov/cov_waivers/nmi_during_debug_cross_waiver.yaml
+   :language: yaml
+   :linenos:
+   :caption: dv/uvm/core_eh2/fcov/cov_waivers/nmi_during_debug_cross_waiver.yaml:全文
+
+逐段精读：
+
+* L1-L5：文件头说明 waiver 对象是 ``interrupt_cg.cp_int_in_debug`` cross 中的 ``nmi x in_debug`` bins。
+* L7-L10：YAML 结构与上一条 waiver 相同，coverage point 精确到 interrupt covergroup 的 debug-mode
+  cross。
+* L11-L19：原因引用 RISC-V debug specification 第 4.1 节：hart 处于 debug mode 时不接收 NMI。
+  EH2 TLU interrupt arbitration 也会用 ``!dec_tlu_debug_mode`` gate ``take_nmi``，因此该 cross 不应
+  通过 backdoor 强行制造样本。
+* L20-L23：记录 author、date、ticket 和 active 状态。这里同样需要在正式复审时补 ticket 或证明
+  waiver 仍有效。
+
+接口关系：
+
+* 被调用：functional coverage waiver 收集/审查流程读取该 YAML。
+* 调用：无。
+* 共享状态：依赖 ``interrupt_cg``、``cp_int_source``、``dec_tlu_debug_mode`` 和 TLU NMI gating
+  语义一致。
+
+§13.3  ``cosim-disabled.yaml`` — sign-off cosim waiver gate 全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/waivers/cosim-disabled.yaml
+   :language: yaml
+   :linenos:
+   :caption: dv/uvm/core_eh2/waivers/cosim-disabled.yaml:全文
+
+逐段精读：
+
+* L1-L15：文件头定义 cosim-disabled waiver schema。每条 entry 必须包含 ``test``、``reason``、
+  ``tracking_issue`` 和 ``expiry_date``；testlist 中的 ``cosim_reason`` 不是正式 waiver，最终 gate
+  由 ``signoff.py`` 强制执行。
+* L16-L39：CSR-directed 两条 waiver。``riscv_csr_test`` 覆盖 EH2 custom CSR、WARL/U 行为和
+  presync/postsync side effect，Spike 不完整建模；``riscv_csr_hazard_test`` 则覆盖 CSR pipeline
+  hazard、scoreboard bypass 和 write-to-read forwarding，Spike 的 ISA-level in-order 模型无法表达
+  这些微架构时序。
+* L41-L77：硬件完整性/fault-injection waiver 组。PC、RF、RF address、RAM、ICache integrity tests
+  都依赖 RTL force、ECC/parity、cache/tag/data RAM 或 EH2-specific error CSR；Spike 没有这些硬件
+  fault injection 和错误恢复路径。
+* L88-L95：``riscv_mem_intg_error_test`` 组合 DCCM、ICCM 和 bus-level integrity faults，覆盖
+  detection、``micect`` counter、``mscause`` trap 和 ``mdeau`` capture；这些同样超出 Spike 模型。
+* L97-L108：AXI bus error injection waiver。该测试通过 TB BFM 驱动 LSU AXI4 SLVERR/DECERR，
+  DUT 产生精确/非精确 bus error；Spike 虽可返回 MMIO error，但无法与该 directed test 的
+  timing-sensitive 注入和 EH2 error CSR 对齐。
+
+接口关系：
+
+* 被调用：``signoff.py`` 的 waiver schema validation、``load_waiver_set`` 和
+  ``--fail-on-cosim-disabled`` gate。
+* 调用：无。
+* 共享状态：``test`` 字段必须与 riscv-dv testlist 中的 test 名严格一致；``expiry_date`` 决定 waiver
+  是否仍可用于 release gate。
