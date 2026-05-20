@@ -2768,3 +2768,180 @@ trace packing 的顶层 glue。
 * L1003-L1027：``tracep`` generate 与 ``endmodule``。WB1 级 instruction、PC、valid、
   exception、interrupt、cause、tval 和 rd writeback 被打包成 ``trace_rv_trace_pkt``，
   供 top trace_rewire、UVM trace monitor、RVFI converter 和 cosim scoreboard 消费。
+
+§13  v2-20 DEC 子模块全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-20 继续把 DEC 顶层下钻到子模块。下面 7 个文件分别覆盖 CSR legality、
+decode/result/NB-load 主控制、GPR、instruction buffer、TLU、TLU top glue 和 trigger。
+它们共同解释 ``eh2_dec.sv`` 端口背后的真实实现，不能只用顶层信号名替代源码阅读。
+
+§13.1  ``eh2_dec_csr.sv`` — CSR 地址、合法性与同步属性
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dec/eh2_dec_csr.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dec/eh2_dec_csr.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头和 package import。该文件只做 CSR decode/legality，不保存 CSR 状态。
+* L25-L86：模块端口。输入是 decode 阶段 CSR 地址、操作类型和当前特权/debug 状态；
+  输出是 ``tlu_csr_pkt_d``、legal、global、presync/postsync 等控制。
+* L88-L147：为标准 CSR、EH2 custom CSR、debug CSR、PIC CSR、timer CSR 和诊断 CSR
+  建立 one-hot 命中信号，同时保留 ``valid_only``、``presync``、``postsync``、``glob``。
+* L148-L370：逐地址组合 decode。每个 ``csr_*`` assign 都是对 ``dec_csr_rdaddr_d`` 的
+  位级匹配，覆盖 MISA、MSTATUS、MEPC/MCAUSE、PIC、debug trigger、performance counter、
+  memory diagnostic 和 EH2 custom control CSR。
+* L373-L414：presync、postsync 和 global 属性分类。CSR 访问是否需要序列化、是否影响
+  全局状态，在这里由地址类别决定。
+* L415-L529：legal/conditionally illegal/valid CSR 判定。该段结合地址命中、timer/PIC
+  配置、debug mode、read/write 属性和 CSR 操作类型生成 ``dec_csr_legal_d``。
+* L530-L613：``tlu_csr_pkt_d`` 打包。所有 one-hot CSR 命中和属性位被送给 TLU，由 TLU
+  完成实际 CSR read mux、write side effect、trap 和 interrupt state 更新。
+
+§13.2  ``eh2_dec_decode_ctl.sv`` — decode、result 与 nonblocking load 主控制
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dec/eh2_dec_decode_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dec/eh2_dec_decode_ctl.sv:全文
+
+逐段精读：
+
+* L1-L16：文件头和 package import。该文件包含 3 个 module：主 ``eh2_dec_decode_ctl``、
+  ``eh2_dec_cam`` 和位级 ``eh2_dec_dec_ctl``。
+* L17-L210：主 decode_ctl 模块端口。输入来自 IFU/IB、GPR、CSR、EXU/LSU/MUL/DIV、
+  TLU flush、debug 和 nonblocking load；输出是 ALU/LSU/MUL/DIV packet、bypass、
+  writeback、trace mirror 和 stall。
+* L211-L520：decode 阶段 I0/I1 operand、immediate、packet 和 legality 组合。该段把
+  compressed/predecode、CSR、debug fence、load/store/mul/div/atomic 选择转成下游控制。
+* L521-L940：pipeline valid、stall、flush、presync/postsync、debug stall、dual issue
+  和 I1 cancel 逻辑。这里决定哪条指令能从 D 进入 E1，哪条必须被 flush 或取消。
+* L941-L1300：operand bypass、GPR writeback source、CSR write data、LSU result、
+  MUL/DIV result 和 store-conditional result 选择。该段解释 RAW hazard 如何在 decode
+  控制层被消解。
+* L1301-L1760：E1/E2/E3/E4/WB pipeline 寄存器和 control/data enable。``dec_i*_data_en``
+  与 ``dec_i*_ctl_en`` 从这里驱动 EXU clock gating。
+* L1761-L2250：TLU 交互、exception/interrupt/debug command、CSR side effect、commit
+  kill 和 writeback qualification。该段是 decode_ctl 与 TLU 边界最密集的部分。
+* L2251-L2740：trace/WB1 mirror、performance event、secondary ALU、divide cancel、
+  debug readback 和 flush path 相关逻辑。UVM probe 和 RVFI-like trace 都依赖这些镜像。
+* L2741-L3233：主 module 收尾。剩余 assign/generate 完成 writeback、stall、commit、
+  nonblocking load output 和 ``endmodule``。
+* L3235-L3493：``eh2_dec_cam``。该 CAM 跟踪 LSU nonblocking load tag、rd、valid 和
+  data return；处理 dc2/dc5 invalidate、same-dest cancel、force halt、flush 和 load-use
+  boundary stall。
+* L3522-L3812：``eh2_dec_dec_ctl``。这是位级 decoder，把 instruction bits 与 predecode
+  信息展开成 ``out`` packet，覆盖 ALU、load/store、branch、CSR、mul/div、fence、atomic
+  和 Zb* bitmanip 指令类别。
+
+§13.3  ``eh2_dec_gpr_ctl.sv`` — GPR bank 读写
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dec/eh2_dec_gpr_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dec/eh2_dec_gpr_ctl.sv:全文
+
+逐段精读：
+
+* L1-L15：文件头和 include。GPR 控制模块不依赖复杂状态机，只负责 register file glue。
+* L16-L48：模块端口。输入包含读地址、写地址、写数据、write enable、thread/bank 选择
+  和 clock/reset；输出是 I0/I1 RS1/RS2 数据。
+* L49-L88：读写地址、write enable 和 x0 处理。该段保证 x0 读为零，写 x0 不改变状态。
+* L89-L116：register file array 与同步写。写回路径按 thread/bank 选择更新物理寄存器。
+* L117-L129：读数据输出和 module 结束。读口将数组内容或零值送回 ``eh2_dec.sv`` 的
+  per-thread operand mux。
+
+§13.4  ``eh2_dec_ib_ctl.sv`` — instruction buffer 控制
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dec/eh2_dec_ib_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dec/eh2_dec_ib_ctl.sv:全文
+
+逐段精读：
+
+* L1-L15：文件头和 import。IB control 是 IFU 到 decode 的 staging buffer。
+* L16-L105：模块端口。输入是 IFU I0/I1 valid/instruction/PC/predecode、stall/ready、
+  flush、debug stall、thread 选择；输出是 IB0-IB3 valid、instruction、PC、branch metadata
+  和 fault/debug 信息。
+* L106-L210：buffer valid、ready、write pointer 和 input selection。该段把 fetch group
+  写入 IB，并根据 decode 消费情况移动。
+* L211-L330：IB data path。instruction、compressed halfword、PC、PC4、predecode、branch
+  prediction index/tag/fghr/toffset 和 access fault 信息随 valid 一起推进。
+* L331-L450：flush、debug fence、i0_only、dual issue 和 stall 处理。该段决定 IB 中哪些
+  条目能形成 I0/I1，哪些因为 flush 或同步约束被清空。
+* L451-L539：输出打包和 module 结束。IB0/IB1/IB2/IB3 valid 与 instruction view 被送回
+  ``eh2_dec.sv`` 的 thread/lane selection。
+
+§13.5  ``eh2_dec_tlu_ctl.sv`` — trap/interrupt/debug/CSR 控制
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dec/eh2_dec_tlu_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dec/eh2_dec_tlu_ctl.sv:全文
+
+逐段精读：
+
+* L1-L25：文件头和 import。该文件包含主 ``eh2_dec_tlu_ctl`` 和 ``eh2_dec_timer_ctl``。
+* L26-L180：TLU control 端口。输入覆盖 commit、exception、interrupt、debug、CSR packet、
+  LSU error、PIC/timer/software/NMI、trigger 和 flush；输出覆盖 CSR state、flush path、
+  debug mode、interrupt claim、trace exception metadata 和 PMU。
+* L181-L520：CSR state、mstatus/mie/mip/mepc/mcause/mtval、debug CSR 和 EH2 custom CSR
+  相关寄存器声明与 reset 值。该段是 architectural state 的主要存储区。
+* L521-L980：exception、interrupt、NMI、debug entry、MRET/DRET 和 flush 优先级。
+  TLU 在这里选择进入 trap/debug 的原因、写入 EPC/cause/tval，并生成 lower flush。
+* L981-L1380：CSR read/write side effect、counter、performance event、PIC CSR、timer
+  CSR 和 memory diagnostic CSR 更新。该段解释 CSR 操作如何改变 core architectural state。
+* L1381-L1780：halt/run、MPC/debug resume、force halt、core empty、pause state 和
+  debug command done/fail。UVM halt/run agent 与 debug/cosim 场景重点观察这些信号。
+* L1781-L2140：interrupt prioritization、external interrupt claim、PIC current priority、
+  wakeup、fast interrupt 和 NMI delegation。该段是 PIC/interrupt directed tests 的 RTL 根。
+* L2141-L2350：trace metadata、commit valid、flush output、clock override、final assigns
+  和 ``endmodule``。trace exception/interrupt/cause/tval 从这里进入 ``trace_rv_trace_pkt``。
+* L2352-L2524：``eh2_dec_timer_ctl``。timer 子模块维护 mcycle/minstret 和 HPM 计数器，
+  响应 counter inhibit、performance event 和 reset，供 CSR read path 和 coverage 使用。
+
+§13.6  ``eh2_dec_tlu_top.sv`` — TLU top glue
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dec/eh2_dec_tlu_top.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dec/eh2_dec_tlu_top.sv:全文
+
+逐段精读：
+
+* L1-L25：文件头和 import。TLU top 是 per-thread TLU control 的实例化胶合层。
+* L26-L180：模块端口。它承接 DEC 顶层传入的 CSR、flush、interrupt、debug、PIC、LSU
+  error、trigger 和 commit 信号，并输出 per-thread TLU 状态。
+* L181-L330：内部 per-thread arrays 和 shared glue。该段把单个顶层信号拆成
+  ``NUM_THREADS`` 维度，准备实例化每线程 TLU。
+* L331-L640：per-thread ``eh2_dec_tlu_ctl`` 实例和连接。每个 hart/thread 拥有自己的
+  CSR/trap/debug state，但共享部分 top-level interrupt/PIC 输入。
+* L641-L820：thread 结果归并。debug halt/run ack、flush、PIC priority、trace metadata、
+  CSR read data 和 PMU event 被汇回 DEC 顶层。
+* L821-L906：clock override、ECC disable、external load forwarding disable、misc control
+  和 module 收尾。这些输出直接影响 top clock gating、LSU/IFU 行为和 coverage 采样。
+
+§13.7  ``eh2_dec_trigger.sv`` — debug trigger match
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/dec/eh2_dec_trigger.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/dec/eh2_dec_trigger.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头、include 和 package import。trigger 模块服务 debug trigger CSR。
+* L25-L44：模块端口。输入是 trigger packet、PC、load/store address 或 execute match
+  条件；输出是 trigger match bit。
+* L45-L58：组合匹配逻辑和 module 结束。该段按 trigger 配置比较地址/execute 条件，
+  将命中结果送回 DEC/TLU 触发 debug entry。

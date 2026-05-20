@@ -1911,3 +1911,94 @@ feedback 没有被跳过。
   divide 的结果与 ``exu_div_wren``、``exu_mul_result_e3`` 等写回信号统一输出。
 * L793-L808：E4 effective prediction、I1 valid 抑制和 ``exu_npc_e4``。如果 I0 同线程
   flush 已发生，I1 的 NPC/valid 会被压制，保证 retire/trace 不把 younger slot 当作有效提交。
+
+§12  v2-20 EXU 子模块全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-20 将 EXU 顶层下钻到 ALU、MUL/bitmanip 和 DIV。三者共同解释 ``eh2_exu.sv``
+实例化的真实计算逻辑：ALU 负责算术、比较、branch target 与 flush 判断；MUL 控制包含
+乘法和大量 Zb* bitmanip；DIV 控制包含多种可配置 divider 实现。
+
+§12.1  ``eh2_exu_alu_ctl.sv`` — primary/secondary ALU 与 branch 判定
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/exu/eh2_exu_alu_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/exu/eh2_exu_alu_ctl.sv:全文
+
+逐段精读：
+
+* L1-L16：文件头和 import。ALU control 使用 decode packet 中的 ALU/branch 控制位。
+* L17-L95：模块端口。输入覆盖 RS1/RS2/immediate、PC、branch immediate、predict packet、
+  E1-E4 enable、flush 和 ALU packet；输出是 ALU result、branch flush、flush path、predict
+  correction 和 branch metadata。
+* L96-L190：operand mux、adder/subtractor、logic op、shift、compare 和 sign/unsigned
+  处理。该段决定普通 ALU 与 branch compare 的基础结果。
+* L191-L300：branch/jump target、PC+4、upper/lower flush 和 predicted-correct 判断。
+  I0/I1 branch mismatch、jal/jalr、conditional branch taken 都在这里形成。
+* L301-L430：E1-E4 pipeline registers。ALU result、flush path、predict packet、branch
+  metadata 和 valid 随 clock enable 推进，保证 top EXU 可以在 E4 输出稳定反馈。
+* L431-L574：输出选择和 module 结束。最终 result、flush、mispredict、call/ret、bank、
+  hist、FGHR、index 和 target offset 被送回 ``eh2_exu.sv``。
+
+§12.2  ``eh2_exu_mul_ctl.sv`` — multiply 与 Zb* bitmanip
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/exu/eh2_exu_mul_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/exu/eh2_exu_mul_ctl.sv:全文
+
+逐段精读：
+
+* L1-L16：文件头和 import。MUL control 同时承载 RV32M multiply 和多组 bitmanip datapath。
+* L17-L92：模块端口和内部信号。输入是 multiply packet、RS1/RS2、LSU bypass、clock
+  override；输出是 E3 result。
+* L93-L166：按参数门控 ZBE/ZBC/ZBP/ZBR/ZBF。未启用的 bitmanip 子扩展被 tie-off，避免
+  无效逻辑影响综合和覆盖。
+* L167-L224：multiply pipeline。E1/E2/E3 clock enable、operand sign 扩展、load-to-mul
+  bypass、signed product 和 high/low result 在这里形成。
+* L225-L279：``bcompress`` 与 ``bdecompress``。这两段 always_comb 用循环扫描 bit mask，
+  完成 bit gather/scatter 类操作。
+* L280-L335：carry-less multiply。``clmul``、``clmulh``、``clmulr`` 通过 XOR partial
+  product 实现 Zbc 语义。
+* L336-L430：``grev`` 与 ``gorc``。多级 bit reverse/or-combine network 根据 shift bits
+  逐层变换 1/2/4/8/16 bit 粒度。
+* L431-L521：``shfl``、``unshfl`` 与 xperm。该段完成 shuffle/unshuffle 和 nibble/byte/half
+  permute 类 bitmanip 结果。
+* L522-L609：CRC32/CRC32C。多个 always_comb 循环按 polynomial 对 byte/half/word 宽度
+  迭代，生成 Zbr CRC 指令结果。
+* L610-L686：BFP、result mux 和 bitmanip/multiply 结果选择。该段按 packet 控制在
+  product、bitmanip 和 CRC/BFP 之间选择最终输出。
+* L687-L738：E3 输出寄存和 module 结束。最终 ``out`` 送回 ``eh2_exu.sv`` 的
+  ``exu_mul_result_e3``。
+
+§12.3  ``eh2_exu_div_ctl.sv`` — configurable divider family
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/exu/eh2_exu_div_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/exu/eh2_exu_div_ctl.sv:全文
+
+逐段精读：
+
+* L1-L16：文件头和 import。该文件包含 divider wrapper、legacy divider、新 divider
+  1/2/3/4 bit variants 和 leading-classifier helper。
+* L17-L132：``eh2_exu_div_ctl`` wrapper。按 ``pt.DIV_NEW`` 与 ``pt.DIV_BIT`` 选择具体
+  divider 实现，并把 ``finish_dly`` 之后的 result gate 到 ``out``。
+* L139-L446：``eh2_exu_div_existing_1bit_cheapshortq``。旧 1-bit divider 使用 run/count、
+  q/a/m 寄存器、small-number fast path、short quotient shift、signed correction 和
+  remainder correction 实现 quotient/remainder。
+* L454-L711：``eh2_exu_div_new_1bit_fullshortq``。新 1-bit divider 重新组织 control、
+  special case、A/B/Q/R 寄存器、shortq、divide-by-zero 和 restore/subtract datapath，
+  以更规整的 full-shortq 结构输出结果。
+* L719-L992：``eh2_exu_div_new_2bit_fullshortq``。2-bit variant 每轮推进更多 quotient
+  bit，扩展 count、adder、quotient_set 和 restore 逻辑，提高 divider 吞吐。
+* L1000-L1329：``eh2_exu_div_new_3bit_fullshortq``。3-bit variant 增加更宽的选择和
+  partial remainder 更新，保持 signed/rem/divide-by-zero 语义与 1-bit/2-bit 版本一致。
+* L1337-L1741：``eh2_exu_div_new_4bit_fullshortq``。4-bit variant 是本文件最长实现，
+  包含更密集的 quotient digit 选择、restore path 和 shortq 跳步，用面积换更少迭代。
+* L1749-L1832：``eh2_exu_div_cls``。classifier helper 计算 operand class/leading group，
+  服务 new divider 的 shortq shift 判断，最后结束整个 divider family 文件。
