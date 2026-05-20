@@ -1668,3 +1668,210 @@ review checklist。
   拉低 toggle 指标。
 * L26-L32：加载 ``unr.vRefine`` 和 ``aux_code.vRefine``。这些 refinement 应由人工审查
   unreachable/auxiliary code 后生成，不能用来掩盖真实 DUT 行为缺口。
+
+§12  v2-32 directed/cosim/coverage 配置全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐配置与 testlist 资产的全文 ``literalinclude``。前文已经按主题讲过
+``rtl_simulation.yaml``、directed/cosim testlist、waiver 与 coverage 片段；
+这里把 v2 行级门禁要求的完整文件纳入渲染，并按连续行段给出源码级解释。
+
+§12.1  ``directed_testlist.yaml`` — directed assembly 回归池
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/directed_tests/directed_testlist.yaml
+   :language: yaml
+   :linenos:
+   :caption: dv/uvm/core_eh2/directed_tests/directed_testlist.yaml:全文
+
+逐段精读：
+
+* L1-L9：文件头声明 Apache-2.0，并定义基础 ``eh2_directed`` config。该 config
+  使用 ``core_eh2_base_test``、300 秒超时、bare-metal GCC 选项、``cosim_link.ld``
+  和 ``tests/asm`` include 路径，是大多数 directed assembly 的共享编译/仿真入口。
+* L11-L23：``eh2_directed_pic`` 和 ``eh2_directed_fetch_toggle`` 是两个专用 config。
+  前者切到 ``core_eh2_pic_test``，用于带 IRQ sideband 的 PIC 场景；后者切到
+  ``core_eh2_fetch_toggle_test``，用于 IFU/BTB toggle pump。二者沿用同一链接脚本
+  和编译选项，使差异集中在 UVM test class。
+* L25-L61：第一组 smoke/ALU/load-store/IRQ/PMP/CSR 条目定义基础 directed proof。
+  ``test_srcs`` 指向真实 ``tests/asm/*.S``，``iterations`` 固定为 1；其中
+  ``directed_pmp_smoke`` 显式 ``cosim: enabled``，``directed_csr_warl`` 显式
+  ``cosim: disabled``，说明 testlist 自身就能覆盖 cosim 策略差异。
+* L63-L106：第二组条目覆盖双发射 hazard、non-blocking load chain、AXI4 error
+  injection、illegal instruction、nested trap、debug basic 和 multi-region PMP。
+  ``directed_axi4_error_inject`` 通过 ``sim_opts`` 打开 100% AXI4 错误注入，因此它是
+  testlist 到 UVM agent plusarg 的直接连接点。
+* L108-L220：PMP 专项条目按模式、权限、地址边界和 fault 结果展开：TOR、NAPOT、
+  NA4、OFF、lock、priority、I-side、D-side load/store、X/W/R 组合、alignment、
+  cross-region、CSR WARL、no-match default、after-trap 和 ``mscause`` decode。
+  这些条目都使用 ``cosim: enabled``，说明 PMP 修复路径已经进入 lockstep 对比目标。
+* L222-L268：coverage pump 条目覆盖 PIC state walk、debug DRET walk、DMA burst、
+  IFU BP/BTB、LSU store buffer 和 ICCM ECC/error。它们多数关闭 cosim，因为目标是
+  激励 RTL 结构 coverage 或错误注入窗口，而不是 Spike architectural lockstep。
+* L270-L303：toggle pump 条目分别面向 AXI4 data、CSR、integer RF、DCCM 和
+  multiply/divide datapath。该段用短 directed assembly 稳定拉高特定数据路径翻转率，
+  与 coverage 配置中的 toggle metric 形成闭环。
+
+接口关系：
+
+* 被调用：``metadata._select_test_entries()``、``signoff.py`` 和 staged Makefile flow
+  读取该 YAML，生成 ``tests_and_counts`` 或 sign-off 待跑列表。
+* 调用：YAML 本身不执行代码；它通过 ``rtl_test``、``test_srcs``、``sim_opts`` 和
+  ``cosim`` 字段影响后续 Python runner 与 UVM test。
+* 共享状态：``config`` 名称必须在同文件的 config 条目中存在；``test_srcs`` 必须能被
+  directed assembly 构建路径找到；``sim_opts`` plusarg 必须被对应 UVM component 消费。
+
+§12.2  ``cosim_testlist.yaml`` — Spike lockstep proof 池
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/directed_tests/cosim_testlist.yaml
+   :language: yaml
+   :linenos:
+   :caption: dv/uvm/core_eh2/directed_tests/cosim_testlist.yaml:全文
+
+逐段精读：
+
+* L1-L10：文件头明确这是 EH2 cosim proof tests。唯一 config ``eh2_cosim`` 固定使用
+  ``core_eh2_cosim_test``，这意味着 Spike lockstep 不是测试条目的可选后处理，而是
+  UVM test class 的构造前提。
+* L12-L34：``cosim_smoke``、``cosim_alu``、``cosim_load_store`` 和
+  ``cosim_dual_issue`` 覆盖初始化、寄存器写回、LSU memory notification 与双发射退休顺序。
+  这组条目是 cosim scoreboard 最小可解释 proof set。
+* L36-L54：``cosim_bitmanip``、``cosim_exception_compare`` 和
+  ``cosim_atomic_basic`` 把 Zb*、exception CSR 对比和 LR/SC/AMO 纳入 lockstep。
+  后两项显式放宽 ``max_cycles``/``timeout_ns``，因为异常路径和 atomic retry 比普通
+  mailbox smoke 更容易拉长仿真时间。
+
+接口关系：
+
+* 被调用：``metadata._select_test_entries()`` 对文件名 ``cosim_testlist.yaml`` 有专门分支，
+  sign-off 可通过 ``RUN_ALL_COSIM`` 或测试选择逻辑纳入这些条目。
+* 调用：YAML 不调用代码；``test_srcs`` 连接 assembly，``rtl_test`` 连接 UVM cosim test。
+* 共享状态：所有条目共享 ``eh2_cosim`` config，因此 lockstep 使能、链接脚本和 include
+  路径保持一致。
+
+§12.3  ``cov_fsm.cfg`` — VCS FSM extraction 表
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/cov_fsm.cfg
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/cov_fsm.cfg:全文
+
+逐段精读：
+
+* L1-L11：注释说明该文件使用 VCS O-2018.09 的 ``-cm_fsmcfg`` 语法。``+module``
+  注释保留人工 coverage triage 的模块意图，同时不影响 VCS 解析。
+* L13-L25：``eh2_dbg`` 的 ``dbg_state`` 与 ``sb_state`` 两个 FSM 被显式列入。
+  前者覆盖 halt/resume、core command、system-bus command 和 command done；
+  后者覆盖 system-bus read/write 命令、地址/数据阶段、response 和 done。
+* L27-L32：``eh2_lsu_bus_buffer`` 的 ``buf_state`` 描述 load/store bus buffer
+  在 IDLE、WAIT、CMD、RESP 和多种 DONE 状态之间的转换，是 LSU 外部总线状态覆盖入口。
+* L34-L53：``eh2_dma_ctrl`` 的 Wr/Rd/Rsp 三个 pointer 被建模为 0-4 的环形状态机。
+  这里不是 RTL enum，而是用指针状态捕捉 DMA FIFO/response 队列推进。
+* L55-L67：``eh2_lsu_stbuf`` 的 write/read pointer 以 10 深度状态展开。write pointer
+  允许跨 1 或 2 个位置推进，read pointer 按顺序推进，对应 store buffer 入队/出队压力。
+* L69-L74：``eh2_ifu_ifc_ctl`` 的 fetch 控制 FSM 覆盖 IDLE、FETCH、STALL 和 WFM，
+  解释 IFU 前端什么时候继续取指、等待 memory 或从 stall 中恢复。
+* L76-L88：``eh2_ifu_mem_ctl_thr`` 的 miss 与 parity/error FSM 被纳入。miss FSM
+  覆盖 critical word bypass、duplicate miss、stream 和 second miss；``perr_state``
+  覆盖 ICache/ECC/DMA sideband error 处理。
+* L90-L95：``err_stop_state`` 描述 error-stop fetch 序列，覆盖从 idle 到 fetch1/fetch2
+  以及 stop-fetch 的转换，是取指错误停止路径的结构 coverage 依据。
+
+接口关系：
+
+* 被调用：``rtl_simulation.yaml`` 的 VCS ``cov_opts`` 通过 ``-cm_fsmcfg`` 指向该文件。
+* 调用：该配置不调用代码；它给 VCS coverage extractor 提供 module/current/next/state/transition。
+* 共享状态：``MODULE``、``CURRENT`` 和 ``NEXT`` 必须与 RTL signal 名称一致，否则 VCS
+  会无法抽取对应 FSM 或产生 coverage 缺口。
+
+§12.4  ``cov_fsm_reset_filter.cfg`` — active-low reset 过滤
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/cov_fsm_reset_filter.cfg
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/cov_fsm_reset_filter.cfg:全文
+
+逐段精读：
+
+* L1-L3：注释说明 VCS reset filter 使用 ``signal=<reset> case=TRUE/FALSE``，EH2
+  reset 为 active-low，因此 reset 驱动的转换在信号为 ``FALSE`` 时过滤。
+* L4-L6：``rst_l``、``dbg_rst_l`` 和 ``dbg_dm_rst_l`` 分别覆盖主复位、debug 复位和
+  debug module 复位。三者都按 ``case=FALSE`` 过滤，避免 reset release/hold 状态机跳转
+  被误计为功能覆盖。
+
+接口关系：
+
+* 被调用：VCS ``cov_opts`` 通过 ``-cm_fsmresetfilter`` 指向该文件。
+* 调用：无。
+* 共享状态：reset signal 名称必须与编译后 design hierarchy 中可见的 reset net 对齐。
+
+§12.5  ``cov_full_nc.ccf`` — NC/Incisive coverage 口径
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/cov_full_nc.ccf
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/cov_full_nc.ccf:全文
+
+逐段精读：
+
+* L1-L18：文件头说明该 CCF 对齐 lowRISC Ibex/OpenTitan 的 Xcelium 工业实践，同时兼容
+  较老的 NC/Incisive 152。注释明确列出 continuous assign、branch、statement、
+  port-only toggle 和 expression instrumentation 这些默认可能不足的 coverage 口径。
+* L19-L24：第一步先 ``deselect_coverage -all`` 和 ``-covergroup``，把 coverage
+  选择重置为空集合。这样后续每个 metric 都是显式打开，避免工具默认值变化影响报告。
+* L25-L33：expression coverage 打开 operator 和 statement 可覆盖范围；注释解释
+  ``-vlog_short_circuit`` 在 NC 152 不支持，因此没有照搬新 Xcelium 参数。
+* L34-L44：branch、statement 和 continuous assignment scoring 被逐一打开，使 NC
+  口径接近 VCS ``-cm line+branch+cond`` 与 continuous assign 统计。
+* L46-L63：lib cell 和 toggle scoring 配置开启 enum/MDA toggle、port-only toggle 和
+  X 翻转计入。port-only 策略减少内部组合 net 噪声，更贴近 release 指标。
+* L65-L83：coverage scope 选择 DUT 子树、functional coverage interface、RVFI converter
+  和 memory model；covergroup 使用 ``-module`` 选择 ``eh2_fcov_if`` 与
+  ``eh2_pmp_fcov_if``，符合 CCF 对 covergroup 选择的限制。
+* L85-L86：显式排除 testbench 桥接 stub ``core_eh2_tb_top.tb_intf``，防止 TB glue logic
+  拉高或污染 DUT code coverage。
+
+接口关系：
+
+* 被调用：``rtl_simulation.yaml:nc`` 的 ``cov_opts`` 通过 ``-covfile`` 指向该文件。
+* 调用：该文件由 NC/Incisive coverage engine 解释，不直接运行仓库脚本。
+* 共享状态：实例路径 ``core_eh2_tb_top.dut``、``u_fcov_if``、``u_rvfi_converter`` 和
+  memory model 名称必须与 TB hierarchy 保持一致。
+
+§12.6  ``gen_testlist.py`` — 外部 directed suite 生成器
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/directed_tests/gen_testlist.py
+   :language: python
+   :linenos:
+   :caption: dv/uvm/core_eh2/directed_tests/gen_testlist.py:全文
+
+逐段精读：
+
+* L1-L18：脚本头说明该工具从 ``riscv-tests``、``riscv-arch-tests`` 和 ePMP directed
+  tests 生成 testlist，并由 Ibex 版本适配到 EH2。import 只依赖 ``os``、``argparse``
+  和 ``sys``。
+* L19-L72：``add_configs_and_handwritten_directed_tests()`` 先写出 3 个 config：
+  ``riscv-tests``、``riscv-arch-tests`` 和 ``epmp-tests``。每个 config 包含链接脚本、
+  include、GCC 参数、``core_eh2_base_test`` 和 ``PMPEnable`` RTL 参数。
+* L73-L410：同一函数继续拼接 handwritten directed tests。这里把 empty test、PMP
+  ``mseccfg`` RLB/L-bit/U-mode 组合、overlap 和 U-mode exec 测试写成 YAML 字符串，
+  最终追加到 ``directed_testlist.yaml``。
+* L415-L440：``append_directed_testlist()`` 扫描外部 suite 目录，根据 ``is_assembly``
+  选择 ``.S`` 或 ``.c``，再为每个文件生成 ``test`` 条目。该函数使用 shell ``ls``/``egrep``
+  枚举文件，因此它是离线生成器，不是仿真 runtime 依赖。
+* L442-L448：``list_tests()`` 是一个简单目录枚举 helper，会打印中间列表；当前主流程没有调用它。
+* L450-L490：``_main()`` 解析 ``--add_tests``，清空旧 ``directed_testlist.yaml``，
+  写入固定 config/handwritten tests，再按选择追加 riscv-tests、riscv-arch-tests 或
+  ePMP outputs。函数最后固定返回 0，表示生成动作成功不因单个测试内容失败而中断。
+
+接口关系：
+
+* 被调用：开发者手工运行该脚本生成外部 suite directed testlist。
+* 调用：读取 vendor suite 目录，写当前目录下 ``directed_testlist.yaml``。
+* 共享状态：生成内容假设 vendor path、``link.ld``、``core_eh2_base_test`` 和
+  ``PMPEnable`` 参数存在；运行目录会影响输出文件位置。
