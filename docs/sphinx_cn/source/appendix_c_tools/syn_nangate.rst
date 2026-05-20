@@ -904,3 +904,63 @@ L79-L104 输出 flat Verilog 诊断产物。当前 release 采用 wrapper/block-
 逐段精读：L1-L40 定义综合/LEC 所需的基础行为模型；L41-L100 补充 memory、clock
 或 library wrapper 行为；L101-L140 继续提供工具可读的 SystemVerilog stub。该文件
 用于商业工具读入闭环，不改变 RTL golden source。
+
+§12  v2-54 ``beh_lib_syn.sv`` 行为库全文行段级精读
+--------------------------------------------------------------------------------
+
+``syn/beh_lib_syn.sv`` 是综合和 LEC 读入时使用的 EH2 行为库补充文件。它不是新的
+golden RTL，而是把上游设计中常见的 flop wrapper、clock-gated flop、仲裁器、load-store
+adder、clock gate header 和 ECC stub 做成商业工具可解析的 SystemVerilog 版本。该文件末尾明确
+标注后续模块被截断，因为那些模块包含 Yosys 0.55 无法解析的 ``import eh2_pkg::*``；当前商业
+DC/Formality path 通过 wrapper/block-level flow 使用它。
+
+.. literalinclude:: ../../../../syn/beh_lib_syn.sv
+   :language: systemverilog
+   :linenos:
+   :caption: syn/beh_lib_syn.sv:全文
+
+逐段精读：
+
+* L1-L16：保留 Apache-2.0 license 和「all flops call the rvdff flop」说明。该注释说明本文件以
+  ``rvdff`` 为基础行为单元，其他 wrapper 都围绕它展开。
+* L19-L73：定义基础 flop 家族 ``rvdff``、``rvdffs`` 和 ``rvdffsc``。``rvdff`` 是异步低有效 reset 的
+  DFF；``rvdffs`` 在 ``en`` 为 0 时回灌 ``dout``；``rvdffsc`` 在 ``clear`` 时把输入 mask 成 0。
+  ``RV_CLOCKGATE`` 分支只做仿真 strobe，不改变 flop 行为。
+* L75-L138：定义 FPGA 版本 ``rvdff_fpga``、``rvdffs_fpga`` 和 ``rvdffsc_fpga``。在
+  ``RV_FPGA_OPTIMIZE`` 下使用 ``rawclk`` 和 ``clken`` 驱动基础 wrapper；否则退回普通 flop wrapper。
+  这让同一 RTL 可以服务 FPGA 优化和商业综合两种读入形态。
+* L141-L238：定义宽 flop 拆分 wrapper ``rvdff4iee`` 与 ``rvdff4e``。它们把宽向量按 localparam
+  拆成 LEFTMOST/LEFT/RIGHT/RIGHTMOST 四段，并根据 ``RV_FPGA_OPTIMIZE`` 在单个 ``rvdffs`` 与多段
+  clock-gated wrapper 之间切换。``RV_PHYSICAL`` 外的参数检查保留为 generate guard，原 ``$error``
+  文本被注释掉。
+* L241-L300：定义 ``rvdffe`` 与 ``rvdffpcie``。``rvdffe`` 用 ``rvclkhdr`` 产生 ``l1clk`` 后实例化
+  ``rvdff``，是 clock-enable flop 的核心 wrapper；``rvdffpcie`` 固定宽度 31，并通过
+  ``rvdfflie`` 做 PC 相关分段 flop。
+* L302-L394：定义 ``rvdfflie`` 和 ``rvdffibie``。前者把向量拆成 LEFT 与 EXTRA 两段；后者服务
+  instruction buffer，把 LEFT/PADLEFT/MIDDLE/PADRIGHT/RIGHT 分段，其中 MIDDLE 和 RIGHT 的 enable
+  由数据位控制，用于 prett/cinst 相关低功耗行为。
+* L396-L492：定义 destination packet 与 predict packet 专用 wrapper ``rvdffdpie`` 和
+  ``rvdffppie``。二者都按字段边界拆分宽 flop，``rvdffppie`` 还区分 control enable、data enable 和
+  右侧普通 enable，便于减少无效翻转。
+* L497-L654：定义 input-enable flop 族 ``rvdffie``、``rvdffiee``、``rvdff2iee`` 和 ``rvdff2ie``。
+  这些模块通过 ``|(din ^ dout)`` 派生数据变化 enable，并在需要时与外部 ``en`` 相与；非 FPGA path
+  继续复用 ``rvdffe``/``rvclkhdr``。
+* L656-L686：定义同步器 ``rvsyncss`` 与 ``rvsyncss_fpga``。二者都是两级 flop synchronizer，FPGA
+  版本显式传入 ``gw_clk``、``rawclk`` 和 ``clken``。
+* L688-L788：定义二路仲裁器 ``rvarbiter2_fpga``、``rvarbiter2`` 和 ``rvarbiter2_pic``。它们根据
+  ``ready``、``shift`` 和 favor bit 选择 thread id；PIC 版本额外把 ``favor`` 作为输出暴露。
+* L791-L922：注释给出 PLA 真值表，随后定义 SMT 仲裁器 ``rvarbiter2_smt``。该模块处理 flush、
+  load/store、multiply、i0-only、thread stall 和 force favor flip，输出 issue lane 选择信号。
+* L925-L951：定义 ``rvlsadder``。低 12 bit 做普通加法并输出 carry；高 20 bit 根据 offset 符号和
+  carry 选择原值、+1 或 -1，用于 load/store 地址生成。
+* L953-L995：说明后续含 ``import eh2_pkg::*`` 的模块被截断，并补入 ``rvclkhdr``、``rvoclkhdr``、
+  ``rvecc_encode`` 和 ``rvecc_decode`` stub。clock header 用 ``clk & en`` 生成 ``l1clk``；ECC encode
+  固定输出 0，decode 透传 data/ECC 并关闭 error 标志，用于满足 mem_lib 引用和综合读入。
+
+接口关系：
+
+* 被调用：EH2 RTL、DC wrapper 和 Formality wrapper 中引用的 flop/arbiter/adder/clock/ECC helper。
+* 调用：本文件内部大量 wrapper 互相实例化，例如 ``rvdffe`` 调 ``rvclkhdr``/``rvdff``，
+  ``rvdffibie`` 调 ``rvdff2iee``/``rvdffe``。
+* 共享状态：不读写文件；作为 elaboration-time 行为库影响商业工具对 flop、clock gate、
+  arbitration、adder 和 ECC stub 的解析。

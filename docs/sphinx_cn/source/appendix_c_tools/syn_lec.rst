@@ -2628,3 +2628,55 @@ Formality report 生成 ``syn/build/lec_summary.txt``。
 * 调用：Python 标准库 ``Path``、``re`` 和 ``datetime``；不调用 Formality。
 * 共享状态：读取 ``syn/build/lec_blocklevel/lec_*.rpt``、``lec_*_timeout_status.rpt`` 和
   ``lec_*.log``；写 ``syn/build/lec_summary.txt`` 并向 stdout 打印同一份 summary。
+
+§20  v2-54 ``lec_common.tcl`` block-level 公共层全文行段级精读
+--------------------------------------------------------------------------------
+
+``syn/scripts/lec_blocklevel/lec_common.tcl`` 是所有 per-block Formality 脚本共享的公共层。它负责
+目录、technology library、reference wrapper、SVF 选择、implementation 读入、implementation top
+选择和报告写出；具体 block 脚本只负责选择 top、补充 user match，并调用 ``match``/``verify``。
+读这个文件时要关注两个边界：它不 mask compare point，也不判断最终 release pass/fail；后者由
+Formality report 和 ``lec_summary.py`` 完成。
+
+.. literalinclude:: ../../../../syn/scripts/lec_blocklevel/lec_common.tcl
+   :language: text
+   :linenos:
+   :caption: syn/scripts/lec_blocklevel/lec_common.tcl:全文
+
+逐段精读：
+
+* L1-L9：文件头说明该公共层服务 R3-C block-level Formality，复用 RC4 reference wrapper 与
+  synthesized netlist，但每个 block 会选择更窄 top；随后设置 ``EH2_ROOT``、``BUILD_DIR``、
+  ``RPT_DIR`` 并创建 report 目录。
+* L11-L20：决定 Formality run dir。调用者可用 ``R3C_FM_RUN_DIR`` 覆盖，否则使用
+  ``lec_blocklevel/run/fm/shared``；脚本创建目录、切换工作目录，并尝试把 ``hdlin_temporary_dir``
+  指向该目录。
+* L21-L28：初始化 ``R3C_SVF_PRELOADED``，抑制常见 reader/elab message，设置 SV 2012、
+  relaxed verification mode、undriven signal 为 0，以及 clock-gate hold mode 为 low。这里是
+  block-level LEC 的公共 Formality policy。
+* L29-L40：设置 search path，包括 run dir、report dir、本仓库 ``syn/include``、上游 snapshot、
+  design include/lib；随后读取 ``class.db`` 与 ``gtech.db``。
+* L42-L63：处理预加载 SVF。``R3C_PRELOAD_SVF_FILE`` 优先，其次 ``R3C_PRELOAD_SVF_TOP`` 对应的
+  ``synth/<top>.svf``，再 fallback 到 ``default.svf``。成功预加载会把 ``R3C_SVF_PRELOADED`` 置 1。
+* L65-L67：读取 reference design ``syn/build/eh2_dc_wrapper.sv``。公共层只读 reference，不设置
+  reference top；具体 block 脚本在 source 之后调用 ``set_top r:/WORK/<TOP>``。
+* L68-L88：``r3c_load_svf`` 在未预加载时为当前 block 加载 ``synth/<top>.svf``，失败时降级到
+  ``default.svf``，再失败则只打印 warning。``set_svf`` 被 ``catch`` 包住，避免单个 SVF guide 问题
+  中断脚本读入。
+* L90-L111：``r3c_read_impl`` 选择 implementation 来源。可强制 top-context ``eh2_synth.v``，也可
+  强制 standalone Verilog；默认优先 ``synth/<top>.ddc``，其次 ``synth/<top>.v``，最后 fallback 到
+  top-context netlist 并打印 warning。
+* L113-L126：``r3c_set_impl_top`` 选择 implementation top 名。强制 top-context 时使用 ``<top>_``；
+  standalone Verilog 存在时使用原 ``<top>``；否则使用 top-context suffixed top。这解释了 IFU 等脚本
+  中 reference/implementation top 名可能不同的原因。
+* L128-L139：``r3c_write_reports`` 写标准 report 集：``lec_<label>.rpt``、普通 failing report、
+  verbose failing report 和 unverified report。两个 failing report 用 ``catch`` 处理工具版本差异；
+  status 和 unverified report 是必写项。
+
+接口关系：
+
+* 被调用：所有 ``syn/scripts/lec_blocklevel/lec_*.tcl`` 通过 ``source`` 加载。
+* 调用：Formality ``read_db``、``read_sverilog``、``set_svf``、``read_verilog``、``read_ddc``、
+  ``set_top`` 和 report 命令。
+* 共享状态：读取 wrapper、block DDC/netlist、SVF、Synopsys libraries；写 block-level report 目录，
+  并通过 Tcl procs 向 per-block 脚本提供公共操作。
