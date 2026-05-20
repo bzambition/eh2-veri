@@ -1492,3 +1492,43 @@ polarity、type 和 clear 生成配置后的 pending 请求。
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§12  v2-24 ``eh2_pic_ctrl.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-24 将 PIC 顶层控制文件全文纳入本页。PIC 的风险点不只是寄存器地址映射，
+还包括 priority tree、thread 选择、gateway pending、delegation 和 threshold 比较；
+这些逻辑都在同一个 ``eh2_pic_ctrl.sv`` 中。
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/eh2_pic_ctrl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/eh2_pic_ctrl.sv:全文
+
+逐段精读：
+
+* L1-L22：文件头和注释。该文件包含 PIC 顶层、priority compare helper 和 configurable
+  gateway helper。
+* L23-L59：``eh2_pic_ctrl`` 端口。输入来自 LSU/PIC memory 端口、external interrupt source、
+  TLU threshold/current priority、halt status 和 clock/reset；输出是 PIC read data、claim id、
+  priority level、external interrupt pending 和 wakeup。
+* L60-L212：地址 map localparam、寄存器数组、gateway 数组、priority tree 数组、clock
+  和 thread arbitration 信号声明。PIC CSR/PIC memory 地址窗口在这里固定。
+* L213-L254：PIC read/write clock enable、地址 decode、delegation 配置开关和 bypass 判定。
+  LSU 同拍读写同一 PIC 地址时通过 ``picm_bypass_ff`` 返回 write data。
+* L260-L319：thread ready/favor/current-thread 选择。双线程配置下 PIC 在两个 thread 间轮转
+  或按 ready 状态选择当前 interrupt target。
+* L326-L407：每个 interrupt source 的 priority、enable、delegation、gateway config、
+  clear 和 pending register generate。配置关闭的 source 被 tie-off。
+* L408-L511：priority tree。源码按 ``pt.PIC_2CYCLE`` 选择单周期或两周期 tree，并用
+  ``eh2_cmp_and_mux`` 比较 priority/id，得到 ``claimid_in`` 和 ``selected_int_priority``。
+* L516-L596：PIC config、claimid/pl/mexintpend/mhwakeup 和 threshold/current priority 比较。
+  ``intpriord`` 会反转 priority 语义，影响 max interrupt 和 pending 判定。
+* L605-L675：PIC memory read mux、intpend/intenable/delg/gateway/config readback、
+  ``picm_rd_data`` bypass 和 main module 结束。
+* L678-L700：``eh2_cmp_and_mux``。该 helper 比较两路 priority，priority 相等时按 id
+  tie-break，服务上方 priority tree。
+* L703-L728：``eh2_configurable_gw``。该 helper 同步 external interrupt source，并按 polarity、
+  type 和 clear 生成 gateway pending。
+* L729-L737：文件尾部保留空行。它们不参与综合逻辑，但全文 ``literalinclude`` 会覆盖到
+  这些行；审计脚本因此能确认文档没有遗漏源文件末尾。
