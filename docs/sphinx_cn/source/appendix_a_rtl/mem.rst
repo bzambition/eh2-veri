@@ -1817,3 +1817,41 @@ bit。
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§11  v2-25 ``eh2_mem.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-25 将 memory wrapper 顶层全文纳入本页。``eh2_mem`` 不是一个 RAM macro，
+而是把 DCCM、ICCM、I-cache data/tag 和 BTB SRAM wrapper 按参数开关组合起来的
+集成层。它的常见风险是某个 profile 关闭 DCCM、ICCM、I-cache 或 BTB 后，输出 tie-off
+与上游控制逻辑预期不一致。
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/eh2_mem.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/eh2_mem.sv:全文
+
+逐段精读：
+
+* L1-L17：Apache 2.0 文件头。该文件来自上游 VeeR EH2 RTL，不是本验证平台生成的 wrapper。
+* L18-L23：``eh2_mem`` 模块头、``eh2_pkg`` 导入和 ``eh2_param.vh`` 参数注入。
+  这让同一份源码能按 ``pt`` 参数展开不同 DCCM/ICCM/I-cache/BTB 配置。
+* L24-L45：全局 clock/reset、ECC disable、DCCM 读写地址、写数据、读数据和
+  DCCM foundry extension packet。DCCM 被 LSU 控制，``eh2_mem`` 只负责实例化对应 memory wrapper。
+* L46-L63：ICCM 端口。这里同时接收 DMA/IFU 访问、ECC correction 状态、thread 选择和写数据，
+  因此 ICCM wrapper 是 IFU、DMA、ECC repair 的交汇点。
+* L64-L95：I-cache data/tag 和 debug 端口。``ic_debug_*`` 允许 CSR/debug 路径直接读写
+  I-cache array，``ic_eccerr``/``ic_parerr`` 把 array 错误送回 IFU 控制逻辑。
+* L96-L113：BTB SRAM 端口。EH2 的 BTB 使用多 virtual bank 读数据和 per-bank 地址，
+  输出 ``eh2_btb_sram_pkt`` 给 IFU 分支预测路径。
+* L116-L118：``rvoclkhdr`` 生成 ``active_clk``。这个 clock header 在当前文件中没有继续使用，
+  但保留了 memory wrapper 的 clock override 接口语义。
+* L119-L128：DCCM generate。``pt.DCCM_ENABLE`` 为 1 时实例化 ``eh2_lsu_dccm_mem``；
+  关闭时把两个 DCCM 读数据输出 tie-off 为 0，避免禁用 profile 出现 X 传播。
+* L130-L142：I-cache generate。仿真启动时打印三类 memory enable 参数；I-cache 开启时实例化
+  ``eh2_ifu_ic_mem``，关闭时 tie-off hit、tag parity 和读数据。
+* L144-L154：ICCM generate。开启时实例化 ``eh2_ifu_iccm_mem`` 并裁剪 ``iccm_rw_addr``；
+  关闭时把普通读数据和 ECC 读数据全部 tie-off。
+* L156-L162：BTB SRAM generate。``pt.BTB_USE_SRAM`` 为 1 时实例化 ``eh2_ifu_btb_mem``；
+  源码没有写关闭分支，这意味着关闭 BTB SRAM 的 profile 需要上游参数组合保证相关输出不用。
+* L164-L165：模块结束。全文行覆盖确认 memory wrapper 末尾没有额外 helper 或 bind 逻辑被漏讲。

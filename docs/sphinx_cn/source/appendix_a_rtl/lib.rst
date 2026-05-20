@@ -1506,3 +1506,136 @@ library 模块是全设计复用最多的一层。问题常见于“症状在 DE
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§11  v2-25 lib 目录全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-25 将上游 ``design/lib`` 目录 5 个文件全部提升为全文行覆盖。这里的文件不是单一
+功能块，而是全设计共用的寄存器 wrapper、clock header、ECC/range helper、RAM macro
+模板和 AXI/AHB bridge。排查这层时要先问“当前症状来自库单元本身，还是调用方参数给错”。
+
+§11.1  ``beh_lib.sv`` — flop、arbiter、ECC 与 clock header
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lib/beh_lib.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lib/beh_lib.sv:全文
+
+逐段精读：
+
+* L1-L17：文件头。``beh_lib.sv`` 是 behavior/library mode 文件，通常通过 filelist 的
+  ``-v`` 供实例化解析。
+* L19-L138：基础 DFF wrapper。``rvdff``、``rvdffs``、``rvdffsc`` 及 FPGA 变体封装
+  reset/set/clear、clock enable 和 raw clock，用统一实例名隐藏工艺差异。
+* L141-L238：多路分段 enable flop。``rvdff4iee`` 和 ``rvdff4e`` 把宽数据拆成 4 段，
+  允许不同段使用独立 enable，降低大 bus pipeline 的无效翻转。
+* L241-L342：常用 enable flop 变体。``rvdffe``、``rvdffpcie``、``rvdfflie`` 覆盖普通
+  enable、PC 左右分段和 left-only enable 形式。
+* L347-L492：更细粒度的 indexed/padded flop。``rvdffibie``、``rvdffdpie``、
+  ``rvdffppie`` 用参数切分 left/pad/middle/right 区域，服务宽 packet 的低功耗更新。
+* L497-L654：instruction enable flop 家族。``rvdffie``、``rvdffiee``、``rvdff2iee``、
+  ``rvdff2ie`` 把不同 enable 组合映射到同一类 ``rvdffe`` 基元。
+* L656-L686：``rvsyncss`` 和 FPGA 变体。两级同步器用于 external interrupt、JTAG/DMI
+  等异步输入跨到 core clock 域。
+* L688-L812：二路 arbiter。``rvarbiter2_fpga``、``RV_ARBITER2`` 宏、``rvarbiter2``、
+  ``rvarbiter2_pic`` 和 ``rvarbiter2_smt`` 覆盖普通、PIC 和双线程仲裁。
+* L913-L1086：地址/匹配 helper。``rvlsadder``、``rvbradder``、``rvtwoscomp``、
+  ``rvfindfirst1``、``rvfindfirst1hot``、``rvmaskandmatch`` 和 ``rvrangecheck`` 支撑
+  LSU 地址、branch target、priority pick 和 DCCM/ICCM/PIC range 判断。
+* L1089-L1216：parity/ECC helper。32-bit 与 64-bit encode/decode 生成 syndrome、
+  single/double-bit error 和 corrected data，是 DCCM/ICCM/I-cache ECC 诊断的基础。
+* L1218-L1275：clock gating header。``TEC_RV_ICG``、``rvclkhdr`` 和 ``rvoclkhdr``
+  把 local enable、scan mode、override 组合成 leaf clock。
+
+§11.2  ``eh2_lib.sv`` — BTB/BHT hash helper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lib/eh2_lib.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lib/eh2_lib.sv:全文
+
+逐段精读：
+
+* L1-L11：``eh2_btb_tag_hash``。当 BTB tag 长度不足完整 PC tag 时，用 PC 高位折叠生成
+  ``hash``，减少直接截断导致的别名集中。
+* L13-L24：``eh2_btb_tag_hash_fold``。该模块对 tag 做 XOR fold，供 BTB tag 比较路径使用。
+* L26-L55：``eh2_btb_addr_hash``。它把 PC、bank、index 和 offset 混合成 BTB RAM 地址，
+  让不同 fetch bank 的 branch target 分散到 SRAM 行。
+* L58-L78：``eh2_btb_ghr_hash``。该模块把 global history register 和 branch index 混合，
+  给 BHT/GHR 相关预测表提供地址扰动。
+
+§11.3  ``mem_lib.sv`` — RAM macro 模板
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lib/mem_lib.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lib/mem_lib.sv:全文
+
+逐段精读：
+
+* L1-L14：文件头。该文件通过宏展开生成大量固定 depth/width 的 RAM module。
+* L16-L29：``EH2_LOCAL_RAM_TEST_IO`` 宏。它统一声明 memory test 口，供 DCCM、ICCM、
+  I-cache 等 foundry memory wrapper 复用。
+* L34-L61：``EH2_RAM`` 宏。宏展开为 ``ram_<depth>x<width>``，包含 clock、enable、
+  write enable、地址、写数据、读数据和 test 口。
+* L63-L90：``EH2_RAM_BE`` 宏。它在普通 RAM 基础上增加 byte enable 写入，适合 data array
+  或带局部写掩码的 SRAM。
+* L92-L117：``eh2_ram`` 参数化 RAM。该版本供 Verilator 等工具使用，避免必须匹配所有
+  固定 macro 名称。
+* L119-L180：固定 ``EH2_RAM`` 展开清单。depth/width 组合覆盖 DCCM、ICCM、BTB、
+  I-cache tag/data 需要的常见宽度。
+* L182-L252：固定 ``EH2_RAM_BE`` 展开清单。byte-enable RAM 组合覆盖更宽的 data array
+  和 ECC/tag 混合宽度。
+* L254-L258：宏 undef。文件结束前清理 ``EH2_RAM``、``EH2_RAM_BE`` 和 test IO 宏，避免污染
+  后续编译单元。
+
+§11.4  ``ahb_to_axi4.sv`` — AHB-Lite slave 到 AXI4 master
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lib/ahb_to_axi4.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lib/ahb_to_axi4.sv:全文
+
+逐段精读：
+
+* L1-L21：文件头。该 bridge 位于 lib 目录，但职责是协议转换，不是基础 flop helper。
+* L23-L90：模块参数和端口。AHB side 接收 ``haddr``、``htrans``、``hwrite``、``hsize``、
+  ``hwdata``；AXI side 输出 AW/W/AR 并接收 B/R。
+* L95-L130：buffer state、request decode 和 command holding 信号。bridge 用小状态机把
+  AHB 单拍地址阶段转换成 AXI valid/ready 多通道事务。
+* L132-L178：AHB command 接收和 buffer 更新。``buf_state`` 控制是否能接受新 AHB transfer，
+  并保存地址、写数据、size 和 write/read 类型。
+* L180-L246：地址 range、size/alignment 和 AXI address/data 拼装。``rvrangecheck`` 用于
+  判断 DCCM、ICCM、PIC region，并在非法访问时生成 error 响应。
+* L248-L271：AXI valid 和 AHB response 生成。bridge 根据 write/read 完成和 error 状态驱动
+  ``hreadyout``、``hresp``、``hrdata``。
+* L273-L296：断言和模块结束。断言用于发现 AHB/AXI valid-ready 在时钟门控场景下的不稳定。
+
+§11.5  ``axi4_to_ahb.sv`` — AXI4 slave 到 AHB-Lite master
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/lib/axi4_to_ahb.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/lib/axi4_to_ahb.sv:全文
+
+逐段精读：
+
+* L1-L22：文件头。该 bridge 让 AXI initiator 可以访问 AHB-Lite memory/peripheral target。
+* L24-L87：模块参数和端口。AXI side 暴露 AW/W/B/AR/R 五通道，AHB side 输出
+  ``ahb_haddr``、``ahb_htrans``、``ahb_hwrite``、``ahb_hwdata`` 并消费 ready/resp/rdata。
+* L88-L121：localparam、状态枚举、command/data buffer 和 size/addr helper 信号。
+  ``state_t`` 覆盖 IDLE、read/write command、read/write data、DONE 和 streaming error read。
+* L123-L181：AXI channel capture。AW/W/AR 被抓入内部 buffer，ID、size、addr、write data
+  和 strobe 被保留到 AHB transaction 完成。
+* L182-L260：主状态机。FSM 把 AXI read/write 拆成 AHB address phase 和 data phase，
+  并在 DONE 状态返回 AXI B/R response。
+* L262-L331：AHB output 和 AXI ready/valid 生成。bridge 在 AHB ready 时推进，
+  并用 AXI backpressure 保持 response 稳定。
+* L333-L461：对齐、byte lane、error 和 response data 处理。不同 ``arsize/awsize`` 决定
+  AHB ``hsize``、写数据 lane 和读数据扩展方式。
+* L463-L480：断言/模块结束。尾部检查 AXI 与 AHB 握手稳定性，帮助定位 bridge hang。

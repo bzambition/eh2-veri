@@ -1368,3 +1368,49 @@ DEC/EXU/LSU/IFU 某个 ``$bits(<packet>)`` flop、``.*`` 端口连接或 cosim t
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§11  v2-25 ``eh2_def.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-25 将 ``eh2_pkg`` 的 typedef 源文件全文纳入本页。这个文件没有状态机，
+但它定义了 IFU、DEC、EXU、LSU、CSR、trace、memory wrapper 之间传递的 packed packet。
+任何字段增删都会改变 ``$bits``、pipeline flop 宽度、trace payload 和 UVM probe 的解码假设。
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/include/eh2_def.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/include/eh2_def.sv:全文
+
+逐段精读：
+
+* L1-L4：旧 include guard 被注释掉，真正的命名空间是 ``package eh2_pkg``。
+  下游模块通过 ``import eh2_pkg::*`` 共享 typedef，而不是文本 include 整个文件。
+* L5-L19：``eh2_trace_pkt_t``。它汇总 retire valid、instruction、PC、exception、
+  interrupt、tval 和验证专用 RD 写回字段，是 trace/RVFI 等价观察点的基础。
+* L22-L36：perr 和 fetch stop enum。``eh2_perr_state_t`` 覆盖 I-cache/ECC/DMA system bus
+  error 状态；``eh2_err_stop_state_t`` 描述 fetch 停止流程。
+* L39-L59：``eh2_inst_pkt_t`` 指令类别枚举。PMU、decode 和 trap packet 使用它描述指令类型，
+  包含普通 ALU/LOAD/STORE，也包含 BITMANIP、ATOMIC、LR、SC。
+* L61-L87：load CAM、return stack 和 branch packet。它们把 IFU/DEC/TLU 之间的 load
+  outstanding、return prediction 和 branch prediction 信息压成 packed struct。
+* L89-L140：predecode、instruction buffer、branch-to-TLU 和 predict packet。这里把
+  compressed instruction、predecode 类别、prediction target、history、way、call/return/jump
+  等控制位集中在 IFU 到 DEC/TLU 的边界上。
+* L142-L199：trap packet 和 destination packet。trap packet 记录触发、PMU 和 legal/tid 信息；
+  destination packet 记录双 pipe 的 RD、load/store/mul、secondary、bypass 和 thread。
+* L201-L261：class/reg/ALU packet。``eh2_alu_pkt_t`` 同时包含 Zbb/Zba 类 bitmanip 控制位、
+  branch/jal、CSR write 和 thread 位，是 decode 到 EXU ALU 的主要契约。
+* L263-L304：LSU packet 和 LSU error packet。字段覆盖 atomic/LR/SC/DMA、size、load/store、
+  bypass、valid、misaligned/access fault、AMO exception 和 fault address。
+* L306-L407：decode packet。它是本文件最大的控制位集合，覆盖完整 bitmanip 子集、
+  operand source、load/store、CSR、sync、exception、mul/div、fence、PMU 和 legality。
+* L410-L443：MUL/DIV packet。``eh2_mul_pkt_t`` 保存乘法、Zb*、CRC、xperm、bfp 等执行控制；
+  ``eh2_div_pkt_t`` 只保存 valid、unsigned、remainder 和 thread。
+* L445-L494：memory macro extension packet。DCCM、ICCM、I-cache data/tag 都复用同一组
+  TEST/RME/RM/LS/DS/SD/BC 字段，把 foundry memory test 口传到 wrapper。
+* L497-L521：trigger、cache debug 和 BTB SRAM packet。它们分别服务 debug trigger match、
+  I-cache diagnostic CSR 和 BTB hit/tag match 展开。
+* L523-L598：CSR-to-TLU packet。字段覆盖 M-mode 标准 CSR、EH2 自定义 CSR、debug CSR、
+  HPM counter/event、I-cache/DCCM ECC diagnostic 和合法性/presync/postsync 标志。
+* L601-L602：package 结束和旧 include guard 尾注释。全文行覆盖确认 typedef 文件末尾没有
+  额外宏或条件编译逻辑被漏掉。
