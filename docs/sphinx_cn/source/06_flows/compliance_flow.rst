@@ -3369,3 +3369,60 @@ Python runner 决定 compile/run/compare/report，SystemVerilog TB 决定 standa
   artifact 读取比较输入。
 * L593-L613：收尾逻辑与 ``endmodule``。任何新增端口或 memory map 改动，都必须同步
   runner、device linker script 和本 TB。
+
+§16  v2-48 ``dv/uvm/riscv_compliance/Makefile`` 全文行段级精读
+---------------------------------------------------------------
+
+本节补齐 RISC-V compliance 子目录 Makefile 的全文源码。它是 make 层控制面：上游顶层
+``Makefile`` 只负责委托，真正的单 ISA 运行、全 suite 批量、dry-run/list-tests、standalone
+TB 编译和 legacy 单测 hex 构建都在这里转发到 Python runner 或 VCS/GCC 命令。
+
+.. literalinclude:: ../../../../dv/uvm/riscv_compliance/Makefile
+   :language: make
+   :linenos:
+   :caption: dv/uvm/riscv_compliance/Makefile:全文
+
+逐段精读：
+
+* L1-L20：文件头说明该 Makefile 编译 riscv-compliance tests、通过 ``simv`` 运行、捕获
+  signature，并与 reference output 做 byte-by-byte 比较。usage 列出单 ISA、全 suite、
+  standalone TB 编译和 clean 入口；prerequisites 明确需要 RISC-V GCC、``build/simv`` 和外部
+  riscv-compliance framework。
+* L22-L31：``SHELL`` 固定为 bash；``EH2_ROOT`` 默认从当前目录向上三级得到仓库根；
+  ``COMPLIANCE_FW`` 默认是 ``/home/host/riscv-compliance``；``WORK_DIR`` 默认在子目录
+  ``work`` 下；工具链前缀和默认 ISA 分别是 ``riscv32-unknown-elf-`` 与 ``rv32i``。
+* L33-L44：``SUPPORTED_ISAS`` 白名单包括 ``rv32i``、``rv32im``、``rv32imc``、``rv32Zicsr`` 和
+  ``rv32Zifencei``；``KNOWN_FAIL_ISAS`` 记录当前已知失败 suite。``SIMV`` 默认指向
+  ``$(EH2_ROOT)/build/simv``，``RUNNER`` 指向本目录的 ``scripts/run_compliance.py``。
+* L46-L50：``.PHONY`` 声明当前 Makefile 的主要入口。它包含 ``compile-compliance-tb`` 和
+  ``list-tests``，避免同名文件影响目标执行。
+* L52-L63：``compliance`` target 首先检查 ``$(SIMV)`` 是否存在；缺失时提示用户在仓库根执行
+  ``make compile`` 并退出。检查通过后调用 Python runner，传入 ``--isa``、``--simv`` 和
+  ``--output $(WORK_DIR)/$(RISCV_ISA)``，并按 ``VERBOSE`` 可选追加 ``--verbose``。
+* L64-L78：``compliance-all`` 遍历 ``SUPPORTED_ISAS``，逐个递归调用 ``$(MAKE) compliance
+  RISCV_ISA=$$isa``。任一 suite 失败会把 shell 局部变量 ``failed`` 置 1，最后只打印 known-fail
+  提示，没有在这段逻辑里显式 ``exit 1``。
+* L79-L85：``compliance-compile`` 调 runner 的 ``--dry-run``，用于只编译/枚举不运行仿真；
+  ``list-tests`` 调 ``--list-tests``，用于查看当前 ISA 下 runner 能发现的测试。
+* L87-L100：standalone compliance TB 相关变量。``COMPLIANCE_TB_TOP`` 是
+  ``eh2_compliance_tb``，输出 ``COMPLIANCE_SIMV`` 是 ``build/simv_compliance``；RTL/shared
+  filelist 复用 core UVM 目录下的 ``eh2_rtl.f`` 和 ``eh2_shared.f``。
+* L102-L120：``compile-compliance-tb`` 用 VCS 编译无 UVM 依赖的 standalone TB。命令启用
+  ``-full64``、``-assert svaext``、SystemVerilog、``GTLSIM`` 和 ``RV_BUILD_AXI4``，包含
+  snapshot defines、TB/common include、RTL/shared filelist 和 ``eh2_compliance_tb.sv``，输出
+  ``build/simv_compliance`` 与 compile log。
+* L122-L133：``test-%.hex`` 是旧式手工入口：用 RISC-V GCC 按当前 ``RISCV_ISA``、device linker
+  script、device include 和 external riscv-test-env include 编译单个 upstream ``$*.S``，再用
+  ``objcopy -O verilog`` 生成 hex。它适合手工 bring-up，不是 sign-off runner 的主路径。
+* L135-L140：``clean`` 删除 ``WORK_DIR`` 并打印清理路径。它只清 compliance work 目录，不删除
+  ``build/simv``、``build/simv_compliance``、外部 framework 或 device 源文件。
+
+接口关系：
+
+* 被调用：仓库根 ``make compliance``、``make compliance-all``、``make compliance-compile`` 或
+  用户在 ``dv/uvm/riscv_compliance`` 下直接运行同名目标。
+* 调用：``scripts/run_compliance.py``、递归 ``make``、VCS、RISC-V GCC、``objcopy``、``mkdir``、
+  ``rm``。
+* 共享状态：读取 external ``/home/host/riscv-compliance``、EH2 ``build/simv``、device/linker/TB
+  源码和 filelist；写 ``dv/uvm/riscv_compliance/work/<isa>``、
+  ``build/simv_compliance`` 和 ``build/compliance_tb_compile.log``。
