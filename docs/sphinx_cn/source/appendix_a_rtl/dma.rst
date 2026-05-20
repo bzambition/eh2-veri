@@ -1435,3 +1435,62 @@ unverified、``PASS``。
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§13  v2-26 ``eh2_dma_ctrl.sv`` 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-26 将 DMA 顶层控制文件全文纳入本页。前文已经按功能片段讲过 FIFO、debug、
+地址错误、range check、AXI channel buffer 和 assertion；本节把它们重新按源码顺序串起来，
+用于行级覆盖审计和快速定位。
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/eh2_dma_ctrl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/eh2_dma_ctrl.sv:全文
+
+逐段精读：
+
+* L1-L23：文件头和注释。注释仍写着 top level VeeR core file，但实际模块是
+  ``eh2_dma_ctrl``，阅读时以 module 名和端口为准。
+* L24-L35：模块头、``eh2_pkg`` 导入、``eh2_param.vh`` 参数注入，以及 core/free/bus
+  clock、reset、override、scan 端口。
+* L36-L50：debug abstract memory command 端口。``dbg_cmd_type[1]`` 后续决定命令是否进入
+  DMA FIFO，``dma_dbg_ready/done/fail/rddata`` 回给 debug module。
+* L51-L83：core-side DCCM/ICCM 和 PMU 端口。DMA 向 DCCM/ICCM 发请求，接收 read data、
+  ECC error 和 tag，再产生 active/stall/PMU 事件。
+* L84-L114：AXI write/read channel 端口。模块是 AXI slave 风格入口，接收 AW/W/AR，
+  输出 B/R，并把 AXI 请求转换成内部 FIFO 项。
+* L118-L151：FIFO 深度、指针宽度、NACK 门限和每个 FIFO entry 的状态/data/error/tag 字段。
+  ``DEPTH`` 来自 ``pt.DMA_BUF_DEPTH``，因此不能在文档里写死 FIFO entry 数。
+* L153-L236：FIFO 输入、指针、debug、地址范围、clock、AXI buffer 和 response 中间信号声明。
+  这些声明把后续逻辑分成 FIFO 侧、core memory 侧和 AXI bus 侧三组。
+* L240-L247：FIFO 输入 mux。debug memory command 优先提供 address/byte enable/size/write，
+  普通 AXI command 则来自 ``bus_cmd_*``。
+* L249-L287：``GenFifo`` generate。每个 FIFO entry 独立保存 valid、error、pending、done、
+  addr、size、byte enable、write/debug/data/tag/mid/priority，并按 DCCM/ICCM 返回 tag 更新。
+* L289-L313：Wr/Rd/Rsp 三个环形指针、FIFO full 估算和 ``dma_fifo_ready``。这三个指针分别
+  对应接收命令、发往 core memory、返回 AXI/debug response。
+* L315-L324：普通 DMA 地址和对齐错误。普通 DMA 只允许 DCCM/ICCM；word/dword 对齐、
+  ICCM access size、DCCM write size 和 write strobe 都在这里检查。
+* L326-L344：debug 输出和 debug 命令错误。debug memory command 允许 DCCM/ICCM/PIC，
+  但 ICCM/PIC 只允许 word size；读数据按 byte/half/word size 做抽取。
+* L346-L379：stall、NACK 计数、core request 和 PMU 输出。``dma_dccm_stall_any`` 会把
+  PIC 地址归入 DCCM stall 条件；``dma_dccm_req`` 则要求请求无错误且 DCCM ready。
+* L381-L416：DCCM、ICCM 和 PIC range check。DCCM/ICCM 受参数开关保护，PIC range check
+  总是存在，因为 debug memory command 可以访问 PIC memory window。
+* L419-L435：跨 bus clock 同步和 clock gating。``fifo_full_spec`` 与 debug bubble 跨到
+  bus clock 侧，``dma_buffer_c1_clk``、``dma_free_clk`` 和 ``dma_bus_clk`` 分别服务不同状态。
+* L437-L460：AXI AW/W/AR channel buffer。写地址和写数据各自 valid，只有两者都到齐才形成
+  write command；read address 单独形成 read command。
+* L462-L483：AXI ready、内部 bus command 和 read/write 仲裁。写读同时有效时，
+  ``axi_mstr_priority`` 每次 command sent 后翻转，避免长期偏向某一侧。
+* L485-L506：FIFO response 转 AXI B/R。``fifo_error`` 映射到 AXI response，
+  write 返回 B channel，read 返回 R channel，``dma_active`` 覆盖 AXI buffer 和 FIFO valid。
+* L509-L513：FIFO done/valid 零延时断言。它要求任何 done entry 必须仍然 valid，
+  防止 reset/response 指针错误清掉未消费 entry。
+* L515-L541：AW/W/AR/B valid stability assertions。它们要求 bus clock enable 没开时，
+  ready/valid 类信号不能在 core clock 边沿中途变化。
+* L543-L583：B/R id/resp/data stability assertions。它们保护 response payload 在等待
+  AXI ready 期间保持稳定，是 DMA AXI 调试的第一批 grep 关键字。
+* L585-L587：``RV_ASSERT_ON`` 结束和 module 结束。全文 ``literalinclude`` 覆盖到文件尾，
+  确认没有额外 helper module 或 bind 被漏讲。
