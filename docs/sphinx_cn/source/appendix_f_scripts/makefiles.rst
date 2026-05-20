@@ -1659,3 +1659,185 @@ EH2 验证平台的总调度入口，不能只看 ``compile``、``smoke`` 或 ``
   等旧入口会打印提示并转发到新 target，保证旧 CI 或旧文档命令仍可定位到当前流程。
 * L1570：普通 target 分支结束。这个 ``endif`` 与 L30 的 staged ``ifneq`` 配对，
   是顶层 Makefile 两套入口不会互相执行的结构边界。
+
+§16  v2-31 core UVM 构建入口、filelist 与波形脚本全源码精读
+--------------------------------------------------------------------------------
+
+本节补齐 ``dv/uvm/core_eh2`` 下构建入口和编译清单的全文源码：local Makefile、
+staged wrapper、RTL/TB/shared/DPI filelist，以及 VCS/NC 波形 Tcl。它们共同决定
+从 UVM 子目录调用顶层 flow、metadata staged flow 如何落地、simulator 编译哪些源文件，
+以及 waveform 产物写到哪里。
+
+§16.1  ``dv/uvm/core_eh2/Makefile`` — 子目录便捷入口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/Makefile
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/Makefile:全文
+
+逐段精读：
+
+* L1-L15：文件头说明这是 UVM 子目录的 local development Makefile，本身不实现仿真，
+  而是委托顶层 Makefile。
+* L16-L21：固定 bash，定义 ``PROJ_ROOT=../../..`` 和 ``TB_DIR``。后续 recipe 先
+  ``cd`` 到项目根，再调用顶层 target。
+* L22-L37：定义 pass-through 变量，包括 config、seed、test、simulator、binary、waves、
+  coverage、iterations、parallel、RTL test、verbosity 和 sign-off LEC 参数。
+* L38-L41：注释明确 coverage compile option 由顶层 Makefile 和
+  ``rtl_simulation.yaml`` 管理；``.PHONY`` 暴露 local wrapper targets。
+* L43-L66：``help`` target 打印本地入口、常用 test target 和变量名，是子目录用户界面。
+* L67-L80：``compile``、``run``、``gen``、``smoke`` 均下钻到顶层 Makefile；``run``
+  依赖 ``compile``，并透传 TEST/SEED/BINARY/WAVES/COV/RTL_TEST/VERBOSITY。
+* L82-L97：``nightly``、``weekly``、``signoff``、``signoff_quick`` 和 ``cov`` 都是
+  顶层 target 的薄封装。
+* L99-L112：``clean`` 委托顶层 clean；``lint`` 只列出 UVM 源文件数量并提示完整语法检查
+  仍需 simulator license。
+
+§16.2  ``dv/uvm/core_eh2/wrapper.mk`` — Ibex-style staged flow
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/wrapper.mk
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/wrapper.mk:全文
+
+逐段精读：
+
+* L1-L18：文件头和 ``.PHONY`` 列出 staged flow 的阶段目标：core config、instruction
+  generator build/run、test compile、RTL compile/run、log check、coverage、results 和 signoff。
+* L20-L35：定义 shell、项目根、输出目录、metadata 目录、simulator、test、seed、
+  parallel、coverage、waves 和 sign-off 变量；``PYTHONPATH`` 默认从 setup_imports 生成。
+* L37-L48：include utility 和 metadata helper，并用 ``get-meta`` 读取输出、测试、build、
+  run 和 metadata 目录，以及 riscv-dv/directed test-dot-seed 列表。
+* L49-L64：定义 staged flow 的标准文件名和派生列表：assembly、binary、hex、RTL log、
+  test run result，以及所有测试目录、binary、log 和 result 文件集合。
+* L66-L77：目录规则创建 build/tests/metadata；``core_config`` 通过
+  ``render_config_template.py`` 生成 ``riscv_core_setting.sv`` 并写 stamp。
+* L79-L94：``instr_gen_build`` 构建随机指令生成器；``instr_gen_run`` 对每个
+  riscv-dv test-dot-seed 运行生成器，并把生成的 ``*.S`` 复制到标准路径。
+* L96-L110：``compile_riscvdv_tests`` 和 ``compile_directed_tests`` 都调用
+  ``compile_test.py``，区别是 riscv-dv 依赖前一步生成 assembly，directed 直接按 metadata
+  编译测试。
+* L112-L122：``rtl_tb_compile`` 委托顶层 ``make compile``；``rtl_sim_run`` 调用
+  ``run_rtl.py`` 并把 simulator log 复制为标准 ``rtl_sim.log``。
+* L124-L130：``check_logs`` 对每个 RTL log 调用 ``check_logs.py``，生成 ``trr.yaml``。
+* L132-L145：coverage 阶段调用 ``get_fcov.py`` 和 ``merge_cov.py``；``collect_results``
+  调用 ``collect_results.py`` 汇总结果到输出目录。
+* L147-L157：``signoff`` 直接调用 ``signoff.py``，透传 profile、simulator、seed、
+  parallel、输出目录、iterations、coverage gate 和附加选项。
+* L159-L164：``dump`` 打印 metadata 派生变量，用于调试 staged flow 的目录和 test list。
+
+§16.3  ``eh2_shared.f`` — shared AXI4 support filelist
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/eh2_shared.f
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/eh2_shared.f:全文
+
+逐段精读：
+
+* L1-L3：文件头说明该 filelist 存放 EH2 UVM 平台共享的 AXI4 package、interface 和
+  memory model，路径相对项目根。
+* L5-L12：按 package、interface、slave memory model 的顺序列出
+  ``axi4_pkg.sv``、``axi4_intf.sv`` 和 ``axi4_slave_mem.sv``。这个顺序保证 AXI4
+  类型先于 interface 和 memory model 可见。
+
+§16.4  ``eh2_dv_cosim_dpi.f`` — cosim DPI C++ filelist
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/eh2_dv_cosim_dpi.f
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/eh2_dv_cosim_dpi.f:全文
+
+逐段精读：
+
+* L1-L3：文件头说明该清单列出通过 DPI-C 连接 Spike cosim bridge 的 C++ 源文件。
+* L5-L6：先列 ``spike_cosim.cc``，再列 ``cosim_dpi.cc``。前者实现 Spike-backed
+  ``Cosim``，后者实现 SystemVerilog DPI shim/factory。
+
+§16.5  ``eh2_rtl.f`` — EH2 RTL 编译清单
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/eh2_rtl.f
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/eh2_rtl.f:全文
+
+逐段精读：
+
+* L1-L9：文件头和 include path 指向 ``rtl/snapshots/default``；``eh2_pdef.vh`` 必须先编译，
+  因为它定义 ``eh2_param_t``，随后 ``eh2_def.sv`` 提供 package 定义。
+* L11-L18：library files 以 ``-v`` library mode 提供，AXI/AHB bridge 作为普通设计文件编译。
+* L20-L30：IFU 文件组列出 align、branch predictor、BTB memory、compressed decode、
+  ICCM/ICache memory、IFC/mem control、顶层 IFU 和 testbench memory read helper。
+* L32-L40：decode 文件组覆盖 CSR、decode control、GPR、instruction buffer、decode top、
+  TLU control/top 和 trigger。
+* L42-L46：EXU 文件组覆盖 ALU、DIV、MUL 和 EXU top。
+* L48-L60：LSU 文件组覆盖 address check、AMO、bus buffer、bus interface、clock domain、
+  DCCM control/memory、ECC、load/store control、store buffer、LSU top 和 trigger。
+* L62-L68：debug 和 DMI/JTAG Verilog 文件组包括 ``eh2_dbg.sv``、sync wrapper、
+  DMI wrapper 和 TAP。
+* L70-L78：顶层文件组编译 DMA、memory wrapper、PIC、core top、wrapper，以及验证用
+  ``eh2_veer_wrapper_rvfi.sv``。
+
+§16.6  ``eh2_tb.f`` — UVM testbench 编译清单
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/eh2_tb.f
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/eh2_tb.f:全文
+
+逐段精读：
+
+* L1-L8：文件头说明 RTL/shared filelist 由 Makefile 分开传入；TB filelist 从
+  bus parameters package 开始，确保 agent package 之前已有 bus tag 参数类型。
+* L9-L18：AXI4 和 trace agent 段分别添加 include directory 并编译 package/interface。
+* L20-L38：IRQ、JTAG、cosim、halt/run agent 段按 interface/package 顺序编译；cosim
+  同时添加 ``dv/cosim`` include 路径供 DPI header 可见。
+* L40-L45：fetch enable 和 TB service interface 作为独立 common interface 编译。
+* L46-L51：functional coverage 段添加 fcov include dir，并编译 CSR category、coverage
+  interface、PMP coverage interface 和 bind 文件。
+* L53-L60：env interface 和 env package 编译顺序固定：probe/CSR/instruction monitor
+  interface 先于 ``core_eh2_env_pkg.sv``。
+* L62-L72：test package、RVFI interface 和 testbench top 最后编译；``core_eh2_tb_top.sv``
+  是 module 世界入口。
+
+§16.7  ``vcs.tcl`` — VCS/UCLI 波形脚本
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/vcs.tcl
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/vcs.tcl:全文
+
+逐段精读：
+
+* L1-L11：脚本由 ``simv -ucli -do`` 调用；如果环境变量 ``SIM_DIR`` 存在，就把波形写到
+  该测试工作目录，否则写到当前目录。
+* L13-L18：检测到 ``VERDI_HOME`` 时启用 FSDB，并把输出文件命名为 ``waves.fsdb``。
+* L19-L38：注释列出 ``fsdbDumpvars`` 常见 option；实际调用对 ``core_eh2_tb_top``
+  以 ``+all`` dump，并对 DUT dump SVA。
+* L39-L43：没有 Verdi 时改用 VCS VPD，输出 ``waves.vpd``，并 dump TB top 聚合信号。
+* L45-L46：运行仿真并退出 UCLI。
+
+§16.8  ``nc_waves.tcl`` — Cadence SHM 波形脚本
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/nc_waves.tcl
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/nc_waves.tcl:全文
+
+逐段精读：
+
+* L1-L8：脚本由 NC/Incisive ``-input`` 调用，目标是生成 Cadence native SHM database；
+  FSDB 是否并行输出留给站点配置。
+* L9-L14：读取 ``SIM_DIR`` 环境变量决定波形目录，缺省为当前目录。
+* L16-L18：在测试工作目录下打开 ``waves`` SHM database，使 ``waves.shm`` 与 log/result
+  同目录。
+* L20-L22：对 ``core_eh2_tb_top`` 以 full depth、all signals 和 memories 建立 probe。
+* L24-L27：运行仿真到 UVM drain/finish，并显式 quit。
