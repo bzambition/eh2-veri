@@ -3589,3 +3589,91 @@ EDA license；它把 ``signoff.py`` 中的覆盖率要求、waiver schema、dire
   相关函数。
 * 共享状态：临时 YAML/Markdown 文件由测试创建并删除；真实 testlist 只通过
   ``collect_cosim_exceptions`` 和 ``collect_skip_in_signoff`` 间接读取。
+
+§16  v2-42 ``core_eh2_intg_test_lib.sv`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``core_eh2_intg_test_lib.sv`` 是 RTL-only integrity fault injection 测试库。它通过
+``uvm_hdl_*`` VPI/backdoor API 短暂 force RTL 内部信号，再读取 TLU integrity counter 或
+exception path 证明 fault 已经进入硬件检测路径。由于这些硬件瞬态错误不会出现在 Spike
+architectural model 里，本文件所有 test 都显式关闭 cosim。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/core_eh2_intg_test_lib.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/tests/core_eh2_intg_test_lib.sv:全文
+
+逐段精读：
+
+* L1-L10：文件头明确这是 EH2 integrity fault-injection tests，故障通过 VPI backdoor
+  短暂注入，属于 RTL-only；随后 include UVM macro，并导入 UVM 与 ``core_eh2_env_pkg``。
+  这里没有导入 cosim package，因为本文件刻意不走 Spike 对比路径。
+* L12-L34：四个自动 helper 封装 UVM HDL API。``core_eh2_intg_path_exists`` 检查层级路径；
+  ``core_eh2_intg_read_or_fatal``、``core_eh2_intg_force_or_fatal`` 和
+  ``core_eh2_intg_release_or_fatal`` 分别做 read、force、release，失败时立即 ``uvm_fatal``。
+  这些 helper 把路径错误和 VPI 失败统一转成 hard fail。
+* L36-L53：``core_eh2_rf_addr_intg_test`` 继承 ``core_eh2_base_test``，注册 UVM component，
+  保存 RF read-address path、read-enable path，以及默认 TLU trap observe path。constructor
+  把 ``test_name`` 设为实例名，保证后续 report ID 与实际 test 一致。
+* L55-L64：RF integrity test 的 ``build_phase`` 调用父类后关闭 cosim、设置
+  ``disable_cosim=1``，并把 wall-clock timeout 设为 5 秒、cycle timeout 设为 500000。
+  ``run_phase`` 被留空，说明该类不用 base test 默认 run phase，而把真实动作放在
+  ``main_phase``。
+* L66-L80：``main_phase`` 声明 VPI 读写用的 ``uvm_hdl_data_t`` 临时变量，raise objection，
+  先加载 binary、启动 vseq，等 reset 释放后再等 100 个 clock，让 DUT 进入可观测执行窗口。
+* L81-L89：先尝试 RF 端口 0 的 ``raddr0/rden0``，路径不存在则切换到端口 1 的
+  ``raddr1/rden1``；两组路径都不存在时 fatal。这是为了适配不同 RTL 层级或综合展开方式。
+* L91-L103：最多等待 2000 个 clock 寻找一次 live RF read：``rden[0]`` 为 1 且地址不是 x0。
+  如果没有观察到 live read，仍读取当前地址作为 fallback，避免测试永久等待。
+* L105-L118：把原地址复制到 ``forced_addr``，翻转 bit 0，并确保低 5 位不为 0；随后 force
+  RF read address path，``#1step`` 后 read back 验证 force 确实生效，等待 1 个 clock 后 release。
+  这段验证的是 backdoor 注入本身，不是假设 force 一定成功。
+* L120-L134：短暂轮询 TLU exception path，若看到 trap 则打印 info；无论是否看到 trap，测试
+  都打印 ``TEST PASSED (rf_addr_intg RTL self-check)`` 并 drop objection。该用例的硬门禁是
+  path 存在、force 生效和仿真未崩溃。
+* L136-L152：``core_eh2_ram_intg_test`` 覆盖 DCCM RAM integrity。它定义 ECC pulse path
+  ``lsu_single_ecc_error_incr``、counter path ``mdccmect``，以及可选 LSU valid path
+  ``lsu_p.valid``，constructor 同样同步 ``test_name``。
+* L154-L164：DCCM RAM test 的 build phase 关闭 cosim、打开 ``enable_mem_error``，并设置
+  5 秒/500000 cycles timeout；``run_phase`` 留空，避免 base test 的 completion wait 抢走流程。
+* L166-L199：``main_phase`` 启动 binary/vseq，等待 reset 后检查 ECC pulse path 与 MDCCMECT
+  counter path 必须存在。随后最多等 3000 个 clock 观察 ``lsu_p.valid``，如果没看到 live LSU op，
+  只打印 info，并继续在 counter 边界注入。
+* L201-L220：先读取 ``MDCCMECT`` 的低 27 位作为 before count，再把 ECC pulse path force 为
+  1，保持 1 个 clock 后 release。接着最多轮询 20 个 clock；若 counter 没变化则 fatal，
+  变化则打印 ``ram_intg`` PASS 和 before/after 计数。
+* L225-L241：``core_eh2_icache_intg_test`` 覆盖 ICache integrity。它定义 IFU ICache
+  error-start path ``ifu_ic_error_start[0]``、counter path ``micect`` 和 fetch request path
+  ``ifc_fetch_req_f1``。constructor 保持与前两个类一致。
+* L243-L252：ICache test build phase 关闭 cosim 并设置 timeout；``run_phase`` 留空。这里没有
+  打开 memory error 或 AXI4 error injection，因为故障直接通过 IFU ICache error-start 信号注入。
+* L254-L287：ICache ``main_phase`` 启动 DUT 后检查 ICache error path 与 ``MICECT`` path
+  存在，再最多等待 3000 个 clock 观察 fetch request。没看到 fetch 只打印 info，不阻断后续
+  counter injection。
+* L289-L308：读取 ``MICECT`` before count，force ICache error-start 1 个 clock，再 release；
+  最多等待 30 个 clock 观察 counter 变化。若 ``MICECT`` 不增则 fatal，增加则打印
+  ``icache_intg`` PASS。
+* L313-L330：``core_eh2_mem_intg_error_test`` 是通用 memory integrity error test，同时覆盖
+  ICCM 和 DCCM。它定义 ``iccm_dma_sb_error``、``lsu_single_ecc_error_incr``、``miccmect`` 和
+  ``mdccmect`` 四条路径。
+* L332-L344：通用 memory test build phase 关闭 cosim，打开 ``enable_mem_error``、
+  ``enable_axi4_error_inject``，并把 ``axi4_error_pct`` 设为 100。``run_phase`` 同样留空，
+  保持 fault injection 流程完全由 ``main_phase`` 控制。
+* L346-L372：``main_phase`` 启动 binary/vseq 后检查 ICCM error、DCCM error、MICCMECT 和
+  MDCCMECT 四条路径都必须存在。任何路径缺失都 fatal，因为该 test 的目的就是一次性证明两类
+  memory integrity counter。
+* L374-L386：读取 ICCM/DCCM before counter 并打印，然后 force ICCM error 1 个 clock、release，
+  再等 2 个 clock 后 force DCCM error 1 个 clock、release。两个 pulse 分开，避免 counter
+  变化窗口互相掩盖。
+* L388-L410：最多等待 40 个 clock，重复读取 ``MICCMECT`` 和 ``MDCCMECT``，分别记录是否变化。
+  两个 counter 都变化则提前退出；任一未变化时 fatal，并打印哪个方向缺失。都变化时打印
+  before/after 计数并 drop objection。
+
+接口关系：
+
+* 被调用：``core_eh2_test_pkg.sv`` include 本文件后，UVM factory 可按 test name 创建这些
+  integrity test class。
+* 调用：继承自 base test 的 ``load_binary_to_mem`` 与 ``start_vseq``，以及 UVM HDL/VPI
+  ``check_path/read/force/release`` API。
+* 共享状态：通过字符串层级路径直接读写 RTL 内部信号；所有类都关闭 cosim，避免 Spike 因看不到
+  injected RTL-only fault 而产生误报。
