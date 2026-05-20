@@ -4420,3 +4420,226 @@ DMA 访问优先级高于取指访问——如果 DMA 正在写 ICCM，``dma_icc
 3. 该模块的输入、输出或状态机如果接错，最可能先在哪个 sign-off stage 暴露？
 4. 本页引用的 coverage、LEC 或 demo 数字是否仍与 2026-05-19 VCS 主线一致？
 5. 与 Ibex 对照时，EH2 的双线程、存储层次或 wrapper 差异在哪里需要单独标注？
+
+§15  v2-22 IFU 全文段落级精读
+--------------------------------------------------------------------------------
+
+v2-22 将 IFU 目录 10 个 RTL 文件全部加入 ``literalinclude``。本页前面的批次已经
+按强语义块解释取指、预测、align、ICache 和 ICCM；本节补齐全文源码视图，确保
+Sphinx 页面、源码解释审计和 literal line 门禁都能直接证明 IFU 没有跳过任何源文件。
+
+§15.1  ``eh2_ifu.sv`` — IFU 顶层胶合
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu.sv:全文
+
+逐段精读：
+
+* L1-L21：文件头和模块注释。该文件是 IFU 顶层，把 fetch control、memory control、
+  aligner、branch predictor 和 diagnostic/debug 端口接到 core。
+* L22-L150：模块端口前半段。输入覆盖 clock/reset、halt、flush、DEC back-pressure、
+  branch predictor repair、debug fence 和 ICCM/DMA/ICache 配置。
+* L151-L274：模块端口后半段。输出覆盖 IFU 到 DEC 的 I0/I1 instruction、PC、predecode、
+  access fault、bus interface、ICCM/DMA response 和 PMU。
+* L276-L430：内部信号声明和顶层组合 glue。该段建立 fetch PC、ICache miss、ICCM access、
+  aligner、BTB/BHT、ECC error、diagnostic 和 per-thread fetch state 的共享连线。
+* L431-L650：``eh2_ifu_ifc_ctl``、``eh2_ifu_mem_ctl``、``eh2_ifu_aln_ctl``、
+  ``eh2_ifu_bp_ctl`` 和 memory wrapper 实例。顶层主要职责是把这些子模块同名连线。
+* L651-L736：clock headers、flop、assertion 和 module 收尾。该段保证 fetch/ICache/ICCM
+  clock gating 与 reset、flush、debug override 在同一顶层边界收敛。
+
+§15.2  ``eh2_ifu_ifc_ctl.sv`` — fetch PC 与 thread 选择
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_ifc_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_ifc_ctl.sv:全文
+
+逐段精读：
+
+* L1-L22：文件头。IFC control 是 IFU 的 PC 选择和 fetch request 控制中心。
+* L23-L118：端口。输入来自 reset vector、DEC/TLU flush、branch target、fetch stall、
+  ICache miss 和 per-thread state；输出是 fetch address、selected thread、fetch valid
+  和 stop-fetch 类控制。
+* L119-L220：PC mux、flush target、reset target、fetch enable 和 thread valid 组合逻辑。
+  该段决定下一拍取哪个线程、哪个 PC。
+* L221-L330：fetch packet、thread select、F1/F2 staging 和 stop-fetch 处理。双线程 IFU
+  的核心 arbitration 在这里完成。
+* L331-L404：flop、clock enable、assertion 和 module 结束。PC、valid 和 thread 选择在
+  这里同步到后续 memory/alignment 管线。
+
+§15.3  ``eh2_ifu_mem_ctl.sv`` — ICache/ICCM/bus memory control
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_mem_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_mem_ctl.sv:全文
+
+逐段精读：
+
+* L1-L23：文件头。该文件包含顶层 ``eh2_ifu_mem_ctl`` 和 per-thread
+  ``eh2_ifu_mem_ctl_thr``。
+* L24-L220：顶层端口。它接收 IFC fetch 地址、ICache/ICCM/DMA/diagnostic 配置、bus response、
+  ECC 状态和 thread select；输出 ICache/ICCM read/write、bus request、miss、fetch data
+  和 error metadata。
+* L221-L650：顶层内部信号、ICache/ICCM 命中判定、bus command 生成、ECC/error 汇聚和
+  per-thread arrays。该段是 IFU memory path 的主路由表。
+* L651-L1120：ICache fill、miss buffer、DMA/diagnostic、ICCM access 和 bus response
+  时序控制。外部 fetch bus 与内部 ICCM/ICache 的优先级在这里收敛。
+* L1121-L1544：top-level flops、per-thread ``eh2_ifu_mem_ctl_thr`` 实例、PMU/error 输出
+  和 assertion。这里把 shared memory 结果分发回每个 thread。
+* L1548-L1770：``eh2_ifu_mem_ctl_thr`` 端口和 per-thread 状态声明。每线程维护 fetch buffer、
+  miss wait、ICCM correction 和 stop-fetch 条件。
+* L1771-L2250：thread-local miss/fetch state、fetch buffer、ICCM ECC correction 和
+  ready/valid 逻辑。该段保证一个线程 miss 或 correction 时不会破坏另一个线程状态。
+* L2251-L2437：thread module flops、输出打包、assertion 和 module 结束。
+
+§15.4  ``eh2_ifu_aln_ctl.sv`` — fetch aligner 与 predecode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_aln_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_aln_ctl.sv:全文
+
+逐段精读：
+
+* L1-L20：文件头。该文件包含主 aligner 和 ``eh2_ifu_predecode_ctl``。
+* L21-L180：aligner 端口。输入是 fetch data、fetch PC、branch/flush、DEC ready 和
+  compressed enable；输出 I0/I1 instruction、PC、predecode、valid 和 access fault。
+* L181-L520：fetch data window、offset、leftover halfword、compressed instruction 判定和
+  instruction bundle 选择。该段决定 16-bit/32-bit 指令如何对齐到 I0/I1。
+* L521-L900：valid、stall、flush、leftover buffer、PC increment、fetch boundary 和
+  DEC back-pressure。aligner 在这里保持跨 fetch beat 的半字状态。
+* L901-L1142：predecode 实例、pipeline flop、trace/debug metadata 和主 module 结束。
+* L1144-L1275：``eh2_ifu_predecode_ctl``。该子模块从 instruction bits 产生 branch、jal、
+  jalr、call、return、fence 和 compressed hint，供 DEC 与 branch predictor 使用。
+
+§15.5  ``eh2_ifu_bp_ctl.sv`` — BTB/BHT/GHR branch prediction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_bp_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_bp_ctl.sv:全文
+
+逐段精读：
+
+* L1-L24：文件头。Branch prediction control 管理 BTB、BHT、GHR 和 branch repair。
+* L25-L117：端口。输入覆盖 fetch PC、predecode、DEC/EXU repair packet、flush、thread select
+  和 clock；输出预测 valid、target、way、BHT history、BTB metadata 和 PMU。
+* L118-L260：BTB/BHT localparam、index/tag 位定义、GHR/BHT/BTB arrays 和 replacement state。
+  这些参数把 EH2 ICache line、BTB size 和 BHT depth 绑定在一起。
+* L261-L620：fetch-side BTB/BHT lookup、fully associative compare、taken 判断和 target
+  offset 计算。IFU 的预测输出主要来自这一段。
+* L621-L1050：EXU/DEC repair、BTB allocate/update、BHT counter update、GHR update 和
+  flush recovery。分支预测错修复在这里写回 predictor state。
+* L1051-L1500：per-thread state、LRU、BHT loops、BTB memory wrapper 和 pipeline flop。
+  EH2 双线程需要分别维护或选择部分 predictor metadata。
+* L1501-L1861：output packing、assertion 和 module 收尾。预测 metadata 被送往 aligner、
+  DEC trace mirror 和 EXU repair path。
+
+§15.6  ``eh2_ifu_btb_mem.sv`` — BTB SRAM wrapper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_btb_mem.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_btb_mem.sv:全文
+
+逐段精读：
+
+* L1-L20：文件头。该 wrapper 封装 BTB memory，不决定 branch 预测策略。
+* L21-L86：端口和局部信号。输入是 read/write address、write data、write enable、
+  clock override 和 scan；输出是 BTB read data。
+* L87-L210：BTB memory bank/read/write enable、address staging 和 optional bypass。
+  同周期读写或 FPGA macro 差异在这里被统一。
+* L211-L340：memory macro/generic memory generate、read data flop 和 debug/clock 处理。
+* L341-L365：tie-off、assertion 和 module 结束。
+
+§15.7  ``eh2_ifu_compress_ctl.sv`` — RVC decompress
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_compress_ctl.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_compress_ctl.sv:全文
+
+逐段精读：
+
+* L1-L19：文件头。该组合模块把 16-bit compressed instruction 展开为 32-bit instruction。
+* L20-L70：端口和 immediate/寄存器字段声明。输入是 ``din[15:0]``，输出是 canonical
+  RV32 instruction。
+* L71-L250：按 quadrant/funct3 解码 C.ADDI、C.LW、C.SW、C.J、C.BEQZ、C.LI、C.LUI、
+  C.ANDI、C.SUB 等 RVC 指令。
+* L251-L360：load/store/jump/branch immediate 拼接、寄存器重映射和非法/保留编码处理。
+* L361-L380：最终 ``dout`` 选择和 module 结束。
+
+§15.8  ``eh2_ifu_ic_mem.sv`` — ICache data/tag memory
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_ic_mem.sv
+   :language: text
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_ic_mem.sv:全文
+
+逐段精读：
+
+* L1-L19：文件头和 include。该文件包含 ICache top wrapper、data array 和 tag array。
+* L20-L83：``eh2_ifu_ic_mem`` 顶层。它实例化 data/tag 子模块，并把 ICache read/write、
+  debug access、ECC disable 和 way/tag/data 信号分发下去。
+* L85-L240：``EH2_IC_DATA`` 端口、数据 bank 参数、read/write enable、debug way 和 data
+  ECC 输入输出。该段定义 ICache data array 的外部契约。
+* L241-L620：data memory bank、way/beat/write mask、debug read/write、ECC encode/decode
+  和 bypass generate。ICache line fill 和 diagnostic 访问在这里落到 SRAM。
+* L621-L834：data read mux、ECC error、way hit data、flop 和 module 结束。
+* L844-L932：``EH2_IC_TAG`` 端口、tag valid、ECC decode enable、tag write/read enable
+  和 address staging。
+* L933-L1358：tag write data、debug way、ECC/non-ECC tag formats、SRAM bypass 宏和
+  per-way tag array generate。
+* L1359-L1582：tag read unpack、ECC error、hit compare、perr 输出和 module 结束。
+
+§15.9  ``eh2_ifu_iccm_mem.sv`` — ICCM banked memory 与 redundant row
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_iccm_mem.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_iccm_mem.sv:全文
+
+逐段精读：
+
+* L1-L20：文件头。ICCM memory wrapper 支持 banked read/write 和 ECC correction row。
+* L21-L80：端口、bank 地址、read/write data、redundant row 和 thread correction 信号声明。
+* L81-L130：lo/mid/hi bank 地址、bank write/read enable、bank address 和 write data 选择。
+  64-bit fetch 可跨多个 39-bit ECC bank。
+* L131-L350：ICCM memory macro/generic memory generate。该段负责实际 bank storage。
+* L360-L465：redundant row hit、LRU hit 选择和 read data substitution。ECC 修复后的
+  replacement row 在这里覆盖普通 bank output。
+* L466-L656：per-thread redundant row address、valid、data 和 LRU flop。双线程配置下
+  correction state 需要按 thread 保存。
+* L663-L672：read address flop、96-bit prefetch data 拼接、64-bit 对齐输出、ECC data
+  输出和 module 结束。
+
+§15.10  ``eh2_ifu_tb_memread.sv`` — RVC decompress smoke testbench
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../../Cores-VeeR-EH2/design/ifu/eh2_ifu_tb_memread.sv
+   :language: systemverilog
+   :linenos:
+   :caption: /home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_tb_memread.sv:全文
+
+逐段精读：
+
+* L1-L17：文件头。该文件是 ``eh2_ifu_compress_ctl`` 的轻量 memory-read testbench。
+* L18-L45：testbench module、clock/reset、input/expected/actual/error 信号和 memory 初始化。
+* L46-L58：``readmemh`` 与 dumpfile 配置。测试从外部 hex file 读取 compressed 输入和
+  expected decompressed 输出。
+* L59-L80：clock、reset、cycle counter、negedge check 和 fail message。错误时打印 actual
+  与 expected。
+* L81-L86：实例化 ``eh2_ifu_compress_ctl``，比较 ``actual`` 与 ``expected_val`` 并结束。
