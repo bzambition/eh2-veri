@@ -1303,3 +1303,52 @@ registration 在 elaboration 阶段可见。
 3. 如果该组件失效，log 中应先查 UVM_FATAL、scoreboard mismatch、coverage hole 还是 testlist 配置？
 4. 本页与 Ibex core_ibex 的一致点和 EH2 差异点分别是什么？
 5. 该组件在 9-stage sign-off 中支撑 smoke、directed、cosim、riscv-dv、formal 还是 coverage gate？
+
+§42  v2-56 ``core_eh2_dut_signals.svh`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``dv/uvm/core_eh2/tb/core_eh2_dut_signals.svh`` 是 ``core_eh2_tb_top.sv`` 的信号声明片段。
+它把 reset、NMI、JTAG、trace/debug/control、interrupt、clock-enable 以及 4 组 AXI4 端口集中
+声明出来，再由 TB top 连接到 DUT wrapper、AXI memory model、trace/probe sidecar、coverage 和
+cosim 监控路径。该文件本身不实例化组件，但决定 TB top 中所有跨模块连线的名字、位宽和方向语义。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tb/core_eh2_dut_signals.svh
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/tb/core_eh2_dut_signals.svh:全文
+
+逐段精读：
+
+* L1-L4：reset/NMI 基础入口。``reset_vector`` 和 ``nmi_vector`` 提供取指起点与 NMI trap
+  入口地址，``nmi_int`` 是 TB 可驱动的非屏蔽中断输入。
+* L6-L12：JTAG 信号组。TCK/TMS/TDI/TRST/TDO 和 ``jtag_id`` 共同服务 debug/JTAG agent，
+  后续 debug directed test 通过这组 pin 进入 DMI/debug module 路径。
+* L14-L26：trace 与 verification-only writeback view。前半段导出每线程、双 lane 的指令、
+  地址、valid、exception、ecause、interrupt 和 tval；后半段补出 RVFI-equivalent 的 rd valid、
+  rd addr 和 rd data，使 cosim/trace monitor 能在双发射场景中对齐 I0/I1 写回。
+* L27-L40：debug/control 状态与请求应答。``o_debug_mode_status``、halt/run ack/status、
+  ``mpc_debug_*``、``mpc_reset_run_req``、``debug_brkpt_status``、``dec_tlu_mhartstart`` 和
+  ``i_cpu_run_req`` 共同覆盖 debug mode、halt/run 协议和 hart start 状态。
+* L41-L57：performance counter、中断和 bus clock enable。``dec_tlu_perfcnt0`` 到
+  ``dec_tlu_perfcnt3`` 给性能事件观察路径使用；timer/software/external interrupt 连接中断 stimulus；
+  LSU/IFU/debug/DMA bus clock enable 则用于 AXI 端口时钟门控观察。
+* L58-L100：LSU AXI4 端口。该段完整声明 AW/W/B/AR/R 五个 channel，ID 宽度取
+  ``RV_LSU_BUS_TAG``，数据宽度为 64 bit，地址为 32 bit。load/store、AMO、bus error injection 和
+  DCCM/MMIO 外部访问都从这组端口进入 memory model 或错误注入逻辑。
+* L101-L142：IFU AXI4 端口。信号形态与 LSU 基本一致，但 ID 宽度取 ``RV_IFU_BUS_TAG``。
+  指令 fetch、ICCM/ICache miss、instruction bus error 和取指侧 PMP/fault 观察最终都落在这组
+  read-dominant AXI 线上。
+* L144-L185：SB/debug AXI4 端口。``sb_axi_*`` 使用 ``RV_SB_BUS_TAG``，承载 debug system bus
+  访问。JTAG/debug 测试通过该端口观察或修改 memory-mapped 状态，因此它与 debug module、memory
+  model 和 scoreboard 都存在间接耦合。
+* L187-L220：DMA AXI4 端口。该文件声明完整 DMA master 端口，但当前 TB top 将 DMA path tie-off，
+  用来固定 DUT wrapper 的端口连接边界。保留完整 AW/W/B/AR/R channel 能避免 wrapper 变化时隐藏
+  未连接端口，也为后续 DMA directed test 留出接口面。
+
+接口关系：
+
+* 被调用：``core_eh2_tb_top.sv`` 通过 include 引入这些信号声明。
+* 调用：无独立调用逻辑；信号随后被 DUT wrapper、AXI memory、JTAG/IRQ/Halt-Run agent、
+  trace/probe/RVFI/fcov interface 和 cosim monitor 引用。
+* 共享状态：``RV_NUM_THREADS``、``RV_*_BUS_TAG``、``RV_PIC_TOTAL_INT`` 等宏必须与 EH2
+  RTL/TB filelist 中的配置一致；否则最先暴露为 elaboration 位宽或端口连接错误。

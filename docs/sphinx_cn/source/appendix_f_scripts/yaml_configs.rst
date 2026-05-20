@@ -1969,3 +1969,50 @@ review checklist。
 * 调用：无。
 * 共享状态：``test`` 字段必须与 riscv-dv testlist 中的 test 名严格一致；``expiry_date`` 决定 waiver
   是否仍可用于 release gate。
+
+§14  v2-56 ``rtl_simulation.yaml`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``dv/uvm/core_eh2/yaml/rtl_simulation.yaml`` 是 core EH2 UVM 环境的 simulator command
+template 表。Python runner 读取该文件后，用 ``<tb_dir>``、``<build_dir>``、``<seed>``、
+``<binary>``、``<rtl_test>``、``<sim_opts>``、``<cov_opts>`` 和 ``<wave_opts>`` 等变量替换出
+最终 compile/sim 命令。该文件同时记录 VCS、Xcelium、NC/Incisive 和 Questa 的能力边界。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/yaml/rtl_simulation.yaml
+   :language: yaml
+   :linenos:
+   :caption: dv/uvm/core_eh2/yaml/rtl_simulation.yaml:全文
+
+逐段精读：
+
+* L1-L7：文件头定义用途和模板变量。这里不是 shell 脚本，而是 runner 消费的 YAML command template。
+* L8-L37：VCS compile 段。命令使用 ``vcs -full64 -sverilog -ntb_opts uvm-1.2``，读取 RTL/shared/TB
+  三个 filelist，top 为 ``core_eh2_tb_top``，输出 ``simv``；coverage 选项打开 line/toggle/assert/
+  FSM/branch，并接入 ``cover.cfg``、``cov_fsm.cfg`` 和 reset filter；cosim 通过 DPI filelist、
+  ISS CFLAGS/LDFLAGS/LIBS 和 ``-lstdc++`` 接入。
+* L38-L52：VCS sim 段。运行 ``simv``，传入 UVM test、binary、seed、timeout、额外 sim opts 和
+  verbosity；coverage run 用 ``+enable_eh2_fcov=1`` 和 ``-cm_name`` 标记测试；wave opts 通过
+  UCLI 执行 ``vcs.tcl``。
+* L53-L79：Xcelium compile 段。``xrun -uvm -sv`` 使用同一组 filelist/top/include，coverage 指向
+  ``cov.ccf``，wave opts 使用 ``-access +rwc -linedebug``，cosim 以 Xcelium 形式传入 DPI 和 ISS 参数。
+* L81-L95：Xcelium sim 段。命令同样传入 UVM test、binary、seed、timeout、sim opts 和 verbosity；
+  coverage 使用 ``+enable_eh2_fcov=1`` 与 ``-covfile``，wave opts 用 ``database``/``probe``/``run``
+  打开 SHM 采样。
+* L97-L113：NC 段头明确 NC/Incisive 只用于 single-test waveform debugging，不参与 sign-off 或
+  coverage collection；注释也说明每次 sim.cmd 都跑完整 ``irun`` parse/elab/sim，但可复用
+  ``INCA_libs``。
+* L114-L139：NC compile 段。命令使用 Incisive 15.20 UVM home、``GTLSIM``、snapshot defines、
+  EH2 filelist、top、``INCA_libs``、timescale、include path 和 ``libcosim.so``；虽然注释说 NC 不参与
+  release coverage，该段仍保留 ``cov_opts`` 作为 debug/cross-check 能力。
+* L141-L167：NC sim 段。命令重复必要 filelist/include/top/libcosim，传入 test/binary/seed/timeout，
+  可用 ``nc_waves.tcl`` 打开波形；coverage opts 指向 ``cov_full_nc.ccf`` 并按 test/seed 命名。
+* L168-L200：Questa 段。compile 使用 ``vlib``/``vlog`` 建 work library，sim 使用 ``vsim -c`` 和
+  ``run -all``；coverage 只保留 ``+enable_eh2_fcov=1``，说明 Questa path 是 template stub，不是当前
+  release 默认路径。
+
+接口关系：
+
+* 被调用：core EH2 compile/run/regression Python scripts 解析 simulator mapping 时读取。
+* 调用：不直接运行命令；命令字符串由 runner 替换变量后传给 shell。
+* 共享状态：filelist、coverage cfg、DPI cosim library、wave Tcl、build/out directory 和
+  simulator-specific coverage database 路径必须与 Makefile/Python runner 保持一致。
