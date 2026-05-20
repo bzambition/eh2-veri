@@ -510,6 +510,43 @@ review 时必须分清这两个范围，不能把 CI 的 DV-only 检查误写成
 * :file:`dv/uvm/core_eh2/fcov/cov_waivers/*.yaml` 是 coverage waiver YAML，不是
   Verible 原生 ``waivers.vbl``；CI 当前把它传给 Verible 是源码事实，后续若改动需同步本文。
 
+§11  v2-44 ``.github/workflows/lint.yml`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 GitHub Actions lint workflow 的全文源码。它是 pull request / push 上的快速 DV
+SystemVerilog lint gate，范围是 ``dv/uvm/core_eh2``，不是本地 ``lint/Makefile`` 的完整
+RTL+DV lint 入口。
+
+.. literalinclude:: ../../../../.github/workflows/lint.yml
+   :language: yaml
+   :linenos:
+   :caption: .github/workflows/lint.yml:全文
+
+逐段精读：
+
+* L1-L4：workflow 名为 ``Verilog Lint``，注释明确这是 blocking CI gate：DV SystemVerilog
+  lint 必须 0 errors；非关键 style issue 的 waiver 位置写成 ``lint/verible/waivers.vbl``。
+* L6-L11：触发条件是 push 和 pull_request；单个 job ``verible-lint`` 跑在
+  ``ubuntu-latest``，timeout 为 10 分钟。
+* L12-L19：steps 先 checkout，然后安装指定 Verible release
+  ``v0.0-3644-g6882e2b7``。下载 tarball、解压，并把 release 的 ``bin`` 目录追加到
+  ``GITHUB_PATH``。
+* L20-L26：lint step 用 ``find dv/uvm/core_eh2 -name '*.sv' -o -name '*.svh'`` 收集文件，
+  经 ``xargs`` 传给 ``verible-verilog-lint``。它禁用 ``line-length`` 和
+  ``no-trailing-spaces``，并把 ``dv/uvm/core_eh2/fcov/cov_waivers/*.yaml`` 作为
+  ``--waiver_files`` 传入，输出同时写 ``lint_report.txt``。
+* L27-L34：检查 step 搜索 ``lint_report.txt`` 中以 ``E`` 或 ``FATAL`` 开头的行；命中则打印
+  blocking 信息、回显错误并 exit 1，否则打印 zero errors。
+* L35-L40：最后无论前面是否失败，都用 ``actions/upload-artifact@v4`` 上传
+  ``lint_report.txt``，artifact 名为 ``lint-report``。
+
+接口关系：
+
+* 被调用：GitHub Actions 在 push/pull_request 事件触发。
+* 调用：``actions/checkout``、``wget``、``tar``、``verible-verilog-lint``、``grep``、
+  ``actions/upload-artifact``。
+* 共享状态：读取 DV ``.sv/.svh`` 文件和 waiver 参数；写 CI 工作目录中的 ``lint_report.txt``。
+
 §9  动手练习
 ------------------------
 

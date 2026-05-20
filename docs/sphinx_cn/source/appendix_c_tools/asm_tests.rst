@@ -1889,3 +1889,40 @@ CSR、DCCM、AXI4 data 和 multiply/divide 操作提高结构覆盖活动。YAML
 3. VCS、NC、URG、IMC、DC、Formality、IFV 或 lint 工具的职责是否没有混写？
 4. 失败时应先看工具原生日志、wrapper 脚本返回码还是 sign-off 汇总？
 5. 本页引用的代码片段是否足以让读者定位到具体函数、target 或配置行？
+
+§13  v2-44 顶层 ``tests/asm/Makefile`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``tests/asm/Makefile`` 负责仓库根 ``tests/asm`` 下的最小汇编样例构建。它和
+``dv/uvm/core_eh2/tests/asm/Makefile`` 不同：后者服务 UVM cosim/directed assembly suite，
+前者只构建顶层 ``smoke.S`` 和 ``nop.S``，用于 README quickstart、bring-up 和最短 smoke
+binary。
+
+.. literalinclude:: ../../../../tests/asm/Makefile
+   :language: make
+   :linenos:
+   :caption: tests/asm/Makefile:全文
+
+逐段精读：
+
+* L1-L13：文件头用中文说明用途：顶层独立汇编测试 ``smoke.S`` 和 ``nop.S`` 的编译规则。
+  注释指出这些 ``.hex`` 是 README quickstart 和 sign-off smoke stage 的直接输入；若 clean 后
+  没有重建，会导致 smoke 跑空并 cycle timeout。
+* L15-L18：``RISCV_PREFIX`` 默认是 ``riscv32-unknown-elf-``；``CC``、``OBJCOPY`` 和
+  ``OBJDUMP`` 都从该前缀派生。调用者可通过命令行覆盖 prefix。
+* L20-L25：默认 ``ARCH=rv32imac``、``ABI=ilp32``，linker script 是 ``smoke.ld``。
+  ``CFLAGS`` 使用 freestanding/no-stdlib/no-startfiles，``LDFLAGS`` 只指定 linker script 和
+  no-stdlib。
+* L27-L32：``SRCS`` 固定为 ``smoke.S`` 和 ``nop.S``，``HEXES`` 由后缀替换得到。``all`` 目标
+  构建全部 hex，并打印构建出的文件名。
+* L34-L39：``%.elf`` 规则把单个 ``.S`` 和 linker script 编译链接成 ELF；``%.hex`` 规则先
+  用 objdump 生成 ``.dis``，再用 objcopy 输出 Verilog hex。
+* L41-L44：``clean`` 删除当前目录下 ``.elf``、``.hex``、``.dis`` 和旧 ``hex`` 子目录，然后
+  打印 cleaned。它不删除源 ``.S`` 或 ``smoke.ld``。
+
+接口关系：
+
+* 被调用：顶层 smoke/quickstart 构建或用户在 ``tests/asm`` 下直接执行 ``make``。
+* 调用：RISC-V GCC、objdump、objcopy 和 ``rm``。
+* 共享状态：读取 ``smoke.S``、``nop.S``、``smoke.ld``；写 ``smoke.elf``、``nop.elf``、
+  ``smoke.hex``、``nop.hex`` 和对应 ``.dis``。

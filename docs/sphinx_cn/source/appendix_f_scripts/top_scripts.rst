@@ -1594,3 +1594,37 @@ sign-off gate 阈值文本，并打印仍需额外工具运行时间的项目。
   ``trace_core*.log`` 的普通文件。
 * L9-L11：对每个 trace log 调用 ``column``，以 tab 为输入分隔符、单个空格为输出分隔符，
   并把前 5 列右对齐。结果写到同目录 ``trace_pretty.log``，便于人工阅读 retire trace。
+
+§13  v2-44 ``env.sh`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``env.sh`` 是用户 shell 环境入口，需要通过 ``source env.sh`` 生效。它只导出路径、工具链和
+少量工程根变量，并打印当前设置；它不检查工具是否存在，也不启动任何仿真或构建。
+
+.. literalinclude:: ../../../../env.sh
+   :language: bash
+   :linenos:
+   :caption: env.sh:全文
+
+逐段精读：
+
+* L1-L3：脚本头声明 bash，并提醒用户要 ``source``，不是直接执行。直接执行只会影响子 shell，
+  退出后变量不会留在当前终端。
+* L5-L7：``EH2_VERIF_ROOT`` 通过 ``BASH_SOURCE[0]`` 找到脚本所在目录，再 ``cd`` 后取
+  ``pwd``。因此从任意路径 source 该脚本，都能把验证仓库根定位到脚本所在目录。
+* L8-L10：``RV_ROOT`` 固定指向上游 VeeR EH2 RTL 根 ``/home/host/Cores-VeeR-EH2``。迁移机器时
+  这条绝对路径是首要检查项。
+* L11-L13：``GCC_PREFIX`` 指向 RISC-V GCC 安装前缀，并把 ``${GCC_PREFIX}/bin`` 前置到
+  ``PATH``。这会影响后续 ``riscv32-unknown-elf-*`` 工具查找顺序。
+* L15-L19：``QEMU_BIN`` 指向 EH2 QEMU build；``EH2_SIMULATOR`` 被设为 ``vcs``。注释列出
+  ``nc/vcs/xlm/questa``，但当前导出值固定为 VCS。
+* L21-L28：导出 ``ABI``、``EH2_DV_ROOT``、``EH2_UVM_ROOT``、``EH2_SHARED_ROOT`` 和
+  ``EH2_VENDOR_ROOT``，为脚本、Makefile 或用户命令提供统一路径。
+* L30-L37：打印环境摘要，包括 verification root、RTL root、GCC prefix 和 simulator。这个输出
+  是人工确认用，不是机器可解析的状态文件。
+
+接口关系：
+
+* 被调用：用户 shell、CI step 或文档示例通过 ``source env.sh`` 加载。
+* 调用：bash 内建 ``cd``、``dirname``、``pwd`` 和 ``echo``。
+* 共享状态：修改当前 shell 的环境变量和 ``PATH``；不写文件。
