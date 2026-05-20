@@ -1702,3 +1702,223 @@ CSR unit 子环境也带有一个轻量 runner，用于从 CSR unit 目录调用
 实现方法：该 interface 没有 clocking block，因为 fetch enable 在当前平台中作为静态或
 低频控制信号使用；如果未来要做周期级 backpressure，应先扩展 clocking block 和
 driver sequence，再修改 TB 连接。
+
+§13  v2-30 UVM env 全源码行段级精读
+--------------------------------------------------------------------------------
+
+本节把 ``dv/uvm/core_eh2/env`` 目录 9 个文件全部纳入全文源码说明。它们是 UVM
+环境的 glue 层：负责 package 依赖、配置解析、agent 实例化、TLM 连接、double-fault
+scoreboard、virtual sequencer，以及 CSR/RVFI/instruction/DUT probe 观察接口。
+
+§13.1  ``core_eh2_env_pkg.sv`` — 环境 package 入口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/core_eh2_env_pkg.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/core_eh2_env_pkg.sv:全文
+
+逐段精读：
+
+* L1-L5：文件头说明该 package 汇入所有 agent package 并 include env component，
+  模式对齐 Ibex 的 ``core_ibex_env_pkg.sv``。
+* L7-L17：先 include UVM 宏，再打开 ``core_eh2_env_pkg``，导入 UVM、AXI4、trace、
+  IRQ、JTAG、cosim 和 halt/run agent package。env 中使用的 agent 类型都来自这些 import。
+* L19-L22：按依赖顺序 include virtual sequencer、env config、double-fault scoreboard
+  和 env wrapper。``core_eh2_env.sv`` 最后 include，因为它引用前面所有类型。
+* L24：关闭 package。该文件不含 phase 行为，只定义编译和类型可见性边界。
+
+§13.2  ``core_eh2_env_cfg.sv`` — plusarg 驱动的环境配置
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/core_eh2_env_cfg.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/core_eh2_env_cfg.sv:全文
+
+逐段精读：
+
+* L1-L18：文件头列出主要 plusarg，说明 env 的 stimulus、cosim、memory error、AXI4
+  error injection、double-fault 和 timeout 行为都从命令行配置。
+* L19-L40：class 继承 ``uvm_object`` 并注册 factory；第一组字段控制 IRQ、debug 和
+  fetch-enable stimulus 是否启动。
+* L41-L52：cosim 默认打开；``disable_cosim`` 是覆盖开关。AXI4 error injection 用
+  ``enable_axi4_error_inject`` 和 ``axi4_error_pct`` 控制 LSU agent driver 行为。
+* L53-L65：memory model 相关开关控制 memory error 与 spurious response；double-fault
+  detector 通过 enable bit 和 threshold 控制。
+* L66-L83：stimulus timing、wall-clock timeout、cycle timeout、signature mailbox 地址
+  和 boot 地址集中在这一段，base test 的 completion 逻辑会读这些字段。
+* L84-L95：ISA、misa 和 binary path 字段用于 cosim 与 test loading；``bin_cosim`` 可与
+  DUT binary 分离。
+* L96-L127：constructor 逐项读取 plusarg，覆盖默认配置。这里同时支持
+  ``enable_irq_seq`` 和更细粒度的 single/multiple/NMI/drop 开关。
+* L128-L135：``disable_cosim`` 强制关闭 cosim；打开 single IRQ sequence 时自动打开
+  drop sequence，保证单次中断后有清除路径。
+* L138-L156：``convert2string`` 把关键配置拼成多行日志，env build phase 会打印它，
+  便于复现仿真命令和运行时配置。
+
+§13.3  ``core_eh2_env.sv`` — agent 实例化与 TLM 连接
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/core_eh2_env.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/core_eh2_env.sv:全文
+
+逐段精读：
+
+* L1-L17：文件头列出 env 架构：配置、virtual sequencer、3 个 AXI4 agent、IRQ/JTAG、
+  trace monitor、DUT probe monitor 和 cosim scoreboard。
+* L18-L31：class 继承 ``uvm_env``，声明配置、virtual sequencer，以及 LSU/IFU/SB
+  三个 AXI4 agent。ID width 分别使用 DUT 宏定义。
+* L33-L52：声明 IRQ、JTAG、halt/run active agent，trace monitor、DUT probe monitor、
+  cosim agent 和 double-fault scoreboard。
+* L54-L64：保存可选 CSR/instruction monitor interface 句柄；constructor 中先创建 cfg，
+  让 child build phase 可见配置对象。
+* L66-L72：build phase 打印配置并创建 virtual sequencer。
+* L73-L85：创建 LSU、IFU、SB AXI4 agent。LSU 在 AXI4 error injection 打开时设为
+  active，否则 passive；IFU 和 SB 始终 passive。
+* L87-L103：创建 IRQ、JTAG、halt/run active agent，以及 trace monitor 与 DUT probe
+  monitor。
+* L105-L123：cosim 打开时创建 ``eh2_cosim_cfg``，读取 ICCM/DCCM memory plusarg，
+  调用 ``sync_mem_regions``，并把配置注入 cosim scoreboard 后创建 cosim agent。
+* L125-L139：创建 double-fault scoreboard，尝试获取 CSR 与 instruction monitor
+  interface；这两个 interface 缺失只打印 info，因为它们是可选观察面。
+* L141-L149：connect phase 时 child driver 已构建完成，因此这里给 LSU driver 设置
+  ``enable_error_inject`` 和 ``error_pct``。
+* L151-L164：cosim 打开时把 trace monitor、DUT probe monitor 和 LSU AXI4 monitor
+  连接到 cosim scoreboard/agent。IFU 和 SB AXI4 monitor 不接入 cosim dmem port。
+* L166-L172：trace monitor 也连接到 double-fault scoreboard；最后把 IRQ/JTAG/halt-run
+  子 sequencer 填入 virtual sequencer。
+* L175：关闭 class。env 本身不产生 stimulus，stimulus 来自 test/virtual sequence 和各 agent。
+
+§13.4  ``core_eh2_scoreboard.sv`` — double-fault 检测 scoreboard
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/core_eh2_scoreboard.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/core_eh2_scoreboard.sv:全文
+
+逐段精读：
+
+* L1-L10：文件头定义 double-fault 判断：在 exception handler 中再次遇到 exception，
+  这里近似为连续 exception 且中间没有成功 instruction retirement。
+* L11-L29：class 继承 ``uvm_scoreboard``，声明 enable/threshold 配置、统计计数器和
+  trace analysis FIFO。
+* L30-L42：build phase 创建 FIFO，并读取 detector enable、连续 exception 阈值、
+  total exception 阈值和 fatal/error 模式 plusarg。
+* L44-L50：run phase 只有在 detector 打开时才 fork ``monitor_exceptions``；默认关闭时
+  不消费 trace FIFO。
+* L52-L67：``monitor_exceptions`` 从 trace FIFO 阻塞取 item，null item 跳过；每个 item
+  增加 retirements，并按 ``item.exception`` 调用 exception 或 retirement helper。
+* L68-L79：连续 exception 达到阈值时，根据 ``fatal_on_threshold`` 发 ``uvm_fatal``
+  或 ``uvm_error``。
+* L81-L92：总 exception 数达到阈值时同样报 fatal 或 error。
+* L96-L107：``notify_exception`` 更新连续和总 exception 计数，并记录最大连续值；
+  ``notify_retirement`` 在成功 retirement 时清零连续 exception。
+* L109-L119：report phase 打印 total retirements、total exceptions、max consecutive
+  exceptions 和 detector enable 状态。
+
+§13.5  ``core_eh2_vseqr.sv`` — virtual sequencer 汇聚点
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/core_eh2_vseqr.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/core_eh2_vseqr.sv:全文
+
+逐段精读：
+
+* L1-L6：文件头说明 virtual sequencer 用于协调 env 内各子 sequencer。
+* L7-L14：class 继承通用 ``uvm_sequencer``，保存 IRQ、JTAG 和 halt/run 子 sequencer
+  句柄。AXI4 agent 当前不通过 virtual sequence 发起普通 bus transaction。
+* L16-L20：constructor 无额外状态。env connect phase 会把实际子 sequencer 填入这些字段。
+
+§13.6  ``eh2_dut_probe_if.sv`` — DUT 内部状态观察面
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/eh2_dut_probe_if.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/eh2_dut_probe_if.sv:全文
+
+逐段精读：
+
+* L1-L13：文件头说明 regular pipeline writeback 已由 RTL trace packet 携带，因此该
+  probe interface 保留 DIV 异步写回、non-blocking load completion、interrupt/NMI/debug、
+  CSR mirror 和 exception flag。
+* L14-L17：interface 接收 clock 和 reset，由 TB 顶层通过 hierarchy reference 连接 DUT
+  内部信号。
+* L19-L30：声明 DIV cancel/writeback 和 non-blocking load writeback 信号。DUT probe
+  monitor 用这些信号构造异步 writeback item。
+* L32-L38：声明 MIP、NMI、debug request 和 mcycle，trace monitor 用它们在 trace item
+  中同步 cosim side effect。
+* L39-L45：CSR mirror state 包括 mstatus、mtvec、mepc、mcause 和 mtval，exception/
+  interrupt trace 可 snapshot 这些值。
+* L46-L59：声明 E4 和 writeback stage 的 trap/exception 信号，用于 directed tests 与
+  functional coverage。
+* L60-L74：debug state、interrupt tracking 和全局 ``wb_seq``。``wb_seq`` 由 probe monitor
+  写入，trace monitor 读取，用于严格异步 writeback 匹配。
+* L76-L115：monitor clocking block 汇总所有输入，并把 ``wb_seq`` 作为 output 暴露给
+  monitor 写入。这是少数由 monitor 回写 interface 的验证辅助字段。
+* L117：关闭 interface。
+
+§13.7  ``eh2_rvfi_if.sv`` — RVFI-like retire 观察接口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/eh2_rvfi_if.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/eh2_rvfi_if.sv:全文
+
+逐段精读：
+
+* L1-L6：文件头说明该接口捕获 ``eh2_veer_wrapper_rvfi`` 输出的 RVFI retire packet，
+  供 UVM scoreboard 或一致性检查使用，支持 EH2 i0/i1 双通道。
+* L8-L11：interface 使用 ``clk`` 和低有效 ``rst_l``。
+* L12-L29：声明 RVFI-like 字段：valid、order、instruction、PC、source/dest register、
+  memory address/data/mask、trap、interrupt 和 privilege mode。
+* L30-L49：clocking block 在 ``posedge clk`` 同步采样所有 RVFI 字段。
+* L51-L61：monitor modport 只读 clock/reset 和 RVFI 字段，避免 monitor 驱动 retire view。
+* L62：关闭 interface。该 interface 是观察面，不参与 stimulus 或 cosim DPI 直接调用。
+
+§13.8  ``eh2_csr_if.sv`` — CSR access 观察接口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/eh2_csr_if.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/eh2_csr_if.sv:全文
+
+逐段精读：
+
+* L1-L15：文件头说明该 interface 从 DUT decode/TLU hierarchy probe CSR access bus，
+  用于 coverage 和验证；方法学参考 Ibex CSR interface。
+* L16-L19：interface 接收 ``clk`` 和 ``rst_n``。
+* L21-L30：声明 CSR access valid、address、write/read data、write enable，以及
+  read/write/set/clear 操作分类。
+* L32-L43：monitor clocking block 只读所有 CSR 信号。
+* L45：关闭 interface。env build phase 获取该 interface 失败时只记录 optional info，
+  因为当前主 scoreboard 不依赖它才能运行。
+
+§13.9  ``eh2_instr_monitor_if.sv`` — decode instruction 观察接口
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/env/eh2_instr_monitor_if.sv
+   :language: text
+   :linenos:
+   :caption: dv/uvm/core_eh2/env/eh2_instr_monitor_if.sv:全文
+
+逐段精读：
+
+* L1-L15：文件头说明该 interface probe decode stage pipeline，覆盖 dual-issue slot、
+  instruction word、compressed 标志、branch/flush 和 stall。
+* L17-L20：interface 接收 ``clk`` 和 ``rst_n``。
+* L22-L29：I0 slot 信号包括 valid、32-bit instruction、compressed 标志、16-bit
+  compressed bits、branch taken 和 stall。
+* L30-L36：I1 slot 信号与 I0 同构。
+* L38-L40：pipeline control 信号包括 full pipeline flush 和 dual-issue active。
+* L42-L58：monitor clocking block 只读两个 slot 与 pipeline control 信号。
+* L60：关闭 interface。该 interface 支撑 instruction-level coverage 或调试观察，不替代
+  retire trace monitor。
