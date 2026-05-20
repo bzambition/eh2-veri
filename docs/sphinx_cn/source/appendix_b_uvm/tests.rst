@@ -3677,3 +3677,124 @@ architectural model 里，本文件所有 test 都显式关闭 cosim。
   ``check_path/read/force/release`` API。
 * 共享状态：通过字符串层级路径直接读写 RTL 内部信号；所有类都关闭 cosim，避免 Spike 因看不到
   injected RTL-only fault 而产生误报。
+
+§17  v2-43 ``core_eh2_test_lib.sv`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``core_eh2_test_lib.sv`` 是常规 EH2 UVM test class 的主库。它既包含 Ibex-style
+``core_eh2_directed_test`` 基类，也包含按验证主题拆开的 IRQ、debug、CSR、load/store、
+PMP/ePMP、WFI、DRET、fetch-enable 等 test class。这个文件的阅读重点不是每个 class 名称，
+而是三种行为模式：只改 ``env_cfg`` 的配置型 test，覆盖 ``start_vseq`` 的后台刺激型 test，
+以及覆盖 ``run_phase`` 后用 ``fork/join_any`` 并行 stimulus、vseq 和 completion 的交互型 test。
+
+.. literalinclude:: ../../../../dv/uvm/core_eh2/tests/core_eh2_test_lib.sv
+   :language: systemverilog
+   :linenos:
+   :caption: dv/uvm/core_eh2/tests/core_eh2_test_lib.sv:全文
+
+逐段精读：
+
+* L1-L15：文件头说明这是 EH2 UVM test library，包含 20+ 个 specialized test class；
+  终止检测交给 testbench top/mailbox。随后导入 UVM、env、AXI4、trace、IRQ、JTAG 和 cosim
+  package，说明本文件既要创建 UVM test，也会直接发 IRQ/JTAG transaction。
+* L16-L39：``core_eh2_directed_test`` 继承 ``core_eh2_base_test``。开头定义 debug cause
+  code、DCSR/DPC CSR 地址，并注明 NC/ncvlog 不允许像 VCS 那样前向引用 class localparam，
+  所以这些常量必须放在所有方法之前。
+* L41-L83：directed 基类定义 ``instr_t``、标准 RISC-V opcode 常量、已见普通/压缩 instruction
+  队列，以及最近一次 DCSR 数据缓存 ``dcsr_data``。这些状态服务 instruction tracking 和
+  debug CSR 检查，不属于普通 base test。
+* L84-L128：``send_stimulus`` 实现 Ibex-style directed 模式：一条分支后台启动
+  ``vseq.start(env.vseqr)``，另一条分支等待 core setup、延迟 50 个 clock、以 ``join_none``
+  启动子类 ``check_stimulus``，再等待 mailbox done、停止 vseq 并 disable fork。
+* L130-L160：基类 ``check_stimulus`` 直接 fatal，表示 ``core_eh2_directed_test`` 不能直接运行；
+  ``wait_for_core_setup`` 等第一次 signature write，``wait_test_done`` 则轮询
+  ``tb_vif.mailbox_test_done``。
+* L162-L229：``send_debug_stimulus`` 通过 JTAG 写 ``DMI_DMCONTROL=32'h80000001`` 请求 debug
+  halt，用 ``wait_for_core_status(DEBUG_REQ)`` 和 timeout 竞争等待 debug entry，再等 DCSR CSR
+  写入、缓存 ``dcsr_data``，检查 privilege mode 和 haltreq cause，最后写
+  ``32'h40000000`` resume。
+* L231-L296：DCSR helper 解释 RISC-V Debug Spec bit layout。``check_dcsr_ebreak`` 根据
+  ``dcsr_data[1:0]`` 检查 M/S/U 对应 ebreak bit；``check_dcsr_cause`` 检查 ``[8:6]``；
+  ``check_dcsr_prv`` 检查 ``[1:0]``。失败全部 fatal，避免 debug directed test 静默通过。
+* L298-L398：``decode_instr`` 把 32-bit instruction 拆成 opcode、funct3、funct7 和
+  system immediate。LUI/AUIPC/JAL 按 opcode 去重；load/store/branch/JALR/misc-mem 按
+  opcode+funct3；OP-IMM shift 额外比较 funct7；OP 比较 opcode+funct3+funct7；SYSTEM 对
+  WFI、ECALL/MRET/DRET 和 CSR 做特殊处理。
+* L400-L466：``decode_compressed_instr`` 按 compressed instruction quadrant 去重。C0 主要看
+  ``[15:13]``；C1 对 ``3'b100`` 继续细分 ``[11:10]``、``[12]``、``[6:5]``；C2 对
+  ``3'b100`` 比较 ``[12]``。非法 compressed encoding 直接 fatal。
+* L468-L490：``get_last_signature_data`` 返回 mailbox data 低 32 位；``wait_for_csr_write``
+  重写 base helper，在等待指定 CSR address 的同时把 data 缓存到 ``dcsr_data``，给 DCSR 检查
+  函数使用。
+* L492-L524：``core_eh2_irq_test`` 覆盖 ``start_vseq``，在后台每隔随机时间创建
+  ``eh2_irq_seq_item``，随机 external IRQ ID、duration，并通过 ``eh2_irq_seq::send_irq`` 发给
+  ``env.irq_agent.sequencer``，随后仍调用 ``super.start_vseq``。
+* L526-L555：``core_eh2_debug_test`` 覆盖 ``start_vseq``，创建 ``debug_seq``，绑定
+  ``env.vseqr.jtag_seqr``，设置 ``stress_mode=1`` 并启动。注释说明这样做是为了避免 vseq body
+  立即返回导致 ``join_any`` 在 0 时刻完成。
+* L556-L601：``core_eh2_stress_test`` 同时 fork IRQ 和 debug 背景刺激。IRQ 分支从 5 us 后
+  高频发送 external IRQ；debug 分支从 50 us 后循环写 halt/resume DMI command，再调用
+  ``super.start_vseq`` 启动其它配置项。
+* L603-L637：``core_eh2_bitmanip_test`` 只覆盖 ISA 字符串为
+  ``rv32imac_zba_zbb_zbc_zbs``；``core_eh2_cosim_test`` 在 build phase 打开
+  ``env_cfg.enable_cosim``。两者都是配置型 test，不重写 run phase。
+* L639-L715：timer/software interrupt tests 都重写 ``run_phase``：raise objection、load binary，
+  fork stimulus、vseq 和 completion，``join_any`` 后 disable fork。差异是 timer test 发送
+  ``IRQ_TIMER``，software test 发送 ``IRQ_SOFTWARE``。
+* L717-L798：``core_eh2_nmi_test`` 使用 external IRQ ID 1 近似 NMI source；旧
+  ``core_eh2_nested_irq_test`` 每轮 repeat 3 个 external IRQ transaction，制造多中断同时
+  pending 的压力。
+* L800-L881：``core_eh2_debug_stress_test`` 周期性写 halt/resume DMI command；
+  ``core_eh2_debug_step_test`` 先 halt，再写 ``DMI_ABSTRACTCS``，随后用 ``DMCONTROL``
+  resume-with-step 和 full resume，覆盖 debug single-step 入口。
+* L883-L1015：CSR、load/store、mul/div、atomic、dual issue、exception、fetch toggle 是
+  轻量配置型 test。它们主要关闭不需要的 random IRQ/debug stress，或打开
+  ``enable_fetch_toggle``，让被测二进制本身主导场景。
+* L1017-L1057：``core_eh2_pic_test`` 先启动 vseq，再 fork PIC stimulus 和 completion。
+  ``run_pic_stimulus`` 重复 20 次发送 external IRQ，ID 限制在 1-31，用于覆盖 PIC priority
+  相关窗口。
+* L1059-L1171：``core_eh2_mem_error_test`` 打开 ``enable_mem_error``；``core_eh2_random_test``
+  只继承 base 行为；``core_eh2_irq_debug_test`` 同时打开 single IRQ 和 single debug；
+  ``core_eh2_stall_test`` 打开 fetch toggle 并缩短 interval；long/quick test 只调整 timeout、
+  max_cycles 和刺激开关。
+* L1173-L1228：PMP basic/disable/random tests 都主要调整 timeout 和 max_cycles；random PMP
+  给到 10 秒和 1M cycles，说明该场景预期比 basic/disable 更长。
+* L1230-L1305：PC/RF integrity、reset、single-step 这些 class 仍是配置型 wrapper：前几项只拉长
+  timeout/cycle，single-step 额外打开 ``enable_debug_single``，让 vseq 注入一次 debug 请求。
+* L1307-L1362：ePMP MML、MMWP、RLB tests 只设置 10 秒 timeout 和 500000 cycles。这些 class
+  的语义主要来自对应 binary 或 testlist 参数，本 SV class 提供稳定的运行预算。
+* L1364-L1444：``core_eh2_debug_wfi_test`` 和 ``core_eh2_debug_csr_test`` 重写 run phase，
+  并通过 JTAG halt/resume 在 WFI 或 CSR 访问附近打断。二者结构相同，差异是 CSR 版本的随机
+  间隔更短，用来提高命中 CSR read-modify-write 窗口的概率。
+* L1446-L1476：``core_eh2_debug_ebreak_test`` 设置较长 timeout 后只 fork ``start_vseq`` 和
+  ``wait_for_completion``。EBREAK 是否进入 debug 主要由测试程序和 DCSR 配置决定，SV class
+  不额外注入 JTAG stimulus。
+* L1478-L1560：``core_eh2_irq_wfi_test`` 在 WFI 可能执行后发送持续较长的 external IRQ；
+  ``core_eh2_irq_csr_test`` 以更短随机间隔发送 external IRQ，目标是在 CSR instruction 窗口
+  触发 interrupt。
+* L1562-L1613：``core_eh2_irq_nest_test`` 设置较长预算，并在每轮随机发送 2-5 个 external IRQ；
+  每个 ``send_irq`` 放进 ``fork/join_none``，让多个 transaction 近似并行，制造 nested IRQ
+  条件。
+* L1615-L1661：``core_eh2_irq_in_debug_test`` 的命名强调 debug mode 内的 interrupt 行为，但
+  当前 stimulus 只发送 external IRQ，没有直接写 JTAG halt；debug 入口依赖 vseq 或 binary 侧
+  行为。
+* L1663-L1711：``core_eh2_debug_in_irq_test`` 先发送 external IRQ，短随机延迟后原本应触发
+  debug；当前源码只保留 delay，没有实际 JTAG 写入。这是阅读源码时要识别的实现缺口，不能从
+  class 名称推断已有 debug 注入。
+* L1713-L1775：``core_eh2_dret_test`` 与 ``core_eh2_debug_ebreakmu_test`` 都设置较长预算，
+  run phase 只启动 vseq 并等待 completion；DRET/EBREAKMU 语义来自 test binary 自身。
+* L1777-L1815：``core_eh2_single_debug_pulse_test`` fork 一个 ``run_single_debug_pulse``，
+  但该 task 只等待并打印 info，注释说 single pulse 由 vseq 处理；因此实际 debug pulse 取决于
+  ``env_cfg`` 或 vseq 配置，而非本 task 直接驱动。
+* L1817-L1887：``core_eh2_invalid_csr_test`` 只运行 vseq 与 completion，异常语义来自 binary；
+  ``core_eh2_fetch_en_chk_test`` fork ``run_fetch_en_stimulus``，该 task 只等待并打印，实际
+  fetch-enable toggle 也由 vseq 处理。
+
+接口关系：
+
+* 被调用：``core_eh2_test_pkg.sv`` include 本文件后，UVM factory 根据 ``+UVM_TESTNAME`` 创建
+  这些 test class。
+* 调用：base test 的 binary loading、vseq start、completion wait，IRQ agent 的
+  ``eh2_irq_seq::send_irq``，JTAG agent 的 ``eh2_jtag_seq::send_write``。
+* 共享状态：大多数 class 只修改 ``env_cfg``；交互型 class 通过 ``env.irq_agent.sequencer``、
+  ``env.jtag_agent.sequencer`` 和 ``env.vseqr`` 向外层 UVM env 注入刺激。
