@@ -1631,3 +1631,120 @@ EH2 仅支持 M-mode（Machine mode），不支持 U/S 模式。
   ``jtag_tdo``，再由 core debug/DMI 子系统消费。
 * L811-L818：initial 检查和 module 结束。该段在仿真开始时给出必要提示或配置检查，是
   wrapper 源码的收尾边界。
+
+§17  v2-46 仓库本地 wrapper 与 LEC shim 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节补齐 EH2-Veri 仓库本地 ``rtl`` 目录中的两个适配层源码。它们不是上游
+``Cores-VeeR-EH2/design`` 的原始 DUT 文件：``eh2_veer_wrapper_rvfi.sv`` 是 UVM/testbench
+侧的 RVFI sidecar 观测层，``eh2_veer_lec_pack.sv`` 是 Formality LEC 专用端口展平层。
+阅读时要先分清「观测/比较辅助层」与「真实 DUT 行为」的边界，避免把验证适配逻辑误当成
+处理器微架构实现。
+
+§17.1  ``rtl/eh2_veer_wrapper_rvfi.sv`` — trace-to-RVFI sidecar 全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../rtl/eh2_veer_wrapper_rvfi.sv
+   :language: systemverilog
+   :linenos:
+   :caption: rtl/eh2_veer_wrapper_rvfi.sv:全文
+
+逐段精读：
+
+* L1-L16：文件头把职责限定为 trace-to-RVFI converter layer，并引用 ADR-0015。注释强调它是
+  ``tb_top`` 中的 sidecar，不替换真实 ``eh2_veer_wrapper`` DUT；这是一条重要设计边界，因为
+  RVFI 信号用于 lockstep comparison/formal observation，而不是反馈到处理器流水线。
+* L18-L41：模块输入端口分为 clock/reset、DUT trace packet 和 LSU bus probe。trace 输入把双发射
+  i0/i1 的 instruction、PC、valid、exception、interrupt、rd 地址和写回数据打包为宽向量；LSU
+  输入来自 testbench 中可观察到的 AXI/LSU 事务。
+* L42-L60：RVFI 输出仍按双通道打包：``rvfi_valid[1:0]`` 对应 i0/i1，``rvfi_order``、``rvfi_insn``、
+  ``rvfi_pc_*``、``rvfi_rd_*``、``rvfi_mem_*`` 等以 64 或 128 bit 宽度同时承载两个 retire slot。
+  这样写的动因是保留 EH2 dual-issue 语义，同时给 scoreboard 一个接近标准 RVFI 的统一观测面。
+* L62-L80：内部 ``trace_i0_*`` 与 ``trace_i1_*`` 把打包 trace 拆成每个 retire slot 独立信号。
+  这些信号全由后续 assign 驱动，避免早期空 shell 只声明不连接而让 cosim 看到零或 X。
+* L82-L97：``wb_*`` 是写回 probe 与序号计数相关信号，``lsu_bus_*_int`` 是 LSU probe 的内部镜像。
+  这里没有实例化真实流水线，只做观测信号暂存和命名规整。
+* L99-L122：trace 拆包规则按低半/高半切分。``trace_address[31:0]`` 与 ``trace_insn[31:0]`` 给 i0，
+  ``[63:32]`` 给 i1；``trace_rd_addr[4:0]`` 给 i0，``[9:5]`` 给 i1。``trace_ecause`` 当前同一个
+  5-bit cause 被两路截成低 4 bit 使用，因此异常原因不是每 slot 完整独立展开。
+* L124-L132：LSU bus probe 直接镜像输入，并在非写事务时把 ``lsu_bus_wmask_int`` 清零。这样
+  RVFI memory write mask 不会在 load 或 idle 周期残留旧写掩码。
+* L134-L149：``wb_seq`` 是异步低有效复位、时钟上升沿更新的 64-bit retire 序号。任一路 trace
+  valid 时每拍加 1；后续 i0 使用 ``wb_seq``，i1 使用 ``wb_seq + 1``。这适合把同周期双发射拆成
+  相邻 order，但调试单 slot retire 时要注意该计数是按有 retire 的周期推进，不是按每条指令逐次
+  自增两次。
+* L151-L167：i0 RVFI 字段从 ``trace_i0_*`` 生成。``rvfi_valid[0]`` 过滤 exception，PC next 按
+  compressed instruction 低两位选择加 2 或加 4，rs1/rs2 直接从 instruction bitfield 解码。
+* L168-L179：i1 使用同一套规则，只是写入 packed 输出的高半区。``rvfi_order[127:64]`` 使用
+  ``wb_seq[31:0] + 1``，用于和 i0 在同一周期形成顺序相邻的 RVFI order。
+* L181-L193：memory RVFI 字段来自 LSU probe。当前只填低 32 bit 地址和 32 bit data，高 32 bit 固定
+  为 0；写事务给 ``wmask``，非写事务给全 4-bit ``rmask``。这反映当前 EH2 验证平台按 RV32 观测
+  memory side effect 的事实。
+* L195-L198：``rvfi_mode`` 固定为 ``4'b0011``，表示机器模式（M-mode），然后结束模块。若后续要
+  支持更细粒度 privilege observation，应从这里和 upstream CSR/trace 信号同步扩展。
+
+接口关系：
+
+* 被调用：``dv/uvm/core_eh2/tb/core_eh2_tb_top.sv`` 中的 RVFI sidecar 实例。
+* 调用：无子模块实例化，只使用连续赋值和一个 ``always_ff``。
+* 共享状态：读取 testbench 传入的 DUT trace/LSU probe，输出到 ``eh2_rvfi_if`` 或 scoreboard
+  采样路径；不驱动 DUT 输入。
+
+§17.2  ``rtl/lec_shim/eh2_veer_lec_pack.sv`` — Formality packed-port shim 全文
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../../rtl/lec_shim/eh2_veer_lec_pack.sv
+   :language: systemverilog
+   :linenos:
+   :caption: rtl/lec_shim/eh2_veer_lec_pack.sv:全文
+
+逐段精读：
+
+* L1-L4：文件头明确这是 LEC-only wrapper，不用于仿真或 production synthesis。存在这个 shim 的
+  直接原因是旧版 Formality O-2018.06-SP1 对部分 2D packed-array top ports 处理不稳定，因此
+  外层暴露 1D vector，内部 ``eh2_veer`` 保持不变。
+* L6-L10：模块导入 ``eh2_pkg::*``，并通过 ``eh2_param.vh`` 注入参数。LEC shim 必须和真实 core
+  使用同一套参数，否则 flattened port 宽度会与内部 ``eh2_veer`` 不一致。
+* L11-L20：clock/reset/NMI 与 core clock 输出端口直接透传到内部 core。``rst_l``、``dbg_rst_l``、
+  ``rst_vec``、``nmi_int`` 和 ``nmi_vec`` 仍保持上游 core 顶层的语义。
+* L22-L31：trace 输出被声明为 1D flat vector，宽度按 ``pt.NUM_THREADS`` 乘以每组 trace payload
+  宽度计算。外部 Formality 顶层只看到 flat port，从而避开 2D packed-array 顶层端口问题。
+* L33-L45：clock override、ECC disable、BTB override、mhartstart 以及 halt/run/debug status 端口
+  保持原 core 边界。它们没有被展平处理，因为这些信号本身已经是一维或标量。
+* L47-L60：core id、MPC debug/run/reset handshake 和 per-thread performance counter 端口。这里
+  仍有 2D packed performance counter 输出，但该 shim 的注释只针对 selected trace/RVFI-style
+  outputs；当前源码没有把所有多维端口都展平。
+* L61-L85：DCCM 与 ICCM memory-style 端口，包括 read/write enable、地址、写数据和 ECC 读数据。
+  这些端口让 block/top LEC 能观察 memory interface 等价性，但 shim 不改变 memory 行为。
+* L87-L113：ICache、debug cache access、ECC/parity、premux 和 BTB packet 端口。``eh2_btb_sram_pkt``
+  仍以 package typedef 形式穿过 shim，说明当前 Formality flow 能接受该结构体边界或在脚本中处理。
+* L115-L126：BTB SRAM bank 读数据和写控制端口，保留多 bank 组织。该段与 fetch/branch prediction
+  相关，常见 mismatch 应回到 IFU/BTB 逻辑，而不是优先怀疑 shim 的 flat trace 转换。
+* L127-L170：LSU AXI4 五通道端口。输出方向对应 core master 发出的 AW/W/AR 和 ready，输入方向对应
+  外部返回的 ready/valid/resp/data。
+* L171-L213：IFU AXI4 五通道端口。IFU 主要使用 read address/read data 通道取指，但 wrapper 保留
+  完整 AXI4 形状以对齐上游 core 端口契约。
+* L215-L257：System Bus AXI4 五通道端口，用于 debug/system bus access。LEC mismatch 若集中在
+  ``sb_axi_*``，通常要同时看 debug/DMI 路径和 external response 约束。
+* L259-L293：DMA AXI4 slave 端口。方向与 LSU/IFU/SB master 端口相反：外部 DMA request 进入 core，
+  core 返回 B/R response。
+* L295-L346：AHB-Lite 相关端口覆盖 core、LSU、SB 和 DMA AHB 形态。该 shim 同时保留 AXI 与 AHB
+  端口，是为了让同一参数化 core 在不同 build 宏下都能形成可比较顶层。
+* L348-L362：bus clock enable、DMI register access、外部中断、timer/soft interrupt 和 scan mode
+  是模块声明收尾。到这里，shim 外部端口已经覆盖 ``eh2_veer`` 实例所需的全部非 trace-flat 边界。
+* L365-L374：内部重新声明 2D packed trace 信号。外层 flat vector 不直接连入 ``eh2_veer``，而是先
+  通过这些 ``*_2d`` 中间信号恢复成 core 原生端口形态。
+* L376-L387：``gen_trace_flatten`` 按 ``tid`` 展开，把每个线程的 2D trace slice 映射到 flat vector
+  的固定 bit range。例如 ``tid*64 +: 64`` 对应该线程的 instruction/address payload，
+  ``tid*2 +: 2`` 对应 valid/exception/interrupt/rd_valid。这样做把所有位选择固定在 elaboration
+  阶段，便于 Formality 建立一对一 compare point。
+* L389-L403：内部实例化真实 ``eh2_veer u_inner``。十组 trace 端口显式连接到 ``*_2d`` 中间信号，
+  其余端口用 ``.*`` 按同名连接。这个写法减少 300 多个端口重复连接的维护成本，但也要求 shim
+  端口名必须与 ``eh2_veer`` 保持严格同步。
+
+接口关系：
+
+* 被调用：Formality/LEC 脚本把该模块作为旧工具兼容顶层或 golden wrapper 使用。
+* 调用：实例化上游 ``eh2_veer``。
+* 共享状态：读取同一套 ``eh2_param.vh`` 与 ``eh2_pkg`` 类型；只改变 Formality 顶层端口形态，
+  不改变内部 core 逻辑。
