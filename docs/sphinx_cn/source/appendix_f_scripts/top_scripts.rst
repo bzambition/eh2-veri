@@ -1628,3 +1628,77 @@ sign-off gate 阈值文本，并打印仍需额外工具运行时间的项目。
 * 被调用：用户 shell、CI step 或文档示例通过 ``source env.sh`` 加载。
 * 调用：bash 内建 ``cd``、``dirname``、``pwd`` 和 ``echo``。
 * 共享状态：修改当前 shell 的环境变量和 ``PATH``；不写文件。
+
+§14  v2-45 ``scripts/clean_workspace.sh`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+``scripts/clean_workspace.sh`` 是仓库级清理与归档入口。它会删除 EDA lock/session 残留，
+归档历史 sign-off 目录和 loose build logs，并把少量历史诊断文档移动到稳定目录。因为该脚本
+会执行 ``rm -rf``、``mv`` 和 ``git mv``，默认阅读顺序应先看模式开关、保留清单和
+``--dry-run`` 输出，再看具体清理函数。
+
+.. literalinclude:: ../../../../scripts/clean_workspace.sh
+   :language: bash
+   :linenos:
+   :caption: scripts/clean_workspace.sh:全文
+
+逐段精读：
+
+* L1-L8：脚本头说明用途是清理 EDA tool residuals 并归档过时 sign-off 输出。``set -euo
+  pipefail`` 让未定义变量、普通命令失败和管道失败都终止脚本，降低半清理状态继续执行的风险。
+* L10-L13：``ROOT_DIR`` 从脚本路径上一级计算，并立即 ``cd`` 到仓库根。``shopt -s nullglob``
+  让没有匹配项的 glob 展开为空列表，避免把字面量 ``*.lck`` 当成真实路径传给删除函数。
+* L15-L23：四个模式开关默认关闭。归档目录名包含当天日期：真实文件放在
+  ``.scratch/r5_build_archive_YYYYMMDD``，``build/archive_signoffs_YYYYMMDD`` 是指向它的链接。
+  ``BUILD_ARCHIVE_READY`` 避免多个归档阶段重复建目录。
+* L25-L42：``BUILD_PRESERVE_BASENAMES`` 是 build 目录保留白名单，包含 final/nightly、coverage
+  database、simv 产物、DPI build 产物和已存在的 archive link。后续遍历 ``build/*`` 时会先查
+  这张表，防止把仍有价值的签核产物误归档或删除。
+* L44-L64：``usage`` 打印四种模式：``--dry-run`` 只预览、``--archive-only`` 只归档不删工具文件、
+  ``--all`` 还会清除旧 archive link/backing archive、``--lck-only`` 只删 Formality lock/session。
+  参数解析遇到未知参数会输出错误并以 2 退出。
+* L66-L80：``say`` 是统一输出包装；``run`` 是所有破坏性或状态变更命令的门面。``DRY_RUN=1`` 时，
+  ``run`` 用 ``%q`` 打印 shell-safe 参数，不真正执行命令。
+* L82-L91：``build_entry_is_preserved`` 用 case pattern 匹配保留清单。清单里包含
+  ``archive_signoffs_*`` 这样的 glob pattern，因此函数使用 ``case``，不是普通字符串相等。
+* L93-L115：``ensure_build_archive`` 延迟创建归档目录和软链接。``--all`` 模式会先通过
+  ``remove_paths`` 清理旧 archive link 和 backing directory；正常模式只在第一次需要归档时创建
+  当日目录，并把 ``BUILD_ARCHIVE_READY`` 置 1。
+* L117-L140：``count_existing`` 统计路径中现存项目数，``remove_paths`` 先过滤真实存在的路径，
+  再统一调用 ``run rm -rf --``。``--`` 防止以短横线开头的文件名被误解为 ``rm`` 参数。
+* L142-L162：``archive_dir`` 和 ``archive_file`` 分别归档目录与普通文件。二者都会先确认源存在，
+  再创建目标目录并移动源，避免无匹配 glob 带来空操作报错。
+* L164-L177：``move_file_to_dir`` 用于移动历史文档。非 dry-run 时优先 ``git mv``，失败后回退到
+  普通 ``mv``；这能在文件已被 Git 跟踪时保留重命名语义，在未跟踪文件上也能完成迁移。
+* L179-L193：``clean_root_locks`` 处理仓库根的 ``fm_shell_command*.lck``、``formality*.lck`` 和
+  ``*.fss``。``--archive-only`` 直接跳过删除；``--lck-only`` 仍删除 lock/session，但跳过
+  ``formalverifier.log`` 和 ``eh2_pkg.pvk``。
+* L195-L212：``clean_syn_residuals`` 处理 ``syn`` 下 lock、session、log、SVF 和 Formality work
+  目录。``--archive-only`` 跳过；``--lck-only`` 只清 lock/session，不动 log 或 work residual。
+* L214-L226：``clean_build_loose`` 只处理 ``build`` 下散落 coverage backup。它明确提示 loose
+  ``build/*.log`` 会在后面的 build archive 阶段归档，而不是在这里直接删除。
+* L228-L254：``archive_signoffs`` 归档历史 sign-off 子目录。候选范围包括
+  ``build/r*_final``、``build/r3b_html_gate``、``build/sf_*``、``build/signoff*`` 和
+  ``build/final_signoff*``，但会跳过保留白名单中的 final/nightly 等目录。
+* L256-L278：``legacy_run_dir_should_archive`` 是 legacy run 名称分类器。它排除已经由
+  sign-off 归档阶段处理的模式，然后接受 ``verify_*``、``sweep_*``、``issue12_*``、``cosim_*``、
+  ``csr_unit_*``、``r2*``、``r3*``、``r5_*``、``cov_*`` 和 ``smoke`` 等历史临时 run。
+* L280-L319：``archive_legacy_runs`` 遍历 ``build/*``，先跳过保留白名单，再把命中 legacy run
+  分类器的目录和 loose ``*.log`` 文件加入候选列表。目录用 ``archive_dir``，日志文件用
+  ``archive_file``，二者进入同一个当日 backing archive。
+* L321-L332：``archive_historical_docs`` 把若干历史诊断/快照文档移动到稳定位置。
+  ``DEEPSEEK_RC4_PROMPTS.md``、``eh2-uvm-implementation-plan.md`` 和 ``PHASE1_PLAN.md`` 进入
+  ``.scratch/round0-archive``；``fsm_uncovered_states.md`` 进入 ``docs/r3b_diagnostics``。
+* L334-L337：``report_sizes`` 打印清理完成标题，并尝试显示 ``build`` 和 ``syn`` 的大小。
+  ``du`` 失败被 ``|| true`` 吸收，因此缺少目录不会让清理脚本失败。
+* L339-L345：主流程按固定顺序执行：先清根目录锁，再清 ``syn``，然后处理 build loose、sign-off
+  归档、legacy run 归档、历史文档归档，最后打印目录大小。这个顺序保证归档阶段能在删除普通
+  residual 后看到仍需保留或移动的 build 项。
+
+接口关系：
+
+* 被调用：用户或维护脚本运行 ``bash scripts/clean_workspace.sh``，常见安全入口是先加
+  ``--dry-run``。
+* 调用：``date``、``mkdir``、``ln``、``rm``、``mv``、``git mv``、``du`` 以及 bash glob/case。
+* 共享状态：读取和修改仓库根、``syn``、``build``、``.scratch`` 与 ``docs/r3b_diagnostics``。
+  dry-run 模式只打印命令，不写这些目录。

@@ -547,6 +547,74 @@ RTL+DV lint 入口。
   ``actions/upload-artifact``。
 * 共享状态：读取 DV ``.sv/.svh`` 文件和 waiver 参数；写 CI 工作目录中的 ``lint_report.txt``。
 
+§12  v2-45 ``lint/Makefile`` 全文行段级精读
+--------------------------------------------------------------------------------
+
+本节把本地 lint 入口升级为全文源码层。``lint/Makefile`` 同时封装 Verible 和 Verilator：
+Verible 路径覆盖 RTL 与 DV ``.sv`` 文件，Verilator 路径只覆盖 RTL ``.sv`` 文件。它和
+GitHub Actions workflow 的差别在于执行范围、规则文件、waiver 文件和日志位置都不同。
+
+.. literalinclude:: ../../../../lint/Makefile
+   :language: make
+   :linenos:
+   :caption: lint/Makefile:全文
+
+逐段精读：
+
+* L1-L5：文件头说明该 Makefile 运行 Verible 和 Verilator lint，范围包括 RTL 与 DV code。
+  注释直接声明 lint 是 blocking gate：任何 ``ERROR`` 或 ``FATAL`` 都应让 pipeline 失败。
+* L7-L10：``LINT_DIR`` 从当前 Makefile 的真实路径推导，``EH2_ROOT`` 取上一级目录，
+  ``RTL_DIR`` 和 ``DV_DIR`` 分别指向仓库根下的 ``rtl`` 与 ``dv/uvm/core_eh2``。这样用户从
+  仓库根或 ``lint`` 目录调用 Make，路径都能保持一致。
+* L12-L18：``VERIBLE`` 和 ``VERILATOR`` 使用 ``?=``，允许外部通过命令行覆盖工具路径。
+  Verible 读取 ``lint/verible/verible.rules`` 与 ``lint/verible/waivers.vbl``；Verilator 读取
+  waiver 和 config 两个 ``.vlt`` 文件。
+* L20：``BUILD_DIR`` 固定为 ``lint/build``。本地 lint 日志、错误摘要和清理目标都围绕这个
+  目录工作。
+* L22-L27：Make 解析阶段用 ``find`` 收集所有 RTL ``.sv`` 和 DV ``.sv`` 文件，再拼成
+  ``ALL_SV``。``.PHONY`` 列出 ``lint``、``lint-verible``、``lint-verilator`` 和 ``clean``；
+  ``lint-quick`` 未列入 ``.PHONY``，如果目录中未来出现同名文件，Make 可能把该 target 视为已
+  满足。
+* L29-L34：``$(BUILD_DIR)`` target 创建输出目录；总 ``lint`` target 串行依赖
+  ``lint-verible`` 和 ``lint-verilator``，最后打印完成提示。是否通过不由最后一行 echo 决定，
+  而由前面两个 target 的退出码决定。
+* L35-L39：``lint-verible`` 依赖 ``BUILD_DIR``，先打印阶段标题并清空
+  ``verible_errors.txt``，然后用 ``command -v`` 检查 Verible 是否可用。工具缺失时进入 skip
+  分支，不会生成 blocking failure。
+* L40-L47：Verible 对 ``ALL_SV`` 中每个文件逐个运行，加载同一套 rule 和 waiver，并把输出
+  ``tee -a`` 追加到 ``verible.log``。源码只清空 ``verible_errors.txt``，没有清空
+  ``verible.log``；因此重复排查时应先 ``make -C lint clean`` 或删除旧日志，避免旧错误被后续
+  grep 再次收集。
+* L43-L45：``PIPESTATUS[0]`` 读取管道左侧 Verible 进程的退出码，而不是 ``tee`` 的退出码。
+  这是为了避免 lint 工具失败却被日志 tee 的成功状态掩盖。
+* L47-L55：target 从完整 log 中提取以 ``E``、``FATAL`` 或 ``Error`` 开头的行，写入
+  ``verible_errors.txt``。错误文件非空时打印 blocking 摘要并 ``exit 1``；为空时打印
+  ``Verible lint PASSED (0 errors)``。
+* L56-L58：Verible 工具缺失只打印 warning。这个 Makefile 本身允许本地开发机跳过工具缺失；
+  release sign-off 是否允许跳过，需要看上层 sign-off gate，不应只凭本页推断。
+* L60-L69：``lint-verilator`` 打印阶段标题，检查 Verilator 是否存在，然后以 ``--lint-only``
+  运行 RTL 文件集合。它传入 ``-Wno-fatal``、``-Wno-UNOPTFLAT`` 和 ``-Wno-UNUSED``，并加载
+  Verilator config 与 waiver。
+* L69-L76：Verilator 输出写到 ``lint/build/verilator.log``，随后 grep ``%Error``。命中时打印
+  blocking 信息并退出 1；没有命中则打印 ``Verilator lint PASSED``。
+* L60-L79：``lint-verilator`` 本身没有显式依赖 ``$(BUILD_DIR)``。通过总 ``lint`` target 运行时，
+  ``lint-verible`` 会先创建目录；若用户直接运行 ``make -C lint lint-verilator``，应先确认
+  ``lint/build`` 已存在或补充目录依赖。
+* L81-L87：``lint-quick`` 是 RTL-only 快速 Verible 检查。它遍历 ``RTL_SV``，加载同一套 rule
+  和 waiver，但每个文件只显示前 5 行输出，没有写 ``verible_errors.txt``，也没有 blocking
+  error gate。
+* L89-L90：``clean`` 删除 ``lint/build``。它只清理 lint 本地输出，不删除规则、waiver 或源码。
+
+接口关系：
+
+* 被调用：用户执行 ``make -C lint lint``、``make -C lint lint-verible``、
+  ``make -C lint lint-verilator`` 或 ``make -C lint lint-quick``。
+* 调用：``find``、``mkdir``、``command -v``、``verible-verilog-lint``、``tee``、``grep``、
+  ``cat``、``verilator`` 和 ``rm``。
+* 共享状态：读取 ``rtl``、``dv/uvm/core_eh2``、rule/waiver/config 文件；写
+  ``lint/build/verible.log``、``lint/build/verible_errors.txt`` 和
+  ``lint/build/verilator.log``。
+
 §9  动手练习
 ------------------------
 
