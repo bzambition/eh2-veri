@@ -127,3 +127,8 @@ build/cov.vdb.pre_*
 .scratch/r5_build_archive_*/
 .scratch/
 .claude/
+.simvision/
+waves.shm/
+INCA_libs/
+.formalrun/
+*.key
