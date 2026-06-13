@@ -1,0 +1,8 @@
+{
+  "total_time_sec": 0.0,
+  "tests": [
+    {"name": "csr_reset_seq",    "seed": 1, "type": "csr_unit", "passed":  true, "sim_log": "csr_unit_test.log"},
+    {"name": "csr_warl_seq",     "seed": 1, "type": "csr_unit", "passed":  true, "sim_log": "csr_unit_test.log"},
+    {"name": "csr_permission_seq","seed": 1, "type": "csr_unit", "passed":  true, "sim_log": "csr_unit_test.log"}
+  ]
+}

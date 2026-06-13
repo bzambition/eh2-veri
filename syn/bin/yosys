@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Wrapper for yowasp-yosys (WASM-based Yosys).
+
+Mounts required directories into the WASM sandbox so yosys can access
+RTL sources, file lists, shared modules, and write outputs.
+
+The RTL tree under eh2-veri/rtl/ is a symlink to Cores-VeeR-EH2/.
+Both the project root and the real RTL path are mounted.
+"""
+import os
+import sys
+
+_proj_root = "/home/host/eh2-veri"
+_rtl_real  = "/home/host/Cores-VeeR-EH2"
+
+if "YOWASP_MOUNT" not in os.environ:
+    os.environ["YOWASP_MOUNT"] = (
+        f"/home/host/eh2-veri={_proj_root}"
+        f":/home/host/Cores-VeeR-EH2={_rtl_real}"
+    )
+
+from yowasp_yosys import run_yosys
+sys.exit(run_yosys(sys.argv[1:]))

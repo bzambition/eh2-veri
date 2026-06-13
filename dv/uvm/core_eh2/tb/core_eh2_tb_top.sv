@@ -22,6 +22,13 @@
 `include "uvm_macros.svh"
 import uvm_pkg::*;
 
+// Ensure UVM packages with tests/sequences register their factory entries.
+// VCS auto-elaborates all packages found in the filelist, but NC (ncelab) only
+// elaborates packages actually referenced from a top-level module — without
+// this import every `uvm_component_utils/`uvm_object_utils registration in
+// the test package would be dropped, leading to "test not found" at run time.
+import core_eh2_test_pkg::*;
+
 // Include parameter defines for RV_* macros
 // common_defines.vh provides `define RV_* macros used throughout the design
 // eh2_pdef.vh provides the eh2_param_t struct definition
@@ -744,6 +751,75 @@ module core_eh2_tb_top;
   assign trace_intf.rd_wdata  = trace_rv_i_rd_wdata_ip;
 
   //--------------------------------------------------------------------------
+  // RVFI Interface Instance (for RVFI-equivalent trace monitoring)
+  //--------------------------------------------------------------------------
+  eh2_rvfi_if rvfi_intf (.clk(core_clk), .rst_l(rst_l));
+
+  //--------------------------------------------------------------------------
+  // LSU bus valid signal (derived from AXI4 LSU transactions)
+  //--------------------------------------------------------------------------
+  logic lsu_bus_valid;
+  logic [31:0] lsu_bus_addr;
+  logic [31:0] lsu_bus_rdata;
+  logic [31:0] lsu_bus_wdata;
+  logic [3:0]  lsu_bus_wmask;
+  logic        lsu_bus_write;
+
+  assign lsu_bus_valid = (lsu_axi_awvalid && lsu_axi_awready) || (lsu_axi_arvalid && lsu_axi_arready) || (lsu_axi_wvalid && lsu_axi_wready) || (lsu_axi_rvalid && lsu_axi_rready);
+  assign lsu_bus_addr  = lsu_axi_awvalid ? lsu_axi_awaddr : lsu_axi_araddr;
+  assign lsu_bus_rdata = lsu_axi_rdata[31:0];
+  assign lsu_bus_wdata = lsu_axi_wdata[31:0];
+  assign lsu_bus_wmask = lsu_axi_wstrb[3:0];
+  assign lsu_bus_write = lsu_axi_awvalid && lsu_axi_awready;
+
+  //--------------------------------------------------------------------------
+  // RVFI Converter Instance (Trace + LSU -> Standard RVFI format)
+  //--------------------------------------------------------------------------
+  eh2_veer_wrapper_rvfi u_rvfi_converter (
+    .clk              (core_clk),
+    .rst_n            (rst_l),
+
+    // Trace inputs from DUT
+    .trace_insn       (trace_rv_i_insn_ip[0]),
+    .trace_address    (trace_rv_i_address_ip[0]),
+    .trace_valid      (trace_rv_i_valid_ip[0]),
+    .trace_exception  (trace_rv_i_exception_ip[0]),
+    .trace_ecause     (trace_rv_i_ecause_ip[0]),
+    .trace_interrupt  (trace_rv_i_interrupt_ip[0]),
+    .trace_tval       (trace_rv_i_tval_ip[0]),
+    .trace_rd_valid   (trace_rv_i_rd_valid_ip[0]),
+    .trace_rd_addr    (trace_rv_i_rd_addr_ip[0]),
+    .trace_rd_wdata   (trace_rv_i_rd_wdata_ip[0]),
+
+    // LSU bus inputs
+    .lsu_bus_valid    (lsu_bus_valid),
+    .lsu_bus_addr     (lsu_bus_addr),
+    .lsu_bus_rdata    (lsu_bus_rdata),
+    .lsu_bus_wdata    (lsu_bus_wdata),
+    .lsu_bus_wmask    (lsu_bus_wmask),
+    .lsu_bus_write    (lsu_bus_write),
+
+    // RVFI output -> interface
+    .rvfi_valid       (rvfi_intf.rvfi_valid),
+    .rvfi_order       (rvfi_intf.rvfi_order),
+    .rvfi_insn        (rvfi_intf.rvfi_insn),
+    .rvfi_pc_rdata    (rvfi_intf.rvfi_pc_rdata),
+    .rvfi_pc_wdata    (rvfi_intf.rvfi_pc_wdata),
+    .rvfi_rs1_addr    (rvfi_intf.rvfi_rs1_addr),
+    .rvfi_rs2_addr    (rvfi_intf.rvfi_rs2_addr),
+    .rvfi_rd_addr     (rvfi_intf.rvfi_rd_addr),
+    .rvfi_rd_wdata    (rvfi_intf.rvfi_rd_wdata),
+    .rvfi_mem_addr    (rvfi_intf.rvfi_mem_addr),
+    .rvfi_mem_rdata   (rvfi_intf.rvfi_mem_rdata),
+    .rvfi_mem_wdata   (rvfi_intf.rvfi_mem_wdata),
+    .rvfi_mem_rmask   (rvfi_intf.rvfi_mem_rmask),
+    .rvfi_mem_wmask   (rvfi_intf.rvfi_mem_wmask),
+    .rvfi_trap        (rvfi_intf.rvfi_trap),
+    .rvfi_intr        (rvfi_intf.rvfi_intr),
+    .rvfi_mode        (rvfi_intf.rvfi_mode)
+  );
+
+  //--------------------------------------------------------------------------
   // DUT Probe Interface Instance (for register writeback monitoring)
   //--------------------------------------------------------------------------
   eh2_dut_probe_if dut_probe_intf (.clk(core_clk), .rst_n(rst_l));
@@ -792,6 +868,8 @@ module core_eh2_tb_top;
   assign dut_probe_intf.mepc    = {dut.veer.dec.tlu.tlumt[0].tlu.mepc[31:1], 1'b0};
   // mcause: full 32 bits
   assign dut_probe_intf.mcause  = dut.veer.dec.tlu.tlumt[0].tlu.mcause[31:0];
+  // mtval: full 32 bits (issue 64 — from RTL TLU mtval register)
+  assign dut_probe_intf.mtval   = dut.veer.dec.tlu.tlumt[0].tlu.mtval[31:0];
 
   // Exception/trap signals at E4 stage
   assign dut_probe_intf.mret_e4            = dut.veer.dec.tlu.tlumt[0].tlu.mret_e4;
@@ -1068,6 +1146,9 @@ module core_eh2_tb_top;
 
     // Store instruction monitoring interface
     uvm_config_db#(virtual eh2_instr_monitor_if)::set(null, "*", "instr_monitor_vif", u_instr_monitor_if);
+
+    // Store RVFI interface
+    uvm_config_db#(virtual eh2_rvfi_if)::set(null, "*", "rvfi_vif", rvfi_intf);
   end
 
   //--------------------------------------------------------------------------

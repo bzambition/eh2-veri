@@ -93,7 +93,7 @@ BUILD_DIR    := build
 # (smoke -> build/smoke, signoff -> build/signoff, etc.) so the simv/csrc/
 # cov.vdb/compile.log they produce live in their own island. Default for
 # standalone `make compile` invocations.
-BUILD_SUBDIR ?= $(BUILD_DIR)/compile
+BUILD_SUBDIR ?= $(BUILD_DIR)/compile_$(SIMULATOR)
 
 # ----------------------------------------------------------------------------
 # Items inside $(BUILD_DIR) that `make clean` MUST preserve. These are either
@@ -125,7 +125,7 @@ CONFIG          ?= default
 SEED            ?= 1
 TEST            ?=
 TESTLIST        ?= riscvdv
-SIMULATOR       ?= vcs
+SIMULATOR   ?= vcs
 BINARY          ?=
 VERBOSITY       ?= UVM_MEDIUM
 TIMEOUT_NS      ?= 10000000
@@ -141,7 +141,7 @@ GEN_OPTS        ?=
 PROFILE         ?= full
 GATE_ONLY       ?= 0
 CLEANUP         ?= 0
-SIGNOFF_OUT     ?= $(BUILD_DIR)/signoff
+SIGNOFF_OUT     ?= $(BUILD_DIR)/signoff_$(SIMULATOR)
 SIGNOFF_OPTS    ?=
 SIGNOFF_ITERATIONS ?=
 LEC_KNOWN_LIMITED  ?= 0
@@ -155,11 +155,11 @@ SIGNOFF_ALLOW_WARNINGS     ?= 1
 
 # Replay
 STAGE_DATA_DIR     ?= $(BUILD_DIR)/r3b_final
-SIGNOFF_REPLAY_OUT ?= $(BUILD_DIR)/signoff_replay
+SIGNOFF_REPLAY_OUT ?= $(BUILD_DIR)/signoff_replay_$(SIMULATOR)
 
 # Demo
 WITH_SYNTH       ?= 1
-DEMO_OUT         ?= $(BUILD_DIR)/demo
+DEMO_OUT         ?= $(BUILD_DIR)/demo_$(SIMULATOR)
 
 # Lint / Synth / Compliance / Manual sub-mode 变量
 TOOL             ?=
@@ -174,17 +174,44 @@ DRY_RUN          ?= 0
 # 仿真器命令
 VCS         := vcs
 XLM         := xrun
+IRUN        := irun
 
-# Coverage 配置
-VCS_COV_METRICS := line+cond+fsm+tgl+branch+assert
-VCS_COV_HIER    := $(TB_DIR)/cov_hier.cfg
+# Coverage 配置 — 对齐 lowRISC Ibex 工业实现
+#   - 5 维度（line+tgl+assert+fsm+branch）；不收 cond/expression
+#     工业实践证明 line+toggle+branch 已覆盖大部分 condition 路径，
+#     cond 维度在大型设计 instrumentation 开销大且不必要。
+#   - -cm_hier cover.cfg 编译时限定 dut 子树，从源头杜绝 tb_intf 等 stub 假高数字。
+#   - -cm_tgl portsonly + structarr 是 Ibex 标准 toggle 配置。
+#   - -cm_report noinitial 不报告 initial 块覆盖率。
+#   - -cm_seqnoconst 跳过常量条件的序列采样。
+VCS_COV_METRICS := line+tgl+assert+fsm+branch
+VCS_COV_HIER    := $(TB_DIR)/cover.cfg
 VCS_FSM_CFG     := $(TB_DIR)/cov_fsm.cfg
 VCS_FSM_RESET_FILTER := $(TB_DIR)/cov_fsm_reset_filter.cfg
-VCS_COMPILE_COV_OPTS := -cm $(VCS_COV_METRICS) -cm_dir $(BUILD_SUBDIR)/cov \
+# `-cm_tgl structarr` 在 VCS 2018 是 LCA (Limited Customer Availability) 选项，
+# 需要 `-lca` 才能启用。Ibex 工业实现使用此 toggle 配置以覆盖 struct/array 信号；
+# 若 VCS license 不允许 LCA，删掉 structarr 与 -lca 两个 flag 即可（line/branch
+# 维度不受影响）。
+VCS_COMPILE_COV_OPTS := -lca \
+                        -cm $(VCS_COV_METRICS) -cm_dir $(BUILD_SUBDIR)/cov \
                         -cm_hier $(VCS_COV_HIER) \
+                        -cm_tgl portsonly \
+                        -cm_tgl structarr \
+                        -cm_report noinitial \
+                        -cm_seqnoconst \
                         -cm_fsmcfg $(VCS_FSM_CFG) \
                         -cm_fsmresetfilter $(VCS_FSM_RESET_FILTER) \
                         -cm_fsmopt report2StateFsms+allowTmp+reportvalues+reportWait+upto64
+
+# NC (Cadence Incisive irun) — 全面支持作为 VCS 备选 simulator。
+# 同样收集覆盖率参与 sign-off；用 cov_full_nc.ccf 限定 dut-only scope
+# 并启用 set_expr_coverable_*-all 让 expression cov 完整 instrument。
+# VCS 是 sign-off 默认；NC 可作 cross-check 或在不便于 Verdi 时优先用 simvision/Indago。
+NC_COV_CCF      := $(TB_DIR)/cov_full_nc.ccf
+NC_COMPILE_COV_OPTS := -coverage all -covworkdir $(BUILD_SUBDIR)/cov_work -covoverwrite -covdut core_eh2_tb_top -covfile $(NC_COV_CCF)
+
+# NC 显式指 UVM-1.2 源，避开默认 -uvm 预编译库的 uvm_default_report_server 可见性问题。
+NC_UVM_HOME ?= /home/cadence/INCISIVE152/tools/methodology/UVM/CDNS-1.2
 VCS_RUN_COV_OPTS := -cm $(VCS_COV_METRICS) -cm_dir $(BUILD_SUBDIR)/cov \
                     -cm_name $(TEST)_$(SEED) +enable_eh2_fcov=1
 
@@ -203,7 +230,7 @@ TEST_LIST   ?= default
 .PHONY: help \
         demo signoff signoff_replay \
         asm cosim compile \
-        smoke regress compliance \
+        smoke regress compliance wave_nc \
         lint formal synth \
         manual clean \
         compile_vcs compile_xlm \
@@ -222,10 +249,14 @@ TEST_LIST   ?= default
 define HELP_TEXT
 
 ================================================================================
-EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更新）
+EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-19 更新）
 ================================================================================
 
 15 个核心 target，按 5 组组织。所有变体行为靠变量切换。
+默认仿真器 = Synopsys VCS（对齐 lowRISC Ibex 工业实现，覆盖率配置见 cover.cfg）。
+NC/Incisive 同时全面支持作为备选 simulator（cover.cfg 等价物：cov_full_nc.ccf），
+所有 stage 与 sign-off 都可以走 NC 路径。build/<target>_<simulator>/ 隔离 VCS/NC 产物。
+NC 的优势是 simvision/Indago 波形与 Cadence 工具链协同。
 默认门限 = v1.1 release 真实值：line ≥ 65%, functional ≥ 40%, warnings allowed。
 
 每个 target 统一字段：用途 / 耗时 / 依赖 / 变量 / 产出 / 示例。
@@ -234,79 +265,100 @@ EH2 UVM 验证平台 — Makefile 入口说明（v1.1 规整版 / 2026-05-17 更
 [ build/ 目录约定 ] —— per-target 岛屿原则
 ──────────────────────────────────────────────────────────────────────────────
 
-每个仿真类 target 是一个"岛"——simv / csrc / cov.vdb / compile.log 与
-work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
+每个仿真类 target 是一个"岛"。VCS 产物（simv / csrc / cov.vdb）与 NC 产物
+（INCA_libs / cov_work）按 simulator 后缀隔离，路径形如 build/<target>_<simulator>/，
+两个 simulator 可并行运行同一 target 而互不干扰。
 
   build/
-  ├── libcosim.so           共享只读 Spike DPI 库
-  ├── spike_objs/           共享 Spike 编译中间产物
-  ├── r3b_final/            历史 v1.1 sign-off 证据（clean 保护）
-  ├── r4a_final/            历史 v1.1 sign-off 证据（clean 保护）
-  ├── archive_signoffs_*    历史归档软链（clean 保护）
+  ├── libcosim.so                 共享只读 Spike DPI 库
+  ├── spike_objs/                 共享 Spike 编译中间产物
+  ├── r3b_final/ r4a_final/       历史 v1.1 sign-off 证据（clean 保护）
+  ├── archive_signoffs_*          历史归档软链（clean 保护）
   │
-  ├── compile/              make compile 独立调用
-  ├── smoke/                make smoke
-  ├── regress/              make regress（旧 build/regression/ 改名）
-  ├── signoff/              make signoff（含 runs/<stage>/...）
-  ├── signoff_replay/       make signoff_replay（gate-only，无 simv）
-  └── demo/                 make demo（含 runs/<stage>/...）
+  ├── compile_vcs/                make compile SIMULATOR=vcs
+  ├── compile_nc/                 make compile SIMULATOR=nc
+  ├── smoke_vcs/ / smoke_nc/      make smoke
+  ├── regress_vcs/ / regress_nc/  make regress
+  ├── signoff_vcs/ / signoff_nc/  make signoff   ★ UVM 验证主线
+  ├── signoff_replay_vcs/nc/      make signoff_replay（gate-only）
+  ├── demo_vcs/ / demo_nc/        make demo（含 ASIC 综合）
+  └── wave_nc_<test>/             make wave_nc TEST=<name>（NC GUI 调试）
 
 每个 target 子目录内典型布局：
-  build/<target>/
-  ├── simv, simv.daidir/, csrc/        VCS 编译产物
-  ├── cov.vdb, cov/, cov_report/       覆盖率数据库（如 COV=1）
+  build/<target>_<simulator>/
+  ├── simv, simv.daidir/, csrc/        VCS 编译产物（SIMULATOR=vcs）
+  ├── cov.vdb, cov/, cov_report/       VCS 覆盖率数据库（如 COV=1）
+  ├── INCA_libs/                       NC 编译产物（SIMULATOR=nc）
+  ├── cov_work/                        NC 覆盖率数据库（IMC 读，如 COV=1）
+  ├── cov_merged/                      sign-off 合并覆盖率（URG/IMC 输出）
+  ├── report.html / signoff_report.md  最终 sign-off 报告（仅 signoff/demo）
   ├── compile.log                      编译日志
   └── <test>_s<seed>/  或  runs/<stage>/<test>_s<seed>/
-      ├── waves.fsdb                   如 WAVES=1
+      ├── waves.fsdb / waves.shm/      如 WAVES=1（VCS=FSDB，NC=SHM 数据库）
       ├── sim_*.log
       └── result.yaml
 
-并行安全：可任意同时跑 make smoke + make demo + make signoff 三个 target，
-彼此不抢 simv、不抢 cov、不抢 ucli 锁。
+并行安全：以下组合都可同时跑，互不干扰：
+  - make signoff SIMULATOR=vcs   &  make signoff SIMULATOR=nc
+  - make smoke SIMULATOR=vcs     &  make smoke SIMULATOR=nc
+  - make signoff & make regress &  make smoke（三个 target 同时）
+唯一共享资源：syn/build/ (DC + LEC 产物)。如同时跑两个含 synth 的 demo，
+需要错开（让一个先跑完 make synth 再启另一个）。
 
 ──────────────────────────────────────────────────────────────────────────────
-[ 一键运行 ] —— 演示 / 完整 sign-off / 复演
+[ UVM 验证主线 ] —— sign-off / 复演 / 完整端到端演示
 ──────────────────────────────────────────────────────────────────────────────
 
-  make demo
-        用途：完整端到端演示 / release 自检。一条龙：clean → asm → cosim → compile
-              → synth → block-level LEC → signoff（含覆盖率） → HTML 报告
-        耗时：PARALLEL=4 约 2-3 小时（DC ~30min + block_lec ~45min + 仿真+cov ~1h）
-              WITH_SYNTH=0 可省 1-2 小时
-        依赖：syn-dc 自动调 scripts/gen_dc_wrapper.sh 生成 wrapper；
-              compile 用 COV=1 重建带覆盖率插桩的 simv（不复用旧 simv）
-        变量：
-          WITH_SYNTH=0|1        是否含 synth+LEC（默认 1）
-          DEMO_OUT=<dir>        输出目录（默认 build/demo）
-          PARALLEL=<N>          回归并行度（默认 4）
-        产出：
-          $(DEMO_OUT)/simv                     本 demo 用的 simv
-          $(DEMO_OUT)/report.html              HTML 报告（含覆盖率仪表盘）
-          $(DEMO_OUT)/signoff_status.json      机器可读结果
-          $(DEMO_OUT)/signoff_report.md        Markdown 摘要
-          $(DEMO_OUT)/runs/{smoke,directed,cosim,riscvdv,csr_unit,compliance}/
-          $(DEMO_OUT)/cov_merged/dashboard.txt URG 合并覆盖率
-          syn/build/eh2_synth.v                综合 netlist
-          syn/build/lec_summary.txt            block-level LEC 31635/31635
-        示例：
-          make demo                       # 完整演示（默认 build/demo）
-          make demo WITH_SYNTH=0          # 跳过综合/LEC，只跑仿真+signoff
-          make demo PARALLEL=8            # 提速：8 路并行
-          DEMO_OUT=build/r4a_final make demo   # 输出为历史命名
+# 关键约定
+# --------
+# 1) 产物隔离：所有 simulator-相关的 target 输出按 simulator 后缀分目录：
+#       make smoke   SIMULATOR=vcs  → build/smoke_vcs/
+#       make smoke   SIMULATOR=nc   → build/smoke_nc/
+#       make regress SIMULATOR=vcs  → build/regress_vcs/
+#       make regress SIMULATOR=nc   → build/regress_nc/
+#       make compile SIMULATOR=vcs  → build/compile_vcs/
+#       make compile SIMULATOR=nc   → build/compile_nc/
+#       make signoff SIMULATOR=vcs  → build/signoff_vcs/   ← UVM 验证主线
+#       make signoff SIMULATOR=nc   → build/signoff_nc/
+#       make demo    SIMULATOR=vcs  → build/demo_vcs/      ← 含 ASIC 综合的完整演示
+#       make demo    SIMULATOR=nc   → build/demo_nc/
+#    VCS 与 NC 产物互不干扰，可并行运行：`make signoff SIMULATOR=vcs` 与
+#    `make signoff SIMULATOR=nc` 可同时跑。
+#
+# 2) signoff vs demo（重要！）
+#    - signoff 是 UVM 验证主线：9-stage gate（smoke/directed/cosim/riscvdv/
+#      lint/csr_unit/compliance/formal/syn），重点是 UVM regression + 覆盖率合并
+#      + sign-off 门限判定。formal/syn 两个 stage 仅"读取"已有报告做 gate，
+#      不会重跑工具。
+#    - demo 是完整端到端演示：signoff + 显式跑 make synth（DC + block_lec）。
+#      DC+LEC 与 UVM 无关，是给 signoff.syn stage 提供 lec_summary.txt 数据。
+#      要跑 UVM 主线，直接用 signoff；要做 ASIC 完整演示，用 demo。
+#
+# 3) formal 数据：dv/formal/build/ifv_*.log 由独立的 `make formal` target 生成
+#    （signoff.formal stage 只读这些报告做 gate，不自己跑 IFV）。
 
-  make signoff
-        用途：完整 9-stage sign-off。不清理、不重编，复用已编译的 simv
+  make signoff                                 ★ UVM 验证主线，推荐入口
+        用途：完整 9-stage sign-off（UVM regression + 覆盖率合并 + gate 判定）
         耗时：~1-1.5 小时（COV=1，PARALLEL=4）
-        依赖：本 target 自动调 compile 生成 $(SIGNOFF_OUT)/simv（如启用 COV
-              则带覆盖率插桩）；如启用 LEC_BLOCKLEVEL=1 需先有 syn/build/lec_summary.txt
+        依赖：本 target 自动调 compile 生成编译产物
+              （VCS: build/signoff_vcs/simv；NC: build/signoff_nc/INCA_libs/；
+              COV=1 时带覆盖率插桩）；
+              如启用 LEC_BLOCKLEVEL=1 需先有 syn/build/lec_summary.txt
+              （由 `make synth` 生成，可独立预跑）
               GATE_ONLY=1 时跳过 compile，仅评估现有 runs/。
+        9 stage 说明：
+          smoke / directed / cosim / riscvdv / lint / csr_unit / compliance
+                  ↑ 这 7 个 stage 自己跑测试 + gate
+          formal / syn
+                  ↑ 这 2 个 stage 仅读取 dv/formal/build/ 和 syn/build/ 已有报告做 gate
         变量：
+          SIMULATOR=vcs|nc                       仿真器（默认 vcs；可与 NC 并行跑）
           PROFILE=full|quick|cosim|nightly       profile（默认 full）
           GATE_ONLY=0|1                          仅评估、不重跑（默认 0）
           COV=0|1                                覆盖率（默认 1）
           PARALLEL=<N>                           并行度（默认 4）
           SEED=<N>                               随机种子（默认 1）
-          SIGNOFF_OUT=<dir>                      输出目录（默认 build/signoff）
+          SIGNOFF_OUT=<dir>                      输出目录（默认 build/signoff_$(SIMULATOR)）
           SIGNOFF_MIN_LINE_COV=<pct>             line 门限（默认 65）
           SIGNOFF_MIN_FUNCTIONAL_COV=<pct>       functional 门限（默认 40）
           SIGNOFF_ALLOW_WARNINGS=0|1             warning 容忍（默认 1）
@@ -316,31 +368,35 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
           LEC_BLOCKLEVEL=0|1                     启用块级 LEC（默认 1）
           LEC_KNOWN_LIMITED=0|1                  LEC 失败兜底（默认 0）
           LEC_SUMMARY_PATH=<file>                LEC 摘要（默认 syn/build/lec_summary.txt）
-        产出：
-          $(SIGNOFF_OUT)/simv                       本 sign-off 用的 simv
-          $(SIGNOFF_OUT)/report.html
-          $(SIGNOFF_OUT)/signoff_status.json
-          $(SIGNOFF_OUT)/signoff_report.md
-          $(SIGNOFF_OUT)/runs/<stage>/
-          $(SIGNOFF_OUT)/cov_merged/dashboard.txt
+        产出（路径示例按默认 SIMULATOR=vcs；NC 时同名子目录在 signoff_nc/ 下）：
+          build/signoff_vcs/simv                       VCS 编译产物（SIMULATOR=vcs）
+          build/signoff_nc/INCA_libs/                  NC 编译产物（SIMULATOR=nc）
+          $(SIGNOFF_OUT)/report.html                   HTML 报告
+          $(SIGNOFF_OUT)/signoff_status.json           机器可读结果
+          $(SIGNOFF_OUT)/signoff_report.md             Markdown 摘要
+          $(SIGNOFF_OUT)/runs/<stage>/                 各 stage 运行数据
+          $(SIGNOFF_OUT)/cov_merged/dashboard.txt      URG/IMC 合并覆盖率
         示例：
-          make signoff                                 # full profile，默认门限
-          make signoff PROFILE=quick                   # smoke+directed 快跑
-          make signoff GATE_ONLY=1                     # 不重跑，仅评估现有 runs/
+          make signoff                                       # VCS 主线，默认门限
+          make signoff SIMULATOR=nc                          # 用 NC 跑（与 VCS 并行无冲突）
+          make signoff PROFILE=quick                         # smoke+directed 快跑
+          make signoff GATE_ONLY=1                           # 不重跑，仅评估现有 runs/
           make signoff SIGNOFF_MIN_LINE_COV=85 SIGNOFF_ALLOW_WARNINGS=0
-                                                       # 恢复旧 85/50 严格门限
-          make signoff CLEANUP=1                       # 跑完顺便清 lck 残留
-          make signoff LEC_KNOWN_LIMITED=1 LEC_BLOCKLEVEL=0    # LEC 兜底
+                                                              # 恢复旧 85/50 严格门限
+          make signoff CLEANUP=1                             # 跑完顺便清 lck 残留
+          make signoff LEC_KNOWN_LIMITED=1 LEC_BLOCKLEVEL=0  # LEC 兜底
+          # 双 simulator 并行跑（资源充足时）：
+          make signoff SIMULATOR=vcs & make signoff SIMULATOR=nc
 
   make signoff_replay
         用途：gate-only 复演 v1.1 reference run，秒级出报告（不重跑任何测试）
         耗时：< 30 秒
         依赖：STAGE_DATA_DIR/runs/{smoke,directed,cosim,riscvdv,csr_unit,compliance}
-              默认指向 build/r3b_final（已被 5月17日 make demo 清空时删除，
-              如需恢复请用 build/demo/ 或新跑一次 demo）
+              默认指向 build/r3b_final（如不存在请用 build/demo_vcs/ 或重跑 demo 生成）
         变量：
+          SIMULATOR=vcs|nc                  仿真器（默认 vcs；改变输出目录后缀）
           STAGE_DATA_DIR=<dir>              数据源（默认 build/r3b_final）
-          SIGNOFF_REPLAY_OUT=<dir>          输出目录（默认 build/signoff_replay）
+          SIGNOFF_REPLAY_OUT=<dir>          输出目录（默认 build/signoff_replay_$(SIMULATOR)）
           LEC_BLOCKLEVEL=0|1                启用 LEC gate（默认 1）
           LEC_KNOWN_LIMITED=0|1             LEC 兜底（默认 0）
           LEC_SUMMARY_PATH=<file>           LEC 摘要路径
@@ -348,13 +404,45 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
           SIGNOFF_MIN_FUNCTIONAL_COV=<pct>  functional 门限（默认 40）
           SIGNOFF_OPTS="..."                透传选项
         产出：
-          $(SIGNOFF_REPLAY_OUT)/report.html
-          $(SIGNOFF_REPLAY_OUT)/signoff_status.json
+          $(SIGNOFF_REPLAY_OUT)/report.html               HTML 报告
+          $(SIGNOFF_REPLAY_OUT)/signoff_status.json       机器可读结果
+          $(SIGNOFF_REPLAY_OUT)/signoff_report.md         Markdown 摘要
         示例：
           make signoff_replay                                   # 默认复演 r3b_final
-          make signoff_replay STAGE_DATA_DIR=build/demo         # 复演刚跑完的 demo
-          make signoff_replay STAGE_DATA_DIR=.scratch/r5_build_archive_20260512/r3b_final
-                                                                # 复演历史归档
+          make signoff_replay STAGE_DATA_DIR=build/demo_vcs     # 复演刚跑完的 VCS demo
+          make signoff_replay STAGE_DATA_DIR=build/signoff_nc   # 复演刚跑完的 NC signoff
+
+  make demo                                    完整端到端演示（含 ASIC 综合）
+        用途：完整端到端演示 / release 自检。一条龙：clean → asm → cosim → compile
+              → synth（DC + block-level LEC） → signoff → HTML 报告
+        与 signoff 的区别：demo 额外跑 make synth（DC 综合 + block-level LEC），
+                          DC/LEC 与 UVM 验证无关，是给 signoff.syn stage
+                          提供 lec_summary.txt 数据；要跑 UVM 主线，
+                          直接用 signoff，省 1.5 小时综合时间。
+        耗时：PARALLEL=4 约 2-3 小时（DC ~30min + block_lec ~45min + UVM signoff ~1-1.5h）
+              WITH_SYNTH=0 可省 1-2 小时（跳过 DC+LEC）
+        依赖：syn-dc 自动调 scripts/gen_dc_wrapper.sh 生成 wrapper；
+              compile 用 COV=1 重建带覆盖率插桩的 testbench
+        变量：
+          SIMULATOR=vcs|nc      仿真器（默认 vcs；NC 可同时跑，产物在 demo_nc/）
+          WITH_SYNTH=0|1        是否含 synth+LEC（默认 1）
+          DEMO_OUT=<dir>        输出目录（默认 build/demo_$(SIMULATOR)）
+          PARALLEL=<N>          回归并行度（默认 4）
+        产出（路径示例按默认 SIMULATOR=vcs；NC 时同名子目录在 demo_nc/ 下）：
+          build/demo_vcs/simv                     VCS 编译产物（SIMULATOR=vcs）
+          build/demo_nc/INCA_libs/                NC 编译产物（SIMULATOR=nc）
+          $(DEMO_OUT)/report.html                 HTML 报告（含覆盖率仪表盘）
+          $(DEMO_OUT)/signoff_status.json         机器可读结果
+          $(DEMO_OUT)/signoff_report.md           Markdown 摘要
+          $(DEMO_OUT)/runs/{smoke,directed,cosim,riscvdv,csr_unit,compliance}/
+          $(DEMO_OUT)/cov_merged/dashboard.txt    URG/IMC 合并覆盖率
+          syn/build/eh2_synth.v                   综合 netlist
+          syn/build/lec_summary.txt               block-level LEC 31635/31635
+        示例：
+          make demo                       # 完整演示（默认 build/demo_vcs）
+          make demo SIMULATOR=nc          # NC 版完整演示（build/demo_nc）
+          make demo WITH_SYNTH=0          # 跳过综合/LEC，与 make signoff 等价
+          make demo PARALLEL=8            # 提速：8 路并行
 
 ──────────────────────────────────────────────────────────────────────────────
 [ 构建 ] —— 编译产物
@@ -374,10 +462,14 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
   make cosim
         用途：编译 Spike DPI co-simulation 库
         耗时：30-60 秒
-        依赖：SPIKE_INSTALL（默认 $$HOME/spike-cosim），VCS_HOME
+        依赖：SPIKE_INSTALL（默认 $$HOME/spike-cosim）；
+              svdpi.h 头文件（自动从 NC_INSTALL=$(NC_INSTALL) 或 VCS_HOME 查找，
+              可显式设 SVDPI_INCLUDE=<dir>）
         变量：
           SPIKE_DIR=<path>          Spike 源码目录
           SPIKE_INSTALL=<path>      Spike 安装前缀
+          NC_INSTALL=<path>         INCISIVE 安装根（svdpi.h 来源之一）
+          SVDPI_INCLUDE=<file>      显式指定 svdpi.h 路径（覆盖自动查找）
           NO_COSIM=1                跳过链接（运行时配套 +disable_cosim=1）
         产出：
           build/libcosim.so                 ~200MB Spike DPI 动态库
@@ -387,21 +479,23 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
           make compile NO_COSIM=1           # 无 Spike 环境，跳过 cosim 链接
 
   make compile
-        用途：编译 UVM testbench → simv
-        耗时：3-5 分钟（VCS）；COV=1 慢 1.5 倍
+        用途：编译 UVM testbench（VCS: simv；NC: INCA_libs/）
+        耗时：VCS ~3-5 分钟；NC irun 同量级；COV=1 慢 ~1.5 倍
         依赖：libcosim.so（除非 NO_COSIM=1），RTL flist
         变量：
-          SIMULATOR=vcs|xlm        仿真器（默认 vcs）
+          SIMULATOR=vcs|nc|xlm     仿真器（默认 vcs；NC 全面支持，含 sign-off 与覆盖率）
           COV=0|1                  覆盖率插桩（默认 1，与顶层 COV ?= 1 一致；显式 COV=0 关闭）
-          WAVES=0|1                FSDB/VPD 波形 dump（默认 0）
+          WAVES=0|1                FSDB/SHM 波形 dump（默认 0）
           NO_COSIM=1               跳过 cosim 链接
-        产出：
-          build/compile/simv                       VCS 可执行
-          build/compile/simv.daidir/               VCS 中间数据
-          build/compile/csrc/                      VCS C 中间文件
-          build/compile/compile.log                编译日志
+        产出（默认 build/compile_$(SIMULATOR)/，VCS/NC 互不干扰）：
+          $(BUILD_DIR)/compile_vcs/simv, simv.daidir/, csrc/   VCS 编译产物
+          $(BUILD_DIR)/compile_vcs/cov, cov.vdb                VCS 覆盖率数据库（COV=1）
+          $(BUILD_DIR)/compile_nc/INCA_libs/                   NC (irun) 编译库
+          $(BUILD_DIR)/compile_nc/cov_work/                    NC 覆盖率数据库（COV=1）
+          $(BUILD_DIR)/compile_$(SIMULATOR)/compile.log        编译日志
         示例：
-          make compile                     # 默认 COV=0
+          make compile                     # VCS（默认），COV 取顶层默认值
+          make compile SIMULATOR=nc        # NC 编译
           make compile COV=1               # 带覆盖率（demo/signoff 用）
           make compile WAVES=1             # 启用波形
 
@@ -414,17 +508,23 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
         耗时：~1 分钟（含 compile 自动重建）
         依赖：自动触发 make compile + make asm
         变量：
-          SIMULATOR=vcs|xlm                仿真器（默认 vcs）
-        产出：
-          build/smoke/simv                         本 target 自己的 simv
-          build/smoke/<test>_s1/sim_*.log
-          build/smoke/<test>_s1/result.yaml
-          build/smoke/<test>_s1/waves.fsdb         如 WAVES=1
-          build/smoke/regr.log
-          build/smoke/report.json
+          SIMULATOR=vcs|nc|xlm             仿真器（默认 vcs；NC 同样支持，产物在 smoke_nc/）
+          COV=0|1                          覆盖率插桩（默认 0；COV=1 时跑覆盖率收集）
+          WAVES=0|1                        FSDB/SHM 波形 dump（默认 0）
+        产出（默认 build/smoke_$(SIMULATOR)/）：
+          $(BUILD_DIR)/smoke_vcs/simv, simv.daidir/        VCS 编译产物
+          $(BUILD_DIR)/smoke_nc/INCA_libs/                 NC 编译库
+          $(BUILD_DIR)/smoke_$(SIMULATOR)/<test>_s1/sim_*.log
+          $(BUILD_DIR)/smoke_$(SIMULATOR)/<test>_s1/result.yaml
+          $(BUILD_DIR)/smoke_$(SIMULATOR)/<test>_s1/waves.fsdb|waves.shm/   如 WAVES=1
+          $(BUILD_DIR)/smoke_$(SIMULATOR)/regr.log
+          $(BUILD_DIR)/smoke_$(SIMULATOR)/report.json
         示例：
-          make smoke                       # 默认
-          make smoke SIMULATOR=xlm         # Xcelium 跑
+          make smoke                       # VCS（默认）
+          make smoke SIMULATOR=nc          # NC 跑 smoke
+          make smoke WAVES=1               # 带 FSDB 波形（VCS）/ SHM（NC）
+          # VCS 与 NC 同时跑互不干扰：
+          make smoke SIMULATOR=vcs & make smoke SIMULATOR=nc
 
   make regress
         用途：通用回归入口，覆盖旧的 run / nightly / weekly / run_regress
@@ -437,18 +537,20 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
           ITERATIONS=<N>                    迭代次数（默认 1；旧 weekly 用 5）
           PARALLEL=<N>                      并行度（默认 4）
           COV=0|1                           覆盖率（默认 1）
-          OUT=<dir>                         输出目录（默认 build/regress）
-          SIMULATOR=vcs|xlm                 仿真器
-        产出：
-          build/regress/simv                        本 target 自己的 simv（OUT 未覆盖时）
+          OUT=<dir>                         输出目录（默认 build/regress_$(SIMULATOR)）
+          SIMULATOR=vcs|nc|xlm              仿真器（默认 vcs；NC 同样全面支持）
+        产出（默认 build/regress_$(SIMULATOR)/，OUT 显式给定时按 OUT）：
+          $(OUT)/simv, simv.daidir/                 VCS 编译产物（SIMULATOR=vcs）
+          $(OUT)/INCA_libs/                         NC 编译库（SIMULATOR=nc）
           $(OUT)/<test>_s<seed>/sim_*.log
           $(OUT)/<test>_s<seed>/result.yaml
-          $(OUT)/<test>_s<seed>/waves.fsdb          如 WAVES=1
+          $(OUT)/<test>_s<seed>/waves.fsdb|waves.shm/  如 WAVES=1
           $(OUT)/regr.log
           $(OUT)/report.json
           $(OUT)/regr_junit.xml             JUnit XML（CI 友好）
         示例：
-          make regress                                  # 旧 nightly（riscvdv testlist）
+          make regress                                  # 旧 nightly（riscvdv testlist，VCS）
+          make regress SIMULATOR=nc                     # 走 NC 路径
           make regress ITERATIONS=5                     # 旧 weekly
           make regress TEST=riscv_arithmetic_basic_test # 旧 run（单测）
           make regress TESTLIST=directed                # 旧 run_regress（directed）
@@ -472,6 +574,33 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
           make compliance                  # 默认 RV32IMC
           make compliance MODE=all         # 全套
           make compliance MODE=compile     # 只编译 TB
+
+  make wave_nc TEST=<name>                     ★ NC interactive 波形调试
+        用途：用 NC ncsim + SimVision GUI 实时调试单个测试（老师推荐的
+              "一边仿真一边看波形"模式）。与 batch `make smoke SIMULATOR=nc
+              WAVES=1` 互补：batch 跑完 dump 离线 simvision 看；wave_nc
+              启动 ncsim 后挂 SimVision GUI，可以 run/stop/add wave/
+              reverse run 实时操作，是 NC 工具链相比 VCS+Verdi 的核心优势。
+        耗时：编译 ~5min；之后实时调试（取决于用户操作时间）
+        依赖：irun (NC/Incisive)、SimVision GUI、X11 forwarding（远程 ssh
+              要加 -X 或本地图形终端）
+        变量：
+          TEST=<name>           必填。要调试的测试 hex 名（去掉 .hex）
+                                例：TEST=smoke 读 tests/asm/smoke.hex
+        产出：
+          build/wave_nc_<TEST>/                NC interactive 工作目录
+          build/wave_nc_<TEST>/<TEST>_s1/waves.shm/   SHM 数据库（可离线再看）
+        示例：
+          make wave_nc TEST=smoke           # 调试 smoke
+          make wave_nc TEST=nop             # 调试 nop
+        交互式命令（ncsim 启动后在 SimVision 或 ncsim shell 用）：
+          run 100ns                        # 前进 100ns
+          add wave -position end /core_eh2_tb_top/dut/veer/exu/*
+                                           # 加信号到波形窗口
+          stop -name brk1 -object <signal> # 设断点
+          run                              # 继续到断点
+          reverse run                      # 反向调试（部分版本支持）
+          quit                             # 退出
 
 ──────────────────────────────────────────────────────────────────────────────
 [ 静态 / 形式化 / 综合 ]
@@ -556,10 +685,12 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
         耗时：< 5 秒
         依赖：无
         变量：
-          SCOPE=full|build|cov|syn|formal|asm|docs    范围（默认 full）
+          SCOPE=full|build|cov|vcs|nc|syn|formal|asm|docs    范围（默认 full）
               full     —— build/ 可再生产物 + 根残留（最常用）
               build    —— 只清 build/（保留清单见下）
-              cov      —— 只清覆盖率数据库（cov.vdb/cov_report）
+              cov      —— 只清覆盖率数据库（cov.vdb/cov_report/cov_work/cov_merged）
+              vcs      —— 只清所有 *_vcs 子目录（保留 NC 产物）
+              nc       —— 只清所有 *_nc 子目录（保留 VCS 产物）
               syn      —— 只清 syn/build/（wrapper 下次 syn-dc 自动重建）
               formal   —— 只清 dv/formal/build/
               asm      —— 只清 tests/asm 产物（hex/elf/dis）
@@ -567,8 +698,9 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
           FORCE=0|1                  彻底删（默认 0）
               0 —— 保留这些关键目录：
                    r3b_final / r4a_final / nightly       sign-off 证据
-                   cov / cov.vdb / cov_report             覆盖率数据库
                    simv / simv.daidir / simv.vdb          VCS 编译产物
+                   cov / cov.vdb / cov_report             VCS 覆盖率数据库
+                   INCA_libs / cov_work                   NC (irun) 编译产物 + 覆盖率
                    simv_compliance / simv_compliance.daidir
                    libcosim.so / spike_objs / csrc        长耗时缓存
                    compile.log / compliance_tb_compile.log
@@ -584,6 +716,8 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
           make clean FORCE=1                 # 彻底清（含 r3b_final/r4a_final）
           make clean SCOPE=build             # 只清 build/ 可再生产物
           make clean SCOPE=build FORCE=1     # 把 build/ 完全 rm -rf
+          make clean SCOPE=vcs               # 只清 *_vcs 子目录（保 NC）
+          make clean SCOPE=nc                # 只清 *_nc 子目录（保 VCS）
           make clean SCOPE=syn               # 清 syn/build/（旧 syn_clean）
           make clean SCOPE=formal            # 清 dv/formal/build/（旧 formal_clean）
           make clean SCOPE=cov               # 只清覆盖率（旧 clean_cov）
@@ -609,13 +743,16 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
 
     变量             仅对以下 target 生效（传给其它 target 不报错也无效果）
     ──────────────────────────────────────────────────────────────────────────────
-    SIMULATOR        compile / smoke / regress / signoff                （默认 vcs）
+    SIMULATOR        compile / smoke / regress / signoff / signoff_replay / demo
+                                                                        （默认 vcs；nc/xlm 可选）
     PARALLEL         regress / signoff / demo                           （默认 4）
     SEED             regress / signoff                                  （默认 1）
-    COV              compile / regress / signoff                        （顶层默认 1；显式 COV=0 关）
+    COV              compile / smoke / regress / signoff                （顶层默认 1；显式 COV=0 关）
     WAVES            compile / smoke / regress / signoff / demo         （默认 0，详见"查看波形"小节）
                      compliance 不支持 WAVES（验证靠 signature 比对）
+                     wave_nc 永远开启波形（target 本身的语义）
     NO_COSIM         cosim / compile                                    （默认 0）
+    TEST             regress / wave_nc                                  （wave_nc 必填）
 
   仿真：
     TEST=<name>                       单测名（regress 用）
@@ -641,10 +778,13 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
 
   demo：
     WITH_SYNTH=0|1                    是否含 synth/LEC（默认 1）
-    DEMO_OUT=<dir>                    输出目录（默认 build/demo）
+    DEMO_OUT=<dir>                    输出目录（默认 build/demo_$(SIMULATOR)）
+
+  wave_nc：
+    TEST=<name>                       必填，要 GUI 调试的 hex 名（去掉 .hex）
 
   clean：
-    SCOPE=full|build|cov|syn|formal|asm|docs   清理范围
+    SCOPE=full|build|cov|vcs|nc|syn|formal|asm|docs   清理范围
     FORCE=0|1                         绕过保护清单（默认 0）
     MODE=delete|archive               清理模式
     DRY_RUN=0|1                       干跑
@@ -654,15 +794,26 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
 ──────────────────────────────────────────────────────────────────────────────
 
   build/                              通用构建目录（gitignored）
-    ├── simv / simv.daidir / simv.vdb       VCS 编译产物（make clean 默认保留）
     ├── libcosim.so / spike_objs/            Spike DPI 库（保留）
-    ├── csrc/ / compile.log                  VCS 中间文件 + 日志（保留）
-    ├── cov.vdb / cov_report                 覆盖率数据库（保留）
     ├── r3b_final/ / r4a_final/              v1.1 sign-off 证据（保留）
     ├── archive_signoffs_<date>              历史归档软链（保留）
-    ├── demo/                                make demo 产物（默认清除）
-    ├── signoff/                             make signoff 产物（默认清除）
-    └── smoke/ / regression/                 单测/回归产物（默认清除）
+    │
+    ├── compile_vcs/ / compile_nc/           make compile（默认清除）
+    ├── smoke_vcs/   / smoke_nc/             make smoke
+    ├── regress_vcs/ / regress_nc/           make regress
+    ├── signoff_vcs/ / signoff_nc/           make signoff
+    ├── signoff_replay_vcs/ / signoff_replay_nc/   make signoff_replay
+    ├── demo_vcs/    / demo_nc/              make demo
+    └── wave_nc_<test>/                      make wave_nc TEST=<name>
+
+  build/<target>_<simulator>/         per-target 岛屿布局（make clean 默认清除）
+    ├── simv / simv.daidir / csrc/          VCS 编译产物（SIMULATOR=vcs）
+    ├── cov.vdb / cov / cov_report/         VCS 覆盖率数据库（COV=1）
+    ├── INCA_libs/                          NC 编译产物（SIMULATOR=nc）
+    ├── cov_work/                           NC 覆盖率数据库（COV=1）
+    ├── cov_merged/                         sign-off 合并覆盖率（URG/IMC 输出）
+    ├── report.html                         HTML 报告（仅 signoff/demo）
+    └── compile.log                          编译日志
 
   syn/build/                          综合 + LEC 产物（make clean SCOPE=syn 清）
     ├── eh2_dc_wrapper.sv                    自动生成的 wrapper
@@ -713,31 +864,48 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
   快速冒烟（开发循环，<2 分钟）：
     make smoke
 
-  查看波形（FSDB）—— 仿真类 target 的通用调试手段：
-    原则：所有跑 simv 的 target（smoke / regress / signoff / demo）都原生支持
-          WAVES=1，默认关以节省磁盘（单测 fsdb 通常 50-200 MB）。
-    机制：WAVES=1 同时影响编译期（vcs -kdb -debug_access+all）和运行期
-          （-ucli -do dv/uvm/core_eh2/vcs.tcl）。make 自动传播，命令行加一次即可。
-    产物：每个测试 work_dir 下的 waves.fsdb。
+  查看波形（仿真类 target 的通用调试手段）：
+    原则：所有跑仿真的 target（smoke / regress / signoff / demo）都原生支持
+          WAVES=1，默认关以节省磁盘（单测 fsdb 通常 50-200 MB，shm 量级类似）。
+    机制：WAVES=1 同时影响编译期与运行期：
+            VCS (默认)  —— `vcs -kdb -debug_access+all` + 运行期
+                          `+UVM_VERDI_TRACE=UVM_AWARE+RAL+HIER+COMPWAVE`
+                          `+UVM_TR_RECORD`
+                          `-ucli -do dv/uvm/core_eh2/vcs.tcl`，
+                          dump FSDB 并记录 Verdi UVM Hier / component 细节。
+            NC          —— irun 在 compile 时已加 `-access +rwc`；运行期
+                          注入 SHM dump（dv/uvm/core_eh2/nc_waves.tcl）。
+                          单测交互式调试推荐 `make wave_nc TEST=<name>`，
+                          会挂 SimVision GUI 边跑边看。
+          make 自动传播 WAVES=1 到编译+运行，命令行加一次即可。
+    产物：每个测试 work_dir 下的 waves.fsdb (VCS) 或 waves.shm/ (NC)。
 
     最短示例（按耗时升序）：
       # smoke ——1 分钟出 fsdb，演示首选
       make smoke WAVES=1
-      verdi -ssf build/smoke/smoke_s1/waves.fsdb &
+      verdi -ssf build/smoke_vcs/smoke_s1/waves.fsdb &
+
+      # smoke (NC) —— 走 SHM
+      make smoke SIMULATOR=nc WAVES=1
+      simvision build/smoke_nc/smoke_s1/waves.shm &
 
       # regress 单测 —— 调试某个具体测试
       make regress TEST=riscv_arithmetic_basic_test SEED=1 WAVES=1
-      verdi -ssf build/regress/riscv_arithmetic_basic_test_s1/waves.fsdb &
+      verdi -ssf build/regress_vcs/riscv_arithmetic_basic_test_s1/waves.fsdb &
 
       # signoff —— 所有 stage 都 dump（磁盘显著上升）
       make signoff WAVES=1
-      verdi -ssf build/signoff/runs/directed/<test>_s<seed>/waves.fsdb &
+      verdi -ssf build/signoff_vcs/runs/directed/<test>_s<seed>/waves.fsdb &
 
-      # demo —— 与 signoff 同结构，路径在 build/demo/
+      # demo —— 与 signoff 同结构
       make demo WAVES=1
-      verdi -ssf build/demo/runs/<stage>/<test>_s<seed>/waves.fsdb &
+      verdi -ssf build/demo_vcs/runs/<stage>/<test>_s<seed>/waves.fsdb &
 
-    查看器：verdi -ssf <waves.fsdb>    推荐（已装于 $$VERDI_HOME，KDB 自动联动源码）
+      # NC 交互式调试（边仿真边看波形，无需先跑完）
+      make wave_nc TEST=smoke   # 启动 ncsim + SimVision GUI
+
+    查看器：verdi -ssf <waves.fsdb>       VCS / FSDB（推荐，KDB 自动联动源码）
+            simvision <waves.shm>         NC / SHM（也可由 wave_nc 自动挂起）
     注：compliance 不支持 WAVES（验证靠 signature 比对，无需波形）。
 
   开发自检（30 分钟）：
@@ -751,7 +919,7 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
 
   完整端到端演示 / release 自检（2-3 小时）：
     make clean && make demo
-    xdg-open build/demo/report.html
+    xdg-open build/demo_vcs/report.html
 
   v1.1 数字快速复演（< 30 秒）：
     make signoff_replay STAGE_DATA_DIR=build/r3b_final
@@ -759,8 +927,15 @@ work_dirs 全在自己目录里。岛之间任意并行，不抢资源。
   CI gate（只评估、不重跑）：
     make signoff GATE_ONLY=1
 
+  双 simulator 并行（资源充足时，互不干扰）：
+    make signoff SIMULATOR=vcs & make signoff SIMULATOR=nc
+
   清理但保留 sign-off 证据：
     make clean
+
+  仅清 VCS / NC 一侧产物（保另一侧）：
+    make clean SCOPE=vcs
+    make clean SCOPE=nc
 
   彻底重置（包括 r3b_final / r4a_final 等历史证据）：
     make clean FORCE=1
@@ -801,6 +976,16 @@ SPIKE_CXX     ?= /home/Xilinx/Vivado/2019.1/tps/lnx64/gcc-6.2.0/bin/g++
 SPIKE_CXXFLAGS ?= -std=c++17 -static-libstdc++
 SPIKE_BUILD   ?= $(BUILD_DIR)/spike_objs
 
+# DPI header (svdpi.h) lookup. NC (Cadence Incisive) is the default simulator
+# so we prefer its header path; fall back to VCS for environments where only
+# Synopsys is available. Override by exporting SVDPI_INCLUDE to a directory
+# containing svdpi.h.
+NC_INSTALL    ?= /home/cadence/INCISIVE152
+SVDPI_INCLUDE ?= $(firstword \
+  $(wildcard $(NC_INSTALL)/tools/include/svdpi.h) \
+  $(wildcard $(VCS_HOME)/include/svdpi.h))
+SVDPI_INCLUDE_DIR := $(dir $(SVDPI_INCLUDE))
+
 cosim: $(LIBCOSIM)
 
 $(LIBCOSIM): $(COSIM_DIR)/spike_cosim.cc $(COSIM_DIR)/cosim_dpi.cc \
@@ -810,7 +995,12 @@ $(LIBCOSIM): $(COSIM_DIR)/spike_cosim.cc $(COSIM_DIR)/cosim_dpi.cc \
 	  echo "       先 build spike-cosim，或设 SPIKE_DIR=<path>，或传 NO_COSIM=1 跳过 cosim。"; \
 	  exit 1; \
 	fi
-	@echo "=== [cosim] 构建 Spike DPI libcosim.so ==="
+	@if [ -z "$(SVDPI_INCLUDE)" ]; then \
+	  echo "ERROR: 找不到 svdpi.h。请设置 NC_INSTALL 指向 INCISIVE 安装根，"; \
+	  echo "       或设置 VCS_HOME 指向 VCS 安装根，或显式 SVDPI_INCLUDE=<dir>。"; \
+	  exit 1; \
+	fi
+	@echo "=== [cosim] 构建 Spike DPI libcosim.so (svdpi from: $(SVDPI_INCLUDE_DIR)) ==="
 	@mkdir -p $(SPIKE_BUILD)
 	@cd $(SPIKE_BUILD) && \
 	  ar x $(SPIKE_INSTALL)/lib/libriscv.a && \
@@ -823,7 +1013,7 @@ $(LIBCOSIM): $(COSIM_DIR)/spike_cosim.cc $(COSIM_DIR)/cosim_dpi.cc \
 	  -I$(COSIM_DIR) \
 	  -I$(SPIKE_INSTALL)/include \
 	  -I$(SPIKE_INSTALL)/include/softfloat \
-	  -I$(VCS_HOME)/include \
+	  -I$(SVDPI_INCLUDE_DIR) \
 	  $(SPIKE_CXXFLAGS) \
 	  -o $(LIBCOSIM) \
 	  $(COSIM_DIR)/spike_cosim.cc \
@@ -853,6 +1043,7 @@ compile_vcs: $(COMPILE_LIBCOSIM_DEP) | $(BUILD_DIR)
 	  -ntb_opts uvm-1.2 \
 	  +error+500 \
 	  +define+GTLSIM \
+	  +define+UVM_VERDI_COMPWAVE \
 	  $(DEFINES) \
 	  +incdir+$(SNAPSHOTS) \
 	  +incdir+$(TB_DIR)/common/axi4_agent \
@@ -871,9 +1062,40 @@ compile_vcs: $(COMPILE_LIBCOSIM_DEP) | $(BUILD_DIR)
 	  -l $(BUILD_SUBDIR)/compile.log \
 	  -timescale=1ns/1ps \
 	  -debug_access+all \
-	  $(if $(filter 1,$(WAVES)),-kdb,) \
+	  -kdb \
 	  $(if $(filter 1,$(COV)),$(VCS_COMPILE_COV_OPTS),)
 	@echo "=== [compile] simv 完成: $(BUILD_SUBDIR)/simv ==="
+
+compile_nc: $(COMPILE_LIBCOSIM_DEP) | $(BUILD_DIR)
+	@echo "=== [compile] NC (irun) UVM testbench (BUILD_SUBDIR=$(BUILD_SUBDIR)) ==="
+	@mkdir -p $(BUILD_SUBDIR)
+	$(IRUN) -64bit -uvmhome $(NC_UVM_HOME) -sv -assert \
+	  -vlog_ext +.vh \
+	  +define+UVM_NO_DEPRECATED \
+	  +define+GTLSIM \
+	  $(DEFINES) \
+	  +incdir+$(SNAPSHOTS) \
+	  +incdir+$(TB_DIR)/common/axi4_agent \
+	  +incdir+$(TB_DIR)/common/trace_agent \
+	  +incdir+$(TB_DIR)/common/irq_agent \
+	  +incdir+$(TB_DIR)/common/jtag_agent \
+	  +incdir+$(TB_DIR)/common/cosim_agent \
+	  +incdir+$(COSIM_DIR) \
+	  -f $(RTL_F) \
+	  -f $(SHARED_F) \
+	  -f $(TB_F) \
+	  -top core_eh2_tb_top \
+	  -elaborate \
+	  -nclibdirname $(BUILD_SUBDIR)/INCA_libs \
+	  -access +rwc \
+	  -timescale 1ns/1ps \
+	  -errormax 500 \
+	  $(if $(COMPILE_LIBCOSIM_LINK),-sv_lib $(COMPILE_LIBCOSIM_LINK),) \
+	  -l $(BUILD_SUBDIR)/compile.log \
+	  $(if $(filter 1,$(COV)),$(NC_COMPILE_COV_OPTS),)
+	@# NC 作为 VCS 备选 simulator，与 VCS 一样收覆盖率参与 sign-off。
+	@# 覆盖率通过 cov_full_nc.ccf 限定 dut-only scope（与 cover.cfg 等价）。
+	@echo "=== [compile] NC 完成: $(BUILD_SUBDIR)/INCA_libs ==="
 
 compile_xlm: | $(BUILD_DIR)
 	@echo "=== [compile] Xcelium UVM testbench (BUILD_SUBDIR=$(BUILD_SUBDIR)) ==="
@@ -898,7 +1120,7 @@ compile_xlm: | $(BUILD_DIR)
 # 仿真 — smoke / regress / compliance
 # ============================================================
 smoke: asm
-	@$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(BUILD_DIR)/smoke
+	@$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(BUILD_DIR)/smoke_$(SIMULATOR)
 	@echo "=== [smoke] 运行 smoke 测试 ==="
 	python3 $(SCRIPTS_DIR)/run_regress.py \
 	  --test smoke \
@@ -907,22 +1129,23 @@ smoke: asm
 	  --seed 1 \
 	  --rtl-test core_eh2_base_test \
 	  --sim-opts "+disable_cosim=1" \
-	  --build-dir $(BUILD_DIR)/smoke \
-	  --output $(BUILD_DIR)/smoke \
+	  --build-dir $(BUILD_DIR)/smoke_$(SIMULATOR) \
+	  --output $(BUILD_DIR)/smoke_$(SIMULATOR) \
+	  $(if $(filter 1,$(COV)),--coverage,) \
 	  $(if $(filter 1,$(WAVES)),--waves,)
 	@echo "=== [smoke] 完成 ==="
 
 regress:
-	@$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(BUILD_DIR)/regress
+	@$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(BUILD_DIR)/regress_$(SIMULATOR)
 	@echo "=== [regress] testlist=$(TESTLIST) parallel=$(PARALLEL) iter=$(ITERATIONS) ==="
 	python3 $(SCRIPTS_DIR)/run_regress.py \
-	  $(if $(TEST),--test $(TEST),--testlist $(TESTLIST_PATH)) \
+	  $(if $(TEST),--test $(TEST) --testlist $(TESTLIST_PATH),--testlist $(TESTLIST_PATH)) \
 	  --simulator $(SIMULATOR) \
 	  --seed $(SEED) \
 	  --iterations $(ITERATIONS) \
 	  --parallel $(PARALLEL) \
-	  --build-dir $(BUILD_DIR)/regress \
-	  --output $(if $(OUT),$(OUT),$(BUILD_DIR)/regress) \
+	  --build-dir $(BUILD_DIR)/regress_$(SIMULATOR) \
+	  --output $(if $(OUT),$(OUT),$(BUILD_DIR)/regress_$(SIMULATOR)) \
 	  $(if $(filter 1,$(COV)),--coverage,) \
 	  $(if $(filter 1,$(WAVES)),--waves,)
 	@echo "=== [regress] 完成 ==="
@@ -930,6 +1153,55 @@ regress:
 compliance:
 	@echo "=== [compliance] mode=$(or $(MODE),run) ==="
 	+@$(MAKE) -C dv/uvm/riscv_compliance $(if $(filter all,$(MODE)),compliance-all,$(if $(filter compile,$(MODE)),compliance-compile,compliance))
+
+# ============================================================
+# NC interactive waveform debug — `make wave_nc TEST=<name>`
+#
+# 启动 NC ncsim + SimVision GUI 实时调试单个测试（老师推荐的
+# "一边仿真一边看波形"模式）。与 batch `make smoke SIMULATOR=nc WAVES=1`
+# 互补：batch 模式跑完 dump 离线看；interactive 模式 ncsim 启动后挂载
+# SimVision，用户可以 run/stop/add wave/reverse run 实时操作。
+#
+# 不收覆盖率（debug 用途），不参与 sign-off。
+# ============================================================
+wave_nc: asm
+	@if [ -z "$(TEST)" ]; then \
+	  echo "ERROR: 必须指定 TEST=<name>，例：make wave_nc TEST=smoke"; \
+	  exit 1; \
+	fi
+	@echo "=== [wave_nc] NC interactive debug: TEST=$(TEST) ==="
+	@echo "    SimVision GUI 将启动；需要 X11 forwarding 或本地图形终端。"
+	@echo "    ncsim 进入交互式 shell 后，常用命令："
+	@echo "      run 100ns         前进 100ns 看波形"
+	@echo "      add wave ...      添加信号到 SimVision"
+	@echo "      stop -name brk1   设断点"
+	@echo "      quit              退出"
+	@mkdir -p $(BUILD_DIR)/wave_nc_$(TEST)/$(TEST)_s1
+	@# 在项目根目录跑 irun（不 cd 进子目录，否则 filelist 中的相对路径会找不到文件）。
+	@# 产物路径用 $(BUILD_DIR)/wave_nc_$(TEST)/ 集中。
+	@SIM_DIR=$(CURDIR)/$(BUILD_DIR)/wave_nc_$(TEST)/$(TEST)_s1 \
+	  irun -64bit -uvmhome $(NC_UVM_HOME) -sv -assert \
+	    -vlog_ext +.vh +define+UVM_NO_DEPRECATED +define+GTLSIM \
+	    rtl/snapshots/default/common_defines.vh \
+	    +incdir+rtl/snapshots/default \
+	    +incdir+$(TB_DIR)/common/axi4_agent \
+	    +incdir+$(TB_DIR)/common/trace_agent \
+	    +incdir+$(TB_DIR)/common/irq_agent \
+	    +incdir+$(TB_DIR)/common/jtag_agent \
+	    +incdir+$(TB_DIR)/common/cosim_agent \
+	    +incdir+dv/cosim \
+	    -f $(RTL_F) -f $(SHARED_F) -f $(TB_F) \
+	    -top core_eh2_tb_top \
+	    -nclibdirname $(BUILD_DIR)/wave_nc_$(TEST)/INCA_libs \
+	    -access +rwc -timescale 1ns/1ps -errormax 500 \
+	    -sv_lib $(CURDIR)/build/libcosim.so \
+	    +UVM_TESTNAME=core_eh2_base_test \
+	    +bin=$(ASM_DIR)/$(TEST).hex \
+	    +seed=1 +timeout_ns=10000000 \
+	    -l $(BUILD_DIR)/wave_nc_$(TEST)/$(TEST)_s1/sim.log \
+	    -gui \
+	    -input $(TB_DIR)/nc_waves_interactive.tcl
+	@echo "=== [wave_nc] 退出 ==="
 
 # ============================================================
 # 静态 / 形式化 / 综合
@@ -965,7 +1237,23 @@ synth:
 # ============================================================
 # 一键 — demo / signoff / signoff_replay
 # ============================================================
+# LEC stage flags. Default LEC_BLOCKLEVEL=1 reads syn/build/lec_summary.txt;
+# if that summary is missing (no synth run yet), fall back to
+# --lec-known-limited so signoff still produces a verdict (matches the
+# auto-fallback already in the `demo` target).
+SIGNOFF_LEC_OPTS := $(if $(filter 1,$(LEC_BLOCKLEVEL)),$(if $(wildcard $(LEC_SUMMARY_PATH)),--lec-blocklevel --lec-summary-path $(LEC_SUMMARY_PATH),--lec-known-limited),$(if $(filter 1,$(LEC_KNOWN_LIMITED)),--lec-known-limited,))
+
 signoff:
+	@# VCS 是 sign-off 默认；NC 也可作 cross-check（覆盖率独立合并，
+	@# 维度名与 VCS 同构但工具不同，参见 cover.cfg / cov_full_nc.ccf）。
+	@if [ "$(SIMULATOR)" != "vcs" ] && [ "$(SIMULATOR)" != "nc" ]; then \
+	  echo "ERROR: signoff 仅支持 SIMULATOR=vcs (默认) 或 SIMULATOR=nc (当前为 $(SIMULATOR))。"; \
+	  exit 1; \
+	fi
+	@if [ "$(SIMULATOR)" = "nc" ]; then \
+	  echo "[signoff] 注意：当前用 NC simulator (备选)。VCS 是 sign-off 默认。"; \
+	fi
+	@$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory asm)
 	@$(if $(filter 1,$(GATE_ONLY)),,$(MAKE) --no-print-directory compile BUILD_SUBDIR=$(SIGNOFF_OUT) COV=$(COV))
 	@echo "=== [signoff] profile=$(PROFILE) gate_only=$(GATE_ONLY) out=$(SIGNOFF_OUT) ==="
 	python3 $(SCRIPTS_DIR)/signoff.py \
@@ -976,8 +1264,7 @@ signoff:
 	  --output $(SIGNOFF_OUT) \
 	  $(if $(filter 1,$(GATE_ONLY)),--gate-only,) \
 	  $(if $(SIGNOFF_ITERATIONS),--iterations $(SIGNOFF_ITERATIONS),) \
-	  $(if $(filter 1,$(LEC_KNOWN_LIMITED)),--lec-known-limited,) \
-	  $(if $(filter 1,$(LEC_BLOCKLEVEL)),--lec-blocklevel --lec-summary-path $(LEC_SUMMARY_PATH),) \
+	  $(SIGNOFF_LEC_OPTS) \
 	  $(if $(filter 1,$(COV)),--coverage --min-line-coverage $(SIGNOFF_MIN_LINE_COV) --min-functional-coverage $(SIGNOFF_MIN_FUNCTIONAL_COV),) \
 	  $(if $(filter 1,$(SIGNOFF_ALLOW_WARNINGS)),--allow-warnings,) \
 	  $(if $(filter 1,$(WAVES)),--waves,) \
@@ -994,6 +1281,7 @@ signoff_replay:
 	fi
 	python3 $(SCRIPTS_DIR)/signoff.py \
 	  --profile full --gate-only \
+	  --simulator $(SIMULATOR) \
 	  --output $(SIGNOFF_REPLAY_OUT) \
 	  --stage-result smoke=$(STAGE_DATA_DIR)/runs/smoke \
 	  --stage-result directed=$(STAGE_DATA_DIR)/runs/directed \
@@ -1004,16 +1292,27 @@ signoff_replay:
 	  $(if $(filter 1,$(LEC_BLOCKLEVEL)),--lec-blocklevel --lec-summary-path $(LEC_SUMMARY_PATH),) \
 	  $(if $(filter 1,$(LEC_KNOWN_LIMITED)),--lec-known-limited,) \
 	  --coverage --min-line-coverage $(SIGNOFF_MIN_LINE_COV) --min-functional-coverage $(SIGNOFF_MIN_FUNCTIONAL_COV) \
+	  $(if $(wildcard $(STAGE_DATA_DIR)/cov_merged/dashboard.txt),--coverage-path $(STAGE_DATA_DIR)/cov_merged/dashboard.txt,) \
 	  --allow-warnings \
 	  $(SIGNOFF_OPTS)
 	@echo "=== [signoff_replay] 完成。报告：$(SIGNOFF_REPLAY_OUT)/report.html ==="
 
 demo:
+	@# VCS 是 demo 默认；NC 也支持作为备选 simulator（数据真实工业级）。
+	@if [ "$(SIMULATOR)" != "vcs" ] && [ "$(SIMULATOR)" != "nc" ]; then \
+	  echo "ERROR: demo 仅支持 SIMULATOR=vcs (默认) 或 SIMULATOR=nc (当前为 $(SIMULATOR))。"; \
+	  exit 1; \
+	fi
+	@if [ "$(SIMULATOR)" = "nc" ]; then \
+	  echo "[demo] 注意：当前用 NC simulator (备选)。VCS 是 demo 默认。"; \
+	fi
 	@echo "================================================================="
 	@echo "  EH2 Demo  (清理 → 构建 → sign-off → 报告)"
-	@echo "  WITH_SYNTH=$(WITH_SYNTH)   PARALLEL=$(PARALLEL)   COV=1   输出=$(DEMO_OUT)"
+	@echo "  SIMULATOR=$(SIMULATOR)   WITH_SYNTH=$(WITH_SYNTH)   PARALLEL=$(PARALLEL)   COV=1   输出=$(DEMO_OUT)"
 	@echo "================================================================="
-	@$(MAKE) --no-print-directory clean
+	@# 只清自己的输出目录，保留 build/libcosim.so 和其它 target 的产物
+	@# （build/smoke, build/signoff 等不受影响）。
+	@rm -rf $(DEMO_OUT)
 	@$(MAKE) --no-print-directory asm
 	@$(MAKE) --no-print-directory cosim COV=1
 	@$(MAKE) --no-print-directory compile COV=1 BUILD_SUBDIR=$(DEMO_OUT)
@@ -1027,10 +1326,10 @@ demo:
 	@# 不开 COV=1 会因 dashboard.txt 缺失而 FAIL（threshold 60% line coverage）。
 	@if [ -f "$(LEC_SUMMARY_PATH)" ]; then \
 	  echo "[demo] LEC summary 存在，正常 sign-off（COV=1 全量收集）"; \
-	  $(MAKE) --no-print-directory signoff SIGNOFF_OUT=$(DEMO_OUT) PARALLEL=$(PARALLEL) COV=1; \
+	  $(MAKE) --no-print-directory signoff SIMULATOR=$(SIMULATOR) SIGNOFF_OUT=$(DEMO_OUT) PARALLEL=$(PARALLEL) COV=1; \
 	else \
 	  echo "[demo] LEC summary 缺失，启用 LEC_KNOWN_LIMITED=1 兜底（COV=1 全量收集）"; \
-	  $(MAKE) --no-print-directory signoff SIGNOFF_OUT=$(DEMO_OUT) PARALLEL=$(PARALLEL) COV=1 \
+	  $(MAKE) --no-print-directory signoff SIMULATOR=$(SIMULATOR) SIGNOFF_OUT=$(DEMO_OUT) PARALLEL=$(PARALLEL) COV=1 \
 	    LEC_BLOCKLEVEL=0 LEC_KNOWN_LIMITED=1; \
 	fi
 	@echo ""
@@ -1072,9 +1371,16 @@ clean:
 	case "$(SCOPE)" in \
 	  cov) \
 	    find $(BUILD_DIR) -mindepth 2 -maxdepth 2 \
-	      \( -name 'cov.vdb' -o -name 'cov' -o -name 'cov_report' -o -name 'simv.vdb' \) \
+	      \( -name 'cov.vdb' -o -name 'cov' -o -name 'cov_report' -o -name 'simv.vdb' \
+	         -o -name 'cov_work' -o -name 'cov_merged' \) \
 	      -exec rm -rf {} + 2>/dev/null || true; \
-	    echo "[clean] 已清各 target 子目录下的覆盖率数据库（build/*/cov.vdb 等）" ;; \
+	    echo "[clean] 已清各 target 子目录下的覆盖率数据库（VCS cov.vdb / NC cov_work / 合并产物 cov_merged）" ;; \
+	  vcs) \
+	    find $(BUILD_DIR) -mindepth 1 -maxdepth 1 -name '*_vcs' -exec rm -rf {} + 2>/dev/null || true; \
+	    echo "[clean] 已清所有 *_vcs 子目录（保留 NC 产物）" ;; \
+	  nc) \
+	    find $(BUILD_DIR) -mindepth 1 -maxdepth 1 -name '*_nc' -exec rm -rf {} + 2>/dev/null || true; \
+	    echo "[clean] 已清所有 *_nc 子目录（保留 VCS 产物）" ;; \
 	  syn) \
 	    $(MAKE) --no-print-directory -C syn clean; \
 	    echo "[clean] 已清 syn/build/（wrapper 下次 syn-dc 会自动重建）" ;; \
@@ -1118,6 +1424,8 @@ clean:
 	    rm -rf verdiLog novas_* DVEfiles; \
 	    rm -f stack.info.* stack_*.log; \
 	    rm -f eh2_pkg.pvk *.mr *-verilog.pvl *-verilog.syn; \
+	    rm -f irun.log irun.history ncsim.log .simvision; \
+	    rm -rf INCA_libs cov_work; \
 	    rm -f syn/*.lck syn/*.fss syn/*.log syn/default.svf syn/command.log; \
 	    rm -rf syn/FM_WORK syn/FM_WORK1; \
 	    mkdir -p out $(BUILD_DIR); \

@@ -125,7 +125,7 @@ class RegressionMetadata:
                     # YAML, which is stable across entry points.
                     pass
         if yaml_path.exists():
-            with open(yaml_path, "r") as f:
+            with open(yaml_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
             md = cls()
             for key, value in data.items():
@@ -263,7 +263,7 @@ class RegressionSummary:
 
 def load_testlist(path: str) -> List[Dict]:
     """Load test list from YAML file."""
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 

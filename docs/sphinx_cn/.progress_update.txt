@@ -1,0 +1,6 @@
+| 01_overview/index.rst | done | 408 | 400 | yes | 2026-05-13 |
+| 01_overview/introduction.rst | done | 347 | 400 | yes | 2026-05-13 |
+| 01_overview/features.rst | done | 350 | 400 | yes | 2026-05-13 |
+| 01_overview/standards.rst | done | 333 | 400 | yes | 2026-05-13 |
+| 01_overview/targets.rst | done | 322 | 400 | yes | 2026-05-13 |
+| 01_overview/licensing.rst | done | 247 | 400 | yes | 2026-05-13 |

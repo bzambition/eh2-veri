@@ -31,9 +31,11 @@ def get_compile_cmd(md: RegressionMetadata) -> list:
             '-sverilog',
             '-ntb_opts', 'uvm-1.2',
             '-timescale=1ns/1ps',
+            '+define+UVM_VERDI_COMPWAVE',
             '-debug_access+all',
             '-kdb',
             '-l', os.path.join(md.work_dir, 'compile.log'),
+            '-Mdir={}'.format(os.path.join(md.work_dir, 'csrc')),
         ]
         # Add filelists
         cmd += ['-f', str(core_eh2 / 'eh2_rtl.f')]

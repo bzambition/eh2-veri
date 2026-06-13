@@ -38,3 +38,17 @@
   config: eh2_cosim
   test_srcs: tests/asm/cosim_bitmanip.S
   iterations: 1
+
+- test: cosim_exception_compare
+  desc: "Exception mcause/mepc comparison — ECALL/illegal/misaligned (issue 51)"
+  config: eh2_cosim
+  test_srcs: tests/asm/cosim_exception_compare.S
+  sim_opts: "+max_cycles=500000 +timeout_ns=50000000"
+  iterations: 1
+
+- test: cosim_atomic_basic
+  desc: "Atomic LR/SC + AMO* lockstep cosim proof (issue 52)"
+  config: eh2_cosim
+  test_srcs: tests/asm/cosim_atomic_basic.S
+  sim_opts: "+max_cycles=500000 +timeout_ns=50000000"
+  iterations: 1

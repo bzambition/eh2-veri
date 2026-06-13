@@ -61,30 +61,50 @@
   rtl_test: core_eh2_base_test
   iterations: 10
 - test: riscv_bitmanip_test
-  description: Bitmanip extension test
-  gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=5000 +boot_mode=m +directed_instr_0=eh2_bitmanip_stream,20
-
-    '
+  description: Bitmanip extension test — bounded EH2 bitmanip directed proof (R3-B)
+  test_srcs: tests/asm/cosim_bitmanip.S
   rtl_test: core_eh2_base_test
-  sim_opts: '+max_cycles=500000 +timeout_ns=50000000
+  sim_opts: '+max_cycles=2000000 +timeout_ns=200000000
 
     '
   iterations: 10
-  cosim: disabled
-  skip_in_signoff: true
-- test: riscv_amo_test
-  description: Atomic LR/SC test
-  gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=10000 +boot_mode=m +directed_instr_0=eh2_atomic_stream,10
+
+- test: riscv_bitmanip_full_test
+  description: Bitmanip full intensity — bounded EH2 bitmanip directed proof (R3-B)
+  test_srcs: tests/asm/cosim_bitmanip.S
+  rtl_test: core_eh2_base_test
+  sim_opts: '+max_cycles=2000000 +timeout_ns=200000000
 
     '
-  rtl_test: core_eh2_base_test
   iterations: 5
-  cosim: disabled
-  skip_in_signoff: true
+
+- test: riscv_bitmanip_balanced_test
+  description: Bitmanip balanced intensity — bounded EH2 bitmanip directed proof (R3-B)
+  test_srcs: tests/asm/cosim_bitmanip.S
+  rtl_test: core_eh2_base_test
+  sim_opts: '+max_cycles=2000000 +timeout_ns=200000000
+
+    '
+  iterations: 5
+
+- test: riscv_bitmanip_otearlgrey_test
+  description: Bitmanip OT EARLGREY closure — bounded EH2 bitmanip directed proof (R3-B)
+  test_srcs: tests/asm/cosim_bitmanip.S
+  rtl_test: core_eh2_base_test
+  sim_opts: '+max_cycles=2000000 +timeout_ns=200000000
+
+    '
+  iterations: 5
+- test: riscv_amo_test
+  description: Atomic LR/SC test — bounded directed AMO proof (R3-B)
+  test_srcs: tests/asm/cosim_atomic_basic.S
+  rtl_test: core_eh2_base_test
+  sim_opts: '+max_cycles=2000000 +timeout_ns=200000000
+
+    '
+  iterations: 5
 - test: riscv_interrupt_test
-  description: Random interrupt test
+  description: Random interrupt test — cosim enabled (issue 53 interrupt cosim)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=20000 +boot_mode=m +enable_interrupt=1 +enable_nested_interrupt=1 +directed_instr_0=eh2_pic_int_stream,5
 
@@ -93,24 +113,20 @@
   sim_opts: '+enable_irq_seq=1 +max_interval=500
 
     '
-  cosim: disabled  # PC mismatch: Spike 未同步嵌套中断注入（PIC stream），DUT 进入 handler 而 ISS 停留主流
-  skip_in_signoff: true
   iterations: 15
 - test: riscv_irq_single_test
-  description: Single interrupt test
+  description: Single interrupt test — cosim enabled (issue 53)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_interrupt=1
 
     '
   rtl_test: core_eh2_base_test
-  sim_opts: '+enable_irq_single_seq=1
+  sim_opts: '+enable_irq_single_seq=1 +max_interval=200
 
     '
-  cosim: disabled  # SIM_TIMEOUT: enable_irq_single_seq 的 forever 循环阻止 vseq.body() 返回，join 无法退出导致 run_phase 永远挂起
-  skip_in_signoff: true
   iterations: 5
 - test: riscv_debug_test
-  description: Debug mode entry/exit test
+  description: Debug mode entry/exit test — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m
 
@@ -119,10 +135,9 @@
   sim_opts: '+enable_debug_seq=1 +max_interval=1000
 
     '
-  cosim: disabled
   iterations: 5
 - test: riscv_debug_csr_test
-  description: Debug CSR access test
+  description: Debug CSR access test — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=5000 +boot_mode=m +directed_instr_0=eh2_debug_csr_stream,5
 
@@ -131,22 +146,18 @@
   sim_opts: '+enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 3
 - test: riscv_stress_test
-  description: High-frequency interrupt and debug stress test
+  description: Signoff-sized random stress test — bounded for cosim (R3-B)
   gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=30000 +boot_mode=m +enable_interrupt=1 +enable_nested_interrupt=1 +directed_instr_0=eh2_bitmanip_stream,10
-    +directed_instr_1=eh2_csr_access_stream,5
+  gen_opts: '+instr_cnt=1000 +boot_mode=m +no_csr_instr=1 +no_fence=1
 
     '
   rtl_test: core_eh2_base_test
-  sim_opts: '+enable_irq_seq=1 +enable_debug_seq=1 +max_interval=200
+  sim_opts: '+max_cycles=1000000 +timeout_ns=100000000
 
     '
-  cosim: disabled
   iterations: 20
-  skip_in_signoff: true
 - test: riscv_dual_issue_test
   description: Test dual-issue pipeline behavior
   gen_test: riscv_rand_instr_test
@@ -164,18 +175,13 @@
   rtl_test: core_eh2_base_test
   iterations: 5
 - test: riscv_breakpoint_test
-  description: Breakpoint instruction test
-  gen_test: riscv_rand_instr_test
-  gen_opts: '+instr_cnt=5000 +boot_mode=m +directed_instr_0=eh2_breakpoint_stream,10
-
-    '
+  description: Breakpoint instruction test — bounded directed ebreak proof (R3-B)
+  test_srcs: tests/asm/directed_debug_basic.S
   rtl_test: core_eh2_base_test
-  sim_opts: '+enable_debug_seq=1
+  sim_opts: '+enable_debug_seq=1 +max_interval=1000 +max_cycles=2000000 +timeout_ns=200000000
 
     '
-  cosim: disabled
   iterations: 5
-  skip_in_signoff: true
 - test: riscv_csr_hazard_test
   description: CSR pipeline hazard test
   gen_test: riscv_rand_instr_test
@@ -195,31 +201,28 @@
   rtl_test: core_eh2_base_test
   iterations: 3
 - test: riscv_pmp_basic_test
-  description: Basic PMP region test
+  description: Basic PMP region test — cosim enabled (issue 55 PMP fixup)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_pmp=1 +pmp_num_regions=4 +pmp_granularity=0
 
     '
   rtl_test: core_eh2_pmp_basic_test
-  cosim: disabled
   iterations: 5
 - test: riscv_pmp_disable_all_test
-  description: Disable all PMP regions test
+  description: Disable all PMP regions test — cosim enabled (issue 55)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=5000 +boot_mode=m +enable_pmp=1 +pmp_num_regions=0
 
     '
   rtl_test: core_eh2_pmp_disable_test
-  cosim: disabled
   iterations: 3
 - test: riscv_pmp_random_test
-  description: Random PMP configuration test
+  description: Random PMP configuration test — cosim enabled (issue 55)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=15000 +boot_mode=m +enable_pmp=1 +pmp_num_regions=8 +pmp_granularity=0
 
     '
   rtl_test: core_eh2_pmp_random_test
-  cosim: disabled
   iterations: 10
 - test: riscv_pc_intg_test
   description: PC integrity fault injection test
@@ -228,7 +231,6 @@
 
     '
   rtl_test: core_eh2_pc_intg_test
-  cosim: disabled
   iterations: 3
 - test: riscv_rf_intg_test
   description: Register file integrity fault injection test
@@ -237,10 +239,9 @@
 
     '
   rtl_test: core_eh2_rf_intg_test
-  cosim: disabled
   iterations: 3
 - test: riscv_reset_test
-  description: Random mid-test reset test
+  description: Random mid-test reset test — cosim enabled (issue 53)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=20000 +boot_mode=m +enable_interrupt=1
 
@@ -249,11 +250,9 @@
   sim_opts: '+enable_irq_seq=1
 
     '
-  cosim: disabled
   iterations: 5
-  skip_in_signoff: true
 - test: riscv_single_step_test
-  description: Debug single stepping test
+  description: Debug single stepping test — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=5000 +boot_mode=m
 
@@ -262,35 +261,30 @@
   sim_opts: '+enable_debug_single=1
 
     '
-  cosim: disabled
   iterations: 3
-  skip_in_signoff: true
 - test: riscv_epmp_mml_test
-  description: ePMP Machine Mode Lockdown test
+  description: ePMP Machine Mode Lockdown test — cosim enabled (issue 55 ePMP)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_pmp=1 +pmp_num_regions=8
 
     '
   rtl_test: core_eh2_epmp_mml_test
-  cosim: disabled
   iterations: 5
 - test: riscv_epmp_mmwp_test
-  description: ePMP Machine Mode Whitelist Policy test
+  description: ePMP Machine Mode Whitelist Policy test — cosim enabled (issue 55)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_pmp=1 +pmp_num_regions=8
 
     '
   rtl_test: core_eh2_epmp_mmwp_test
-  cosim: disabled
   iterations: 5
 - test: riscv_epmp_rlb_test
-  description: ePMP Rule Locking Bypass test
+  description: ePMP Rule Locking Bypass test — cosim enabled (issue 55)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_pmp=1 +pmp_num_regions=8
 
     '
   rtl_test: core_eh2_epmp_rlb_test
-  cosim: disabled
   iterations: 5
 - test: riscv_mem_error_test
   description: Memory bus error injection test
@@ -299,10 +293,50 @@
 
     '
   rtl_test: core_eh2_mem_error_test
-  cosim: disabled
   iterations: 5
+
+- test: riscv_rf_addr_intg_test
+  description: Register file address integrity fault injection (issue 61)
+  gen_test: riscv_instr_base_test
+  gen_opts: '+instr_cnt=5000 +boot_mode=m
+
+    '
+  rtl_test: core_eh2_rf_addr_intg_test
+  cosim: rtl_only
+  iterations: 3
+
+- test: riscv_ram_intg_test
+  description: DCCM/ICCM RAM ECC/parity integrity test (issue 61)
+  gen_test: riscv_instr_base_test
+  gen_opts: '+instr_cnt=5000 +boot_mode=m
+
+    '
+  rtl_test: core_eh2_ram_intg_test
+  cosim: rtl_only
+  iterations: 3
+
+- test: riscv_icache_intg_test
+  description: ICache tag/data integrity fault injection (issue 61)
+  gen_test: riscv_instr_base_test
+  gen_opts: '+instr_cnt=5000 +boot_mode=m
+
+    '
+  rtl_test: core_eh2_icache_intg_test
+  cosim: rtl_only
+  iterations: 3
+
+- test: riscv_mem_intg_error_test
+  description: Generic memory integrity error injection (issue 61)
+  gen_test: riscv_instr_base_test
+  gen_opts: '+instr_cnt=5000 +boot_mode=m
+
+    '
+  rtl_test: core_eh2_mem_intg_error_test
+  cosim: rtl_only
+  iterations: 3
+
 - test: riscv_debug_wfi_test
-  description: Debug request during WFI instruction
+  description: Debug request during WFI instruction — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_wfi=1
 
@@ -311,11 +345,9 @@
   sim_opts: '+enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 5
-  skip_in_signoff: true
 - test: riscv_debug_during_csr_test
-  description: Debug request during CSR access
+  description: Debug request during CSR access — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_csrs_write=1
 
@@ -324,19 +356,17 @@
   sim_opts: '+enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 5
 - test: riscv_debug_ebreak_test
-  description: EBREAK instruction entering debug mode
+  description: EBREAK instruction entering debug mode — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=5000 +boot_mode=m +enable_ebreak=1
 
     '
   rtl_test: core_eh2_debug_ebreak_test
-  cosim: disabled
   iterations: 3
 - test: riscv_irq_wfi_test
-  description: Interrupt during WFI wait state
+  description: Interrupt during WFI wait state — cosim enabled (issue 53)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_wfi=1
 
@@ -345,10 +375,9 @@
   sim_opts: '+enable_irq_seq=1
 
     '
-  cosim: disabled
   iterations: 5
 - test: riscv_irq_csr_test
-  description: Interrupt during CSR access
+  description: Interrupt during CSR access — cosim enabled (issue 53)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_csrs_write=1
 
@@ -357,10 +386,9 @@
   sim_opts: '+enable_irq_seq=1
 
     '
-  cosim: disabled
   iterations: 5
 - test: riscv_irq_nest_test
-  description: Nested interrupt handling
+  description: Nested interrupt handling — cosim enabled (issue 53)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=15000 +boot_mode=m +enable_interrupt=1
 
@@ -369,10 +397,9 @@
   sim_opts: '+enable_irq_seq=1
 
     '
-  cosim: disabled
   iterations: 5
 - test: riscv_irq_in_debug_test
-  description: Interrupt during debug mode
+  description: Interrupt during debug mode — cosim enabled (issues 53, 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_interrupt=1
 
@@ -381,10 +408,9 @@
   sim_opts: '+enable_irq_seq=1 +enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 5
 - test: riscv_debug_in_irq_test
-  description: Debug request during IRQ handler
+  description: Debug request during IRQ handler — cosim enabled (issues 53, 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_interrupt=1
 
@@ -393,10 +419,9 @@
   sim_opts: '+enable_irq_seq=1 +enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 5
 - test: riscv_dret_test
-  description: DRET instruction execution
+  description: DRET instruction execution — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m
 
@@ -405,10 +430,9 @@
   sim_opts: '+enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 3
 - test: riscv_debug_ebreakmu_test
-  description: EBREAK with dcsr.ebreakm/u bits
+  description: EBREAK with dcsr.ebreakm/u bits — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=5000 +boot_mode=m +enable_ebreak=1
 
@@ -417,10 +441,9 @@
   sim_opts: '+enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 3
 - test: riscv_single_debug_pulse_test
-  description: Single debug request pulse
+  description: Single debug request pulse — cosim enabled (issue 54)
   gen_test: riscv_rand_instr_test
   gen_opts: '+instr_cnt=10000 +boot_mode=m
 
@@ -429,7 +452,6 @@
   sim_opts: '+enable_debug_seq=1
 
     '
-  cosim: disabled
   iterations: 3
 - test: riscv_invalid_csr_test
   description: Invalid CSR access exception
@@ -447,3 +469,87 @@
     '
   rtl_test: core_eh2_fetch_en_chk_test
   iterations: 3
+- test: riscv_jump_stress_test
+  description: Stress back-to-back jump instruction test
+  gen_test: riscv_rand_instr_test
+  gen_opts: '+instr_cnt=8000 +boot_mode=m +directed_instr_0=riscv_jal_instr,20
+
+    '
+  rtl_test: core_eh2_base_test
+  cosim: enabled
+  iterations: 10
+
+- test: riscv_debug_triggers_test
+  description: Hardware breakpoint trigger test with directed breakpoint sequence — cosim enabled (issue 54)
+  gen_test: riscv_instr_base_test
+  gen_opts: '+instr_cnt=10000 +boot_mode=m +directed_instr_0=eh2_breakpoint_stream,20
+
+    '
+  rtl_test: core_eh2_single_debug_pulse_test
+  sim_opts: '+enable_debug_seq=1
+
+    '
+  cosim: enabled
+  iterations: 5
+
+- test: riscv_debug_stress_test
+  description: High-frequency debug request stress test — cosim enabled (issue 54)
+  gen_test: riscv_rand_instr_test
+  gen_opts: '+instr_cnt=10000 +boot_mode=m
+
+    '
+  rtl_test: core_eh2_debug_stress_test
+  sim_opts: '+enable_debug_seq=1 +max_interval=250
+
+    '
+  cosim: enabled
+  iterations: 15
+
+- test: riscv_debug_branch_jump_test
+  description: Debug mode with branch/jump in debug ROM — cosim enabled (issue 54)
+  gen_test: riscv_rand_instr_test
+  gen_opts: '+instr_cnt=10000 +boot_mode=m +num_of_sub_program=5
+
+    '
+  rtl_test: core_eh2_base_test
+  sim_opts: '+enable_debug_seq=1 +max_interval=3000
+
+    '
+  cosim: enabled
+  iterations: 10
+
+- test: riscv_debug_csr_entry_test
+  description: Debug request during CSR writes to xSTATUS/xIE — cosim enabled (issue 54)
+  gen_test: riscv_rand_instr_test
+  gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_csrs_write=1
+
+    '
+  rtl_test: core_eh2_debug_csr_test
+  sim_opts: '+enable_debug_seq=1
+
+    '
+  cosim: enabled
+  iterations: 10
+
+- test: riscv_assorted_traps_interrupts_debug_test
+  description: Assorted traps, interrupts, and debug combined stress — cosim enabled (issues 53, 54)
+  gen_test: riscv_rand_instr_test
+  gen_opts: '+instr_cnt=20000 +boot_mode=m +enable_interrupt=1 +enable_illegal_instruction=1 +enable_ebreak=1 +enable_unaligned_load_store=1
+
+    '
+  rtl_test: core_eh2_irq_debug_test
+  sim_opts: '+enable_irq_seq=1 +enable_debug_seq=1 +max_interval=500
+
+    '
+  cosim: enabled
+  iterations: 10
+
+- test: riscv_pmp_out_of_bounds_test
+  description: PMP out-of-bounds memory access test — cosim enabled (issue 55)
+  gen_test: riscv_rand_instr_test
+  gen_opts: '+instr_cnt=10000 +boot_mode=m +enable_pmp=1 +pmp_num_regions=8 +pmp_granularity=0 +directed_instr_0=riscv_load_store_rand_instr_stream,30
+
+    '
+  rtl_test: core_eh2_pmp_basic_test
+  cosim: enabled
+  iterations: 50

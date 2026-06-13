@@ -1,0 +1,35 @@
+//
+// File created by:  irun
+// Do not modify this file
+//
+-assert
+-LINEDEBUG
+-DELAY_TRIGGER
+-GENASSERT_SYNTH_PRAGMA
+-sv
+-DEFINE
+FORMAL
+-DEFINE
+RV_BUILD_AXI4
+-INCDIR
+/home/host/Cores-VeeR-EH2/snapshots/default
+-INCDIR
+/home/host/Cores-VeeR-EH2/design/include
+-INCDIR
+/home/host/Cores-VeeR-EH2/design/lib
+-INCDIR
+/home/host/eh2-veri/dv/formal/properties
+-INCDIR
+/home/host/eh2-veri/dv/formal
+-INCDIR
+/home/cadence/INCISIVE152/tools/ial/include
+-DEFINE
+IAL_OVL_ACCELLERA
+-DEFINE
+OVL_PSL
+-DEFINE
+OVL_ASSERT_ON
+-DEFINE
+IAL_IFV
+-SNAPSHOT
+eh2_veer

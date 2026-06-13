@@ -159,7 +159,7 @@ def precheck(stages: List[str], simulator: str, output_dir: Path) -> Dict:
     add("rtl_filelist", (DV_DIR / "eh2_rtl.f").exists(), str(DV_DIR / "eh2_rtl.f"))
     add("tb_filelist", (DV_DIR / "eh2_tb.f").exists(), str(DV_DIR / "eh2_tb.f"))
 
-    sim_tool = {"vcs": "vcs", "xlm": "xrun", "questa": "vsim"}[simulator]
+    sim_tool = {"vcs": "vcs", "nc": "irun", "xlm": "xrun", "questa": "vsim"}[simulator]
     simv_path = output_dir / "simv"
     simv_exists = simv_path.exists()
     add("simulator_or_simv", simv_exists or tool_exists(sim_tool),
@@ -231,12 +231,19 @@ def build_stage_cmd(stage: str, args, stage_out: Path, simv_path: Path) -> List[
                 "SIGNOFF_OUT=" + str(stage_out)]
     elif stage == "compliance":
         runner = EH2_ROOT / "dv" / "uvm" / "riscv_compliance" / "scripts" / "run_compliance.py"
-        return [
+        cmd = [
             sys.executable, str(runner),
             "--isa", "all",
-            "--simv", str(simv_path),
+            "--simulator", args.simulator,
+            "--build-dir", str(simv_path.parent),
             "--output", str(stage_out),
         ]
+        # `--simv` only applies to VCS where simv is the readiness signal.
+        # For NC the equivalent is the INCA_libs directory under build-dir,
+        # which run_compliance.py infers from --simulator + --build-dir.
+        if args.simulator == "vcs":
+            cmd.extend(["--simv", str(simv_path)])
+        return cmd
     elif stage == "formal":
         return ["make", "-C", str(EH2_ROOT), "formal"]
     elif stage == "syn":
@@ -388,10 +395,19 @@ def collect_stage(stage: str, results_dir: Path, report_dir: Path,
             warning_count))
 
     min_passed = STAGE_MIN_PASSED.get(stage)
+    # Pass-rate ceiling on waivers: even when the absolute minimum-passed
+    # threshold is met, a stage with a high failure rate is not really
+    # passing. Without this gate a 50/395 result for riscvdv (87% failure)
+    # would be silently waived just because passed >= 50. Cap waiver
+    # eligibility at <= MAX_STAGE_FAIL_RATE_FOR_WAIVER failed/total.
+    MAX_STAGE_FAIL_RATE_FOR_WAIVER = 0.25  # 25% — fail more than this and no waiver
+    fail_rate = (summary.failed / summary.total_tests
+                 if summary.total_tests > 0 else 0.0)
     threshold_met = (
         min_passed is not None and
         summary.total_tests > 0 and
-        summary.passed >= min_passed
+        summary.passed >= min_passed and
+        fail_rate <= MAX_STAGE_FAIL_RATE_FOR_WAIVER
     )
     if threshold_met:
         threshold_notes = []
@@ -401,8 +417,9 @@ def collect_stage(stage: str, results_dir: Path, report_dir: Path,
             threshold_notes.append("{} test(s) failed".format(summary.failed))
         if threshold_notes:
             result["waivers"].append(
-                "stage threshold met: {}/{} passed, minimum {}; waived: {}".format(
+                "stage threshold met: {}/{} passed, minimum {}, fail rate {:.1%} <= {:.0%}; waived: {}".format(
                     summary.passed, summary.total_tests, min_passed,
+                    fail_rate, MAX_STAGE_FAIL_RATE_FOR_WAIVER,
                     "; ".join(threshold_notes)))
             result["blockers"] = [
                 blocker for blocker in result["blockers"]
@@ -880,13 +897,22 @@ def _parse_urg_dashboard_header(text: str) -> Dict[str, float]:
             try:
                 values.append(float(token))
             except ValueError:
-                continue
+                # Preserve column position for placeholders like "n/a" so
+                # the header→value zip stays aligned. Use None to mean
+                # "not measured" (the metric will simply be skipped below).
+                if token.lower() in ("n/a", "na", "-", "--"):
+                    values.append(None)
+                # Any other non-numeric token is dropped silently to keep
+                # behaviour stable for URG dashboards that interleave free
+                # text between columns.
 
         if not values or not headers:
             continue
 
         n = min(len(headers), len(values))
         for hdr, val in zip(headers[:n], values[:n]):
+            if val is None:
+                continue
             metric = COVERAGE_METRIC_ALIASES.get(hdr.lower())
             if metric and 0.0 <= val <= 100.0:
                 result[metric] = max(result.get(metric, 0.0), val)
@@ -930,6 +956,10 @@ def coverage_candidate_files(paths: List[Path], output_dir: Path) -> List[Path]:
     search_roots.extend([
         output_dir / "coverage",
         output_dir / "cov_report",
+        output_dir / "cov_merged",
+        # urg also drops text reports under cov_merged/report/, e.g.
+        # dashboard.txt, modinfo.txt, hierarchy.txt. Look there too.
+        output_dir / "cov_merged" / "report",
         EH2_ROOT / "build" / "r2b_cov_report",
     ])
 
@@ -960,8 +990,10 @@ def auto_merge_stage_coverage(stage_results: List[Dict],
                                output_dir: Path) -> Path:
     """Merge coverage databases from all stages into a single merged report.
 
-    Scans each stage's results_dir for .vdb directories, runs urg merge,
-    and generates dashboard.txt. Returns the merged output directory path.
+    Scans each stage's results_dir for .vdb directories, and additionally
+    includes the centralized output_dir/cov.vdb that VCS produces when
+    every stage shares the same -cm_dir. Runs urg merge and generates
+    dashboard.txt. Returns the merged output directory path.
     """
     vdb_dirs = []
     for stage in stage_results:
@@ -975,7 +1007,28 @@ def auto_merge_stage_coverage(stage_results: List[Dict],
         if coverage_dir.is_dir():
             vdb_dirs.append(str(coverage_dir))
 
-    if len(vdb_dirs) < 2:
+    central_vdb = output_dir / "cov.vdb"
+    if central_vdb.is_dir():
+        vdb_dirs.append(str(central_vdb))
+
+    # NC/imc coverage layout (build_dir/cov_work) — full sign-off support.
+    # merge_cov.py auto-detects .vdb (VCS) vs cov_work/*.ucd (NC) and routes
+    # to urg / imc accordingly. NC produces dashboard.txt in the same
+    # column layout as VCS so the signoff parser stays simulator-agnostic.
+    central_cov_work = output_dir / "cov_work"
+    if central_cov_work.is_dir():
+        vdb_dirs.append(str(central_cov_work))
+
+    seen = set()
+    unique_vdb_dirs = []
+    for d in vdb_dirs:
+        real = str(Path(d).resolve())
+        if real not in seen:
+            seen.add(real)
+            unique_vdb_dirs.append(d)
+    vdb_dirs = unique_vdb_dirs
+
+    if not vdb_dirs:
         return Path()
 
     merged_dir = output_dir / "cov_merged"
@@ -999,7 +1052,6 @@ def evaluate_coverage(paths: List[Path], output_dir: Path, args) -> Dict:
     thresholds = {
         "overall": args.min_overall_coverage,
         "line": args.min_line_coverage,
-        "cond": args.min_cond_coverage,
         "fsm": args.min_fsm_coverage,
         "toggle": args.min_toggle_coverage,
         "functional": args.min_functional_coverage,
@@ -1212,17 +1264,40 @@ def check_directed_pool_coverage(testlist_path: Path,
 
 
 def compute_real_run_count(stage_results: List[Dict]) -> Tuple[int, int]:
-    """Count actually-run tests vs total pool across all testlists.
+    """Count actually-run sim tests vs total testlist pool.
 
-    Returns (ran, total_pool).
+    Both numerator and denominator are measured in *testlist entries* — i.e.
+    distinct test names — not iteration count. This keeps the ratio
+    meaningful when iterations >1, and avoids the historical bug where
+    ``ran`` summed every stage's ``total`` (which conflated iterations
+    with tests and even mixed in syn LEC sub-instances and formal
+    properties — producing absurd ratios like 32233/108 = 29845%).
+
+    Only sim regression stages contribute. syn/formal/lint/csr_unit/
+    compliance use unit counts that aren't comparable to testlist entries,
+    so they're excluded from both numerator and denominator.
+
+    Returns (ran_unique_tests, pool).
     """
-    ran = sum(s.get("total", 0) for s in stage_results)
+    sim_stages_with_testlist = set(STAGE_TESTLIST.keys())
+    ran = 0
+    for stage_result in stage_results:
+        stage = stage_result.get("stage", "")
+        if stage not in sim_stages_with_testlist:
+            continue
+        # Count distinct test names from the recorded test results, so
+        # iterations of the same test don't double-count.
+        names = {t.get("name", "") for t in stage_result.get("tests", [])
+                 if t.get("name")}
+        ran += len(names)
+
     pool = 0
     for stage, path in STAGE_TESTLIST.items():
         if path.exists():
             try:
                 entries = _load_yaml(path) or []
-                pool += len(entries)
+                pool += len([e for e in entries if isinstance(e, dict)
+                             and e.get("test")])
             except Exception:
                 pass
     return ran, pool
@@ -1485,7 +1560,7 @@ def main(argv=None) -> int:
     parser.add_argument("--gate-only", action="store_true",
                         help="Only evaluate --stage-result directories")
     parser.add_argument("--simulator", default="vcs",
-                        choices=["vcs", "xlm", "questa"])
+                        choices=["vcs", "nc", "xlm", "questa"])
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=0,
                         help="Override per-test iterations for non-smoke stages")

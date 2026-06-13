@@ -1,0 +1,66 @@
+// IFV Filelist — EH2 Core + Formal Properties
+// RC5 (2026-05-09): Fixed bootstrap + formal_top for IFV 15.20 compatibility.
+// eh2_param.vh moved inside modules (was at file scope, causing SVNOTY).
+
++define+FORMAL
++define+RV_BUILD_AXI4
++incdir+/home/host/Cores-VeeR-EH2/snapshots/default
++incdir+/home/host/Cores-VeeR-EH2/design/include
++incdir+/home/host/Cores-VeeR-EH2/design/lib
++incdir+/home/host/eh2-veri/dv/formal/properties
++incdir+/home/host/eh2-veri/dv/formal
+
+// Bootstrap: macro and type-definition files for $unit scope
+/home/host/eh2-veri/dv/formal/ifv_bootstrap.sv
+
+// RTL design files (same as synthesis flist)
+/home/host/Cores-VeeR-EH2/design/include/eh2_def.sv
+/home/host/Cores-VeeR-EH2/design/lib/eh2_lib.sv
+/home/host/Cores-VeeR-EH2/design/lib/beh_lib.sv
+/home/host/Cores-VeeR-EH2/design/lib/mem_lib.sv
+/home/host/Cores-VeeR-EH2/design/lib/ahb_to_axi4.sv
+/home/host/Cores-VeeR-EH2/design/lib/axi4_to_ahb.sv
+/home/host/Cores-VeeR-EH2/design/dmi/dmi_wrapper.v
+/home/host/Cores-VeeR-EH2/design/dmi/dmi_jtag_to_core_sync.v
+/home/host/Cores-VeeR-EH2/design/dmi/rvjtag_tap.v
+/home/host/Cores-VeeR-EH2/design/dbg/eh2_dbg.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec_decode_ctl.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec_gpr_ctl.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec_ib_ctl.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec_tlu_ctl.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec_tlu_top.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec_csr.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec_trigger.sv
+/home/host/Cores-VeeR-EH2/design/dec/eh2_dec.sv
+/home/host/Cores-VeeR-EH2/design/exu/eh2_exu_alu_ctl.sv
+/home/host/Cores-VeeR-EH2/design/exu/eh2_exu_mul_ctl.sv
+/home/host/Cores-VeeR-EH2/design/exu/eh2_exu_div_ctl.sv
+/home/host/Cores-VeeR-EH2/design/exu/eh2_exu.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_clkdomain.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_addrcheck.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_lsc_ctl.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_stbuf.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_bus_buffer.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_bus_intf.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_ecc.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_dccm_mem.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_dccm_ctl.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_trigger.sv
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_amo.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_aln_ctl.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_compress_ctl.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_ifc_ctl.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_bp_ctl.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_ic_mem.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_mem_ctl.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_iccm_mem.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_btb_mem.sv
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu.sv
+/home/host/Cores-VeeR-EH2/design/eh2_mem.sv
+/home/host/Cores-VeeR-EH2/design/eh2_pic_ctrl.sv
+/home/host/Cores-VeeR-EH2/design/eh2_dma_ctrl.sv
+/home/host/Cores-VeeR-EH2/design/eh2_veer.sv
+
+// SVA bind module: binds to eh2_veer using .* auto-connect (no manual port mapping)
+/home/host/eh2-veri/dv/formal/eh2_veer_sva.sv

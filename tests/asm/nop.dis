@@ -1,0 +1,15 @@
+
+nop.elf：     文件格式 elf32-littleriscv
+
+
+Disassembly of section .text:
+
+80000000 <_start>:
+80000000:	0001                	nop
+80000002:	0001                	nop
+80000004:	0001                	nop
+80000006:	0001                	nop
+80000008:	d0580537          	lui	a0,0xd0580
+8000000c:	0ff00593          	li	a1,255
+80000010:	00b50023          	sb	a1,0(a0) # d0580000 <_start+0x50580000>
+80000014:	a001                	j	80000014 <_start+0x14>

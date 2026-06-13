@@ -1,0 +1,22 @@
+// EH2 Verilator Lint Configuration
+//
+// Configure Verilator lint run for EH2 RTL and DV code.
+// Based on lowRISC Ibex's lint/verilator/verilator-config.vlt.
+
+`verilator_config
+
+// ─── Lint rules ───
+lint_on -rule UNUSED
+lint_on -rule BLKSEQ
+lint_on -rule WIDTH
+lint_on -rule LITENDIAN
+
+// ─── EH2-specific configuration ───
+// Top module: not applicable in lint mode (analyze-all)
+// Include paths
+// +incdir+rtl/design/include
+// +incdir+dv/uvm/core_eh2/env
+
+// ─── Coverage exclusion (lint only, not coverage) ───
+// These constructs are intentional in EH2 RTL
+// lint_off -rule COMBDLY -file "*" -match "*"

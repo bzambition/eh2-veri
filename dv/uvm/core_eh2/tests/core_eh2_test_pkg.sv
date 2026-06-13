@@ -8,6 +8,7 @@
 
 package core_eh2_test_pkg;
 
+  `include "uvm_macros.svh"
   import uvm_pkg::*;
   import core_eh2_env_pkg::*;
   import axi4_agent_pkg::*;
@@ -45,5 +46,6 @@ package core_eh2_test_pkg;
   `include "core_eh2_vseq.sv"
   `include "core_eh2_base_test.sv"
   `include "core_eh2_test_lib.sv"
+  `include "core_eh2_intg_test_lib.sv"
 
 endpackage

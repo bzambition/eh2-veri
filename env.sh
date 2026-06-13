@@ -15,7 +15,7 @@ export PATH="${GCC_PREFIX}/bin:${PATH}"
 # QEMU (for co-simulation)
 export QEMU_BIN="/home/host/eh2-verification/qemu-eh2/build/qemu-system-riscv32"
 
-# Simulator selection (vcs/xlm/questa)
+# Simulator selection (nc/vcs/xlm/questa) — default 'nc' (Cadence Incisive irun)
 export EH2_SIMULATOR="vcs"
 
 # Architecture flags

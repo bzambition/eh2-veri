@@ -63,6 +63,10 @@ dv/uvm/core_eh2/env/core_eh2_env_pkg.sv
 +incdir+dv/uvm/core_eh2/tests
 dv/uvm/core_eh2/tests/core_eh2_test_pkg.sv
 
+// RVFI interface (formal verification)
++incdir+dv/uvm/core_eh2/env
+dv/uvm/core_eh2/env/eh2_rvfi_if.sv
+
 // UVM testbench top
 +incdir+dv/uvm/core_eh2/tb
 dv/uvm/core_eh2/tb/core_eh2_tb_top.sv

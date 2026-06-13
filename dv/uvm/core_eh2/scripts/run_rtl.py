@@ -60,6 +60,7 @@ def build_sim_cmd(md: RegressionMetadata, sim_cfg: dict) -> str:
         "build_dir": md.build_dir,
         "out_dir": md.out_dir,
         "tb_dir": str(DV_DIR),
+        "eh2_root": md.eh2_root or str(EH2_ROOT),
         "test": md.test_name,
         "seed": md.seed,
         "binary": md.binary_path,
@@ -141,7 +142,20 @@ def run_rtl_simulation(md: RegressionMetadata) -> TestRunResult:
 
     # Compile
     sim_exe = os.path.join(md.build_dir, "simv")
+    # For VCS the simv binary is the readiness signal; for NC the equivalent
+    # signal is the elaborated INCA_libs directory left by `make compile_nc`.
+    # When the readiness signal is absent we invoke `make compile` for the
+    # corresponding simulator so each test can run standalone.
     if md.simulator == "vcs" and not os.path.exists(sim_exe):
+        compile_cmd = build_compile_cmd(md, sim_cfg)
+        trr.compile_cmd = compile_cmd
+        compile_log = os.path.join(md.out_dir, "compile.log")
+        rc = run_command(compile_cmd, compile_log)
+        if rc != 0:
+            trr.failure_mode = "COMPILE_ERROR"
+            return trr
+    elif md.simulator == "nc" and not os.path.isdir(
+            os.path.join(md.build_dir, "INCA_libs")):
         compile_cmd = build_compile_cmd(md, sim_cfg)
         trr.compile_cmd = compile_cmd
         compile_log = os.path.join(md.out_dir, "compile.log")
@@ -331,7 +345,7 @@ def main(argv=None) -> int:
     parser.add_argument("--test", default="", help="Test name")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--binary", default="", help="Test binary path")
-    parser.add_argument("--simulator", default="vcs", choices=["vcs", "xlm", "questa"])
+    parser.add_argument("--simulator", default="vcs", choices=["vcs", "nc", "xlm", "questa"])
     parser.add_argument("--config", default="default", help="EH2 configuration")
     parser.add_argument("--waves", action="store_true", help="Enable waveform dump")
     parser.add_argument("--coverage", action="store_true", help="Enable coverage")

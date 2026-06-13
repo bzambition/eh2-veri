@@ -343,7 +343,20 @@ def run_regression(args) -> RegressionSummary:
 
     # Load testlist
     testlist_path = args.testlist or DEFAULT_TESTLIST
-    if args.test:
+    if args.test and args.testlist:
+        testlist = [
+            entry for entry in load_regression_testlist(testlist_path)
+            if entry.get("test") == args.test
+        ]
+        if not testlist:
+            raise ValueError(f"Test {args.test} not found in {testlist_path}")
+        if args.rtl_test:
+            testlist[0]["rtl_test"] = args.rtl_test
+        if args.gen_opts:
+            testlist[0]["gen_opts"] = args.gen_opts
+        if args.disable_cosim:
+            testlist[0]["cosim"] = "disabled"
+    elif args.test:
         # Single test mode
         testlist = [{"test": args.test, "rtl_test": args.rtl_test or "core_eh2_base_test",
                      "gen_opts": args.gen_opts or "", "sim_opts": "",
@@ -365,8 +378,16 @@ def run_regression(args) -> RegressionSummary:
             skipped_signoff.append(entry["test"])
             continue
         iterations = args.iterations or entry.get("iterations", 1)
+        # When iterations >1 each run gets a distinct seed so the iterations
+        # actually exercise different stimulus. Previously every iteration
+        # reused the same seed (args.seed when given, else just `i+1`),
+        # which meant either (a) all iterations ran the identical test, or
+        # (b) iterations clobbered each other in the same `<test>_s1/`
+        # work-dir, leaving only the last result.yaml/sim_log on disk.
+        # Use args.seed as the base and step by i for iteration distinctness.
+        base_seed = args.seed if args.seed else 1
         for i in range(iterations):
-            seed = args.seed if args.seed else (i + 1)
+            seed = base_seed + i
             test_matrix.append((entry, seed))
 
     if skipped_signoff:
@@ -465,7 +486,7 @@ Examples:
     parser.add_argument("--seed", type=int, help="Override random seed")
 
     # Test configuration
-    parser.add_argument("--rtl-test", default="core_eh2_base_test",
+    parser.add_argument("--rtl-test", default="",
                         help="UVM test class")
     parser.add_argument("--gen-opts", default="", help="Generator options")
     parser.add_argument("--sim-opts", default="", help="Simulation options")
@@ -481,7 +502,7 @@ Examples:
 
     # Simulator
     parser.add_argument("--simulator", default="vcs",
-                        choices=["vcs", "xlm", "questa"],
+                        choices=["vcs", "nc", "xlm", "questa"],
                         help="Simulator to use")
 
     # Output

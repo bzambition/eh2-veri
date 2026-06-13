@@ -2,7 +2,7 @@
 
 本文档定义 EH2 UVM 验证平台的术语、模型与约定。新会话进入此项目时应先读此文档。
 
-更新日期：2026-05-08（v1.0 Release — Sign-off full PASS，RISK 状态更新）
+更新日期：2026-05-08（v1.0 GA 候选 — P0 release-readiness 整改中，RISK 状态更新）
 
 ---
 
@@ -58,7 +58,7 @@ dv/uvm/core_eh2/
 └── directed_tests/       # 定向测试（asm + testlist）
 ```
 
-> **当前偏离约定的位置**：`eh2_csr_if.sv` / `eh2_dut_probe_intf.sv` / `eh2_instr_monitor_if.sv` 错放在 `common/trace_agent/`，应该在 `env/`（Phase 2 修复）。
+> **Phase 2 已修复**：接口文件已移至 `env/` 目录，与 Ibex 约定对齐。
 
 ## 4. Cosim 数据通路
 
@@ -97,9 +97,9 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 | RISK-6 | LOW | interrupt 状态采样按 item 而非 cycle | RTL 设计上已正确 |
 | RISK-7 | RESOLVED | EH2 推测 div cancel vs 架构 retire 区分 | **已修**（Phase 1 RTL `dec_div_cancel_overwrite` 信号 + scoreboard FIFO 消费） |
 | RISK-8 | RESOLVED | load_store_test data RF 不同步 | **已验证不再复现**（Phase 3 BE 语义放宽 + stream 修复后 1848 trace / 0 mismatch） |
-| RISK-9 | 部分修 | random_instr_test 中断/异常 cosim | **部分修**（scoreboard mcause/mepc 比对上线，random_instr_test 已解锁 cosim，interrupt_test/irq_single_test 仍 disabled） |
-| RISK-10 | OPEN | bitmanip zba/zbb 触发 RTL illegal-instr 异常率高 | ⚠️ 标 cosim:disabled（exception 路径 cosim step 与 trace 速率不匹配，需排除 RTL bug） |
-| RISK-11 | OPEN | atomic SC.W RTL 写回与 Spike 分歧 | ⚠️ 标 cosim:disabled（需 spike_cosim 加 atomic-store fixup） |
+| RISK-9 | 已修 | random_instr_test 中断/异常 cosim | **已修**（issue 51 mcause/mepc 升级 mismatch + issue 53 8 个中断测试 cosim 解锁） |
+| RISK-10 | OPEN | bitmanip zba/zbb 触发 RTL illegal-instr 异常率高 | ⚠️ 标 cosim:disabled（issue 60 跟踪，需排查 RTL bug） |
+| RISK-11 | 已修 | atomic SC.W RTL 写回与 Spike 分歧 | **已修**（issue 52 spike_cosim.cc atomic-store fixup + amo_test cosim 解锁，ADR-0006） |
 | RISK-12 | RESOLVED | 8 个 EH2 directed stream 全部生成空 instr_list | **已修**（Phase 3 新增 eh2_base_directed_stream，post_randomize → gen_instr 桥接） |
 | RISK-13 | RESOLVED | check_logs 把 VCS banner overlap 误判为 UVM_FATAL | **已修**（UVM_SUMMARY_LINE_RE 识别 summary 行的两种损坏形态） |
 | RISK-14 | RESOLVED | libcosim.so 缺失静默不链 → 仿真启动报 DPI-DIFNF | **已修**（compile_vcs 硬依赖 + NO_COSIM=1 escape hatch） |
@@ -108,13 +108,14 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 
 `make signoff SIGNOFF_PROFILE=full PARALLEL=4` 要全过才算签发。
 
-| Stage | 当前状态（2026-05-08 v1.0 Release sign-off） | 描述 |
+| Stage | 当前状态（2026-05-08 v1.0 RC 整改） | 描述 |
 |-------|---------|------|
 | smoke | ✅ PASS | smoke.hex，含 cosim，6 trace / 0 mismatch |
-| directed | ✅ PASS | 13 个定向 test（含 3 个原始 + 10 个新增），sign-off 跑 3 个 |
-| cosim | ✅ PASS | cosim_testlist 5/5（smoke / alu / load_store / dual_issue / bitmanip） |
-| riscvdv | ✅ PASS | 32/32（11 个 skip_in_signoff 留 issue：cosim:disabled，不影响签发） |
-| **Sign-off full** | **✅ PASS** | 见 build/sf_full2/signoff_report.md |
+| directed | ✅ PASS | 13 个定向 test（10 个 directed_*.S 全在 testlist 注册） |
+| cosim | ✅ PASS | cosim_testlist 7/7（+ cosim_exception_compare + cosim_atomic_basic） |
+| riscvdv | ⚠️ PASS (6 disabled) | 37/43 cosim 使能（6 个等待 P1/P2 issue 完成：csr/bitmanip/csr_hazard/pc_intg/rf_intg/mem_error） |
+| lint | ✅ 新架构 | verible + verilator 双 lint 框架就绪（issue 58） |
+| **Sign-off full** | **⚠️ 需验证** | P0 cosim 通道 + sign-off gates + lint 已就绪，覆盖率需实跑确认 |
 
 ## 8. 工程约定
 
@@ -160,11 +161,27 @@ LSU AXI4 monitor                   axi4_monitor               │  step Spike, c
 | ADR 文档 | 0 | 5 篇 (0001-0005) | ✅ |
 | Git 提交 | 未提交 | 4 commits 完整入库 | ✅ |
 
-## 11. 下一步优先事项（v1.1）
+## 11. 下一步路线图
 
-1. **RISK-9 完整闭环**: 解锁 interrupt_test / irq_single_test 等 15 个中断/调试 cosim 测试
-2. **RISK-10**: 排查 bitmanip RTL illegal-instr 是否为 RTL bug
-3. **RISK-11**: spike_cosim 加 atomic-store fixup
-4. **覆盖率 Gate**: 在 full profile 启用 `--require-coverage` 并设最低阈值
-5. **PMP fcov 补全**: eh2_pmp_fcov_if.sv 扩展到对标 Ibex 854 行
-6. **核心测试补充**: 补充 Ibex 有 EH2 无的 7+ 核心测试类型
+当前 19 个 release-readiness issues（详见 `.scratch/release-readiness/issues/`）：
+
+| 阶段 | Issues | 状态 |
+|------|--------|------|
+| **P0 (阻塞 Release)** | 50-54 | ✅ 完成 — mcause/mepc 升级, atomic/interrupt/debug cosim 全部解锁 |
+| **P1 (工业级硬门槛)** | 55-58 | ✅ 55/58 done — PMP/lint; ⬜ 56 (cs_registers), 57 (compliance) 待建 |
+| **P2 (广度补齐)** | 59-63 | ⬜ 5 个 issue 全部待建 |
+| **P3 (代码/文档收尾)** | 64-68 | ✅ 64/65/67/68 done — mtval/memmap/CONTEXT/fcov; ⬜ 66 (async_wb) |
+
+**执行顺序**：P0 → P1 → P2 → P3，每波完成后停止汇报。
+
+### 当前成果（截至 P0+P1 部分完成）
+
+- cosim 使能测试：37/43（曾 11/43，净增 26 个）
+- cosim 通道：mcause/mepc 升级为 UVM_ERROR（零值豁免已删除）
+- 原子操作 cosim：spike_cosim.cc atomic fixup + ADR-0006
+- 中断 cosim：8 个测试解锁 + ADR-0007
+- 调试 cosim：10+ 个测试解锁 + ADR-0008
+- PMP cosim：misaligned_pmp_fixup 实现 + ADR-0009
+- sign-off gates：覆盖率门 + cosim-disabled 门 + skip 门全部上线
+- lint 框架：verible + verilator 双工具就绪
+- ADR 文档：0001-0009 共 9 篇

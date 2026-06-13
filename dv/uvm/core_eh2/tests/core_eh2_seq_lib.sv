@@ -199,20 +199,48 @@ class debug_seq extends core_eh2_base_seq;
   virtual task body();
     rand_delay();
     if (stress_mode) begin
-      // Continuous debug halt/resume
+      // Continuous debug stimulus for stress tests only.
       forever begin
         if (stopped) return;
-        send_halt();
-        rand_interval();
-        send_resume();
+        send_debug_command_walk();
         rand_interval();
       end
     end else begin
-      // Single debug halt/resume
-      send_halt();
-      rand_interval();
-      send_resume();
+      // Finite debug stimulus for directed coverage tests. This avoids
+      // holding the core in debug mode until the mailbox timeout expires.
+      send_debug_command_walk();
     end
+  endtask
+
+  virtual task dmi_gap(int unsigned cycles = 40);
+    repeat (cycles) #(10ns);
+  endtask
+
+  virtual task send_debug_command_walk();
+    bit [31:0] dccm_addr;
+    send_dmactive();
+    dmi_gap(20);
+    send_halt();
+    dmi_gap(120);
+    send_core_register_read();
+    dmi_gap(160);
+    for (int unsigned i = 0; i < 5; i++) begin
+      dccm_addr = 32'hf0040000 + (i * 32'h4);
+      send_core_local_memory_read(dccm_addr);
+      dmi_gap(180);
+    end
+    send_external_system_bus_read();
+    dmi_gap(220);
+    send_direct_system_bus_read_write();
+    dmi_gap(220);
+    send_resume();
+    dmi_gap(120);
+    clear_resume();
+  endtask
+
+  virtual task send_dmactive();
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_DMCONTROL, 32'h00000001);
   endtask
 
   virtual task send_halt();
@@ -220,9 +248,53 @@ class debug_seq extends core_eh2_base_seq;
       eh2_jtag_seq_item::DMI_DMCONTROL, 32'h80000001);
   endtask
 
+  virtual task send_core_register_read();
+    // Abstract register command: read x0 with transfer=1 and 32-bit size.
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_COMMAND, 32'h00221000);
+  endtask
+
+  virtual task send_core_local_memory_read(bit [31:0] addr = 32'hf0040000);
+    // Debug memory command targeting DCCM. This goes through CORE_CMD_* and
+    // exercises the DMA/debug memory path rather than the external SB path.
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_DATA1, addr);
+    dmi_gap(20);
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_COMMAND, 32'h02200000);
+  endtask
+
+  virtual task send_external_system_bus_read();
+    // Debug memory command targeting external AXI memory. This drives
+    // SB_CMD_START/SEND/RESP in eh2_dbg and the SB AXI slave.
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_DATA1, 32'h80000000);
+    dmi_gap(20);
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_COMMAND, 32'h02200000);
+  endtask
+
+  virtual task send_direct_system_bus_read_write();
+    // Direct system-bus register access covers the standalone sb_state FSM.
+    // bit 20 readonaddr starts a read when SBADDRESS0 is written.
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_SBCS, 32'h00100000);
+    dmi_gap(20);
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_SBADDRESS0, 32'h80000000);
+    dmi_gap(120);
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_SBDATA0, 32'ha5a55a5a);
+  endtask
+
   virtual task send_resume();
     eh2_jtag_seq::send_write(jtag_seqr,
-      eh2_jtag_seq_item::DMI_DMCONTROL, 32'h40000000);
+      eh2_jtag_seq_item::DMI_DMCONTROL, 32'h40000001);
+  endtask
+
+  virtual task clear_resume();
+    eh2_jtag_seq::send_write(jtag_seqr,
+      eh2_jtag_seq_item::DMI_DMCONTROL, 32'h00000001);
   endtask
 
 endclass

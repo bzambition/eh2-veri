@@ -32,6 +32,11 @@ PARALLEL    ?= 1
 RTL_TEST    ?= core_eh2_base_test
 VERBOSITY   ?= UVM_MEDIUM
 SIGNOFF_ITERATIONS ?=
+LEC_BLOCKLEVEL ?= 0
+LEC_SUMMARY_PATH ?= syn/build/lec_summary.txt
+
+# Coverage compile options are owned by the top-level Makefile and
+# rtl_simulation.yaml; R2-B requires FSM extraction through -cm_fsmcfg.
 
 .PHONY: help compile run gen smoke nightly weekly signoff signoff_quick cov clean lint
 
@@ -82,7 +87,8 @@ weekly:
 
 signoff:
 	cd $(PROJ_ROOT) && $(MAKE) signoff SIMULATOR=$(SIMULATOR) PARALLEL=$(PARALLEL) \
-	  SIGNOFF_ITERATIONS=$(SIGNOFF_ITERATIONS) COV=$(COV) WAVES=$(WAVES)
+	  SIGNOFF_ITERATIONS=$(SIGNOFF_ITERATIONS) COV=$(COV) WAVES=$(WAVES) \
+	  LEC_BLOCKLEVEL=$(LEC_BLOCKLEVEL) LEC_SUMMARY_PATH=$(LEC_SUMMARY_PATH)
 
 signoff_quick:
 	cd $(PROJ_ROOT) && $(MAKE) signoff_quick SIMULATOR=$(SIMULATOR) PARALLEL=$(PARALLEL)

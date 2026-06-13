@@ -6,4 +6,3 @@ EH2_SIMULATOR ?= vcs
 
 # Build options
 WAVES ?= 0
-COV ?= 0

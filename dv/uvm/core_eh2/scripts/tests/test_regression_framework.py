@@ -18,6 +18,7 @@ import run_rtl
 import run_instr_gen
 import render_config_template
 import check_logs
+import compile_tb
 import compile_test
 import collect_results
 import directed_test_schema
@@ -96,6 +97,24 @@ class RegressionFrameworkTest(unittest.TestCase):
         self.assertIn("-l /tmp/eh2-out/sim_smoke_7.log", cmd)
         self.assertIn("+timeout_ns=12345", cmd)
         self.assertNotIn("cd /tmp/eh2-build", cmd)
+
+    def test_vcs_waves_enable_verdi_uvm_hierarchy_recording(self):
+        md = RegressionMetadata()
+        md.test_name = "smoke"
+        md.seed = 7
+        md.binary_path = "/tmp/smoke.hex"
+        md.simulator = "vcs"
+        md.rtl_test = "core_eh2_base_test"
+        md.build_dir = str(Path("/tmp/eh2-build"))
+        md.out_dir = str(Path("/tmp/eh2-out"))
+        md.waves = True
+
+        cfg_path = Path(run_rtl.__file__).resolve().parents[1] / "yaml" / "rtl_simulation.yaml"
+        cmd = run_rtl.build_sim_cmd(md, run_rtl.load_sim_config(str(cfg_path)))
+
+        self.assertIn("+UVM_VERDI_TRACE=UVM_AWARE+RAL+HIER+COMPWAVE", cmd)
+        self.assertIn("+UVM_TR_RECORD", cmd)
+        self.assertIn("-ucli -do", cmd)
 
     def test_run_rtl_skips_compile_when_simv_exists(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1371,6 +1390,56 @@ class RegressionFrameworkTest(unittest.TestCase):
             self.assertEqual(data["tests"][0]["sim_log"],
                              str(out_dir / "smoke.log"))
 
+    def test_run_regression_filters_named_test_from_testlist(self):
+        with tempfile.TemporaryDirectory() as td:
+            out_dir = Path(td) / "regress"
+            cosim_testlist = (SCRIPT_DIR.parent / "directed_tests" /
+                              "cosim_testlist.yaml")
+            captured = {}
+
+            class Args:
+                testlist = str(cosim_testlist)
+                test = "cosim_smoke"
+                rtl_test = ""
+                gen_opts = ""
+                disable_cosim = False
+                output = str(out_dir)
+                iterations = None
+                seed = 1
+                parallel = 1
+                simulator = "vcs"
+                binary = ""
+                sim_opts = ""
+                coverage = False
+                waves = True
+                fail_on_warnings = False
+                build_dir = None
+
+            def fake_run_single_test(entry, seed, *args, **kwargs):
+                captured["entry"] = entry
+                captured["seed"] = seed
+                captured["waves"] = args[5]
+                result = TestRunResult()
+                result.test_name = entry["test"]
+                result.seed = seed
+                result.passed = True
+                result.failure_mode = "NONE"
+                result.sim_log_path = str(out_dir / "cosim_smoke.log")
+                return result
+
+            with mock.patch.object(run_regress, "run_single_test",
+                                   fake_run_single_test):
+                summary = run_regress.run_regression(Args)
+
+            self.assertEqual(summary.failed, 0)
+            self.assertEqual(captured["entry"]["test"], "cosim_smoke")
+            self.assertEqual(captured["entry"]["rtl_test"],
+                             "core_eh2_cosim_test")
+            self.assertEqual(captured["entry"]["test_type"], "DIRECTED")
+            self.assertIn("cosim_smoke.S", captured["entry"]["asm"])
+            self.assertEqual(captured["entry"]["cosim"], "enabled")
+            self.assertTrue(captured["waves"])
+
     def test_default_linker_places_generated_ram_in_external_memory(self):
         link_ld = (SCRIPT_DIR / "link.ld").read_text(encoding="utf-8")
 
@@ -1999,6 +2068,25 @@ class RegressionFrameworkTest(unittest.TestCase):
         makefile = (root / "Makefile").read_text(encoding="utf-8")
 
         self.assertIn("-top core_eh2_tb_top", makefile)
+
+    def test_vcs_compile_enables_verdi_uvm_component_wave(self):
+        root = SCRIPT_DIR.parents[3]
+        makefile = (root / "Makefile").read_text(encoding="utf-8")
+
+        self.assertIn("-debug_access+all", makefile)
+        self.assertIn("-kdb", makefile)
+        self.assertIn("+define+UVM_VERDI_COMPWAVE", makefile)
+
+    def test_compile_tb_vcs_enables_verdi_uvm_component_wave(self):
+        md = RegressionMetadata()
+        md.simulator = "vcs"
+        md.work_dir = "/tmp/eh2-build"
+
+        cmd = compile_tb.get_compile_cmd(md)
+
+        self.assertIn("-debug_access+all", cmd)
+        self.assertIn("-kdb", cmd)
+        self.assertIn("+define+UVM_VERDI_COMPWAVE", cmd)
 
     def test_axi_agents_are_parameterized_and_sb_monitor_is_connected(self):
         tb_top = (SCRIPT_DIR.parent / "tb" /

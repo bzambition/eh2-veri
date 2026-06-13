@@ -18,9 +18,11 @@ class eh2_dut_probe_monitor extends uvm_monitor;
   uvm_analysis_port #(eh2_trace_seq_item) ap;
 
   int wb_count;
+  int wb_seq_counter;  // global writeback sequence (issue 66)
 
   function new(string name, uvm_component parent);
     super.new(name, parent);
+    wb_seq_counter = 1;  // start from 1 so wb_tag >= 1 always (issue 66)
   endfunction
 
   function void build_phase(uvm_phase phase);
@@ -58,10 +60,13 @@ class eh2_dut_probe_monitor extends uvm_monitor;
         txn.wb_dest   = vif.div_rd;
         txn.wb_data   = vif.div_wdata;
         txn.wb_source = EH2_WB_SRC_DIV;
+        txn.wb_tag    = wb_seq_counter;
+        vif.wb_seq    = wb_seq_counter;  // write to interface for trace_monitor (issue 66)
         ap.write(txn);
-        `uvm_info("dut_probe", $sformatf("DIV WB: x%0d = %08x",
-          vif.div_rd, vif.div_wdata), UVM_HIGH)
+        `uvm_info("dut_probe", $sformatf("DIV WB: x%0d = %08x wb_tag=%0d",
+          vif.div_rd, vif.div_wdata, wb_seq_counter), UVM_HIGH)
         wb_count++;
+        wb_seq_counter++;
       end
       else if (vif.div_cancel && vif.div_cancel_overwrite && vif.div_rd != 5'b0) begin
         // Only forward "overwrite" cancels: these pair with a retired div
@@ -74,10 +79,13 @@ class eh2_dut_probe_monitor extends uvm_monitor;
         txn.wb_data     = vif.div_result;
         txn.wb_suppress = 1;
         txn.wb_source   = EH2_WB_SRC_DIV;
+        txn.wb_tag      = wb_seq_counter;
+        vif.wb_seq      = wb_seq_counter;
         ap.write(txn);
-        `uvm_info("dut_probe", $sformatf("DIV OVERWRITE-CANCEL: x%0d = %08x",
-          vif.div_rd, vif.div_result), UVM_HIGH)
+        `uvm_info("dut_probe", $sformatf("DIV OVERWRITE-CANCEL: x%0d = %08x wb_tag=%0d",
+          vif.div_rd, vif.div_result, wb_seq_counter), UVM_HIGH)
         wb_count++;
+        wb_seq_counter++;
       end
       else if (vif.div_cancel && !vif.div_cancel_overwrite) begin
         `uvm_info("dut_probe", $sformatf(
@@ -101,10 +109,13 @@ class eh2_dut_probe_monitor extends uvm_monitor;
         txn.wb_dest   = vif.nb_load_waddr;
         txn.wb_data   = vif.nb_load_data;
         txn.wb_source = EH2_WB_SRC_NB_LOAD;
+        txn.wb_tag    = wb_seq_counter;
+        vif.wb_seq    = wb_seq_counter;  // issue 66
         ap.write(txn);
-        `uvm_info("dut_probe", $sformatf("NB LOAD: x%0d = %08x",
-          vif.nb_load_waddr, vif.nb_load_data), UVM_HIGH)
+        `uvm_info("dut_probe", $sformatf("NB LOAD: x%0d = %08x wb_tag=%0d",
+          vif.nb_load_waddr, vif.nb_load_data, wb_seq_counter), UVM_HIGH)
         wb_count++;
+        wb_seq_counter++;
       end
     end
   endtask
@@ -112,7 +123,8 @@ class eh2_dut_probe_monitor extends uvm_monitor;
   function void report_phase(uvm_phase phase);
     super.report_phase(phase);
     `uvm_info("dut_probe", "=== DUT Probe Statistics (async only) ===", UVM_LOW)
-    `uvm_info("dut_probe", $sformatf("Total async writebacks: %0d", wb_count), UVM_LOW)
+    `uvm_info("dut_probe", $sformatf("Total async writebacks: %0d, wb_seq last: %0d",
+              wb_count, wb_seq_counter), UVM_LOW)
   endfunction
 
 endclass

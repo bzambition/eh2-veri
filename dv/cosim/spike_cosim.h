@@ -94,6 +94,7 @@ private:
   struct PendingMemAccess {
     DSideAccessInfo dut_access_info;
     uint32_t be_spike;
+    bool is_atomic_store = false;  // true for SC/AMO store half
   };
 
   // Per-thread state
@@ -113,6 +114,13 @@ private:
 
     // Pending dside accesses from DUT
     std::vector<PendingMemAccess> pending_dside_accesses;
+
+    // LR reservation tracking for atomic cosim (issue 52)
+    uint32_t lr_reservation_addr = 0;
+    bool lr_reservation_valid = false;
+
+    // PC of last stepped instruction (for commit-log-free instr type checks)
+    uint32_t last_step_pc = 0;
   };
   PerThreadState thread_state[COSIM_MAX_THREADS];
 
@@ -127,6 +135,11 @@ private:
                           uint32_t start_mtvec, uint32_t mhpm_counter_num);
   void fixup_csr(int thread_id, int csr_num, uint32_t csr_val);
   void misaligned_pmp_fixup(int thread_id, uint32_t addr, bool store);
+  void atomic_store_fixup(int thread_id, bool store, uint32_t addr,
+                          uint32_t rd_data, bool is_sc);
+  bool pc_is_atomic_mem_instr(int thread_id, uint32_t pc);
+  bool is_sc_instr(int thread_id, uint32_t pc);
+  bool is_lr_instr(int thread_id, uint32_t pc);
   bool check_retired_instr(int thread_id, uint32_t write_reg,
                            uint32_t write_reg_data, uint32_t dut_pc,
                            bool suppress_reg_write);

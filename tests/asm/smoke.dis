@@ -1,0 +1,11 @@
+
+smoke.elf：     文件格式 elf32-littleriscv
+
+
+Disassembly of section .text:
+
+80000000 <_start>:
+80000000:	d0580537          	lui	a0,0xd0580
+80000004:	0ff00593          	li	a1,255
+80000008:	00b50023          	sb	a1,0(a0) # d0580000 <_start+0x50580000>
+8000000c:	a001                	j	8000000c <_start+0xc>

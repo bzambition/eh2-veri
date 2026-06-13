@@ -47,6 +47,9 @@ class core_eh2_vseq extends uvm_sequence;
     if (cfg == null) begin
       `uvm_fatal("vseq", "cfg is null - must set before starting vseq")
     end
+    if (vseqr == null && !$cast(vseqr, m_sequencer)) begin
+      `uvm_fatal("vseq", "m_sequencer is not a core_eh2_vseqr")
+    end
   endtask
 
   virtual task body();
@@ -83,10 +86,10 @@ class core_eh2_vseq extends uvm_sequence;
 
       // Debug sequences
       begin
-        if (cfg.enable_debug_stress) begin
+        if (cfg.enable_debug_seq || cfg.enable_debug_stress) begin
           debug_stress_h = debug_seq::type_id::create("debug_stress_h");
           debug_stress_h.jtag_seqr = vseqr.jtag_seqr;
-          debug_stress_h.stress_mode = 1;
+          debug_stress_h.stress_mode = cfg.enable_debug_stress;
           debug_stress_h.interval = cfg.max_interval;
           debug_stress_h.start(null);
         end
@@ -110,7 +113,7 @@ class core_eh2_vseq extends uvm_sequence;
           fetch_en_h.start(null);
         end
       end
-    join
+    join_none
   endtask
 
   // Stop all sequences

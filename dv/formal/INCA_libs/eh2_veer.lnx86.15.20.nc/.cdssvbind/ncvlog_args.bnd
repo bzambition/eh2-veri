@@ -1,0 +1,67 @@
+-MSS\ 
+-dumpxst\ 
+eh2_veer_0x521314e3\ 
+-LOG_FD\ 
+7\ 
+-neverwarn\ 
+-reduce_messages\ 
+-nocopyright\ 
+-specificunit\ 
+worklib.eh2_veer:sv\ 
+-NCERROR\ 
+CUVDSI\ 
+-NCERROR\ 
+CUVDSO\ 
+-NCERROR\ 
+CUVDSB\ 
+-NCERROR\ 
+CUVDSM\ 
+-NCERROR\ 
+CUVDSN\ 
+-NCERROR\ 
+CUVDSF\ 
+-LINEDEBUG\ 
+-SV\ 
+-DELAY_TRIGGER\ 
+-ASSERT\ 
+-GENASSERT_SYNTH_PRAGMA\ 
+-DEFINE\ 
+FORMAL\ 
+-DEFINE\ 
+RV_BUILD_AXI4\ 
+-DEFINE\ 
+IAL_OVL_ACCELLERA\ 
+-DEFINE\ 
+OVL_PSL\ 
+-DEFINE\ 
+OVL_ASSERT_ON\ 
+-DEFINE\ 
+IAL_IFV\ 
+-INCDIR\ 
+.\ 
+-INCDIR\ 
+/home/host/Cores-VeeR-EH2/snapshots/default\ 
+-INCDIR\ 
+/home/host/Cores-VeeR-EH2/design/include\ 
+-INCDIR\ 
+/home/host/Cores-VeeR-EH2/design/lib\ 
+-INCDIR\ 
+./properties\ 
+-INCDIR\ 
+.\ 
+-INCDIR\ 
+/home/cadence/INCISIVE152/tools/ial/include\ 
+-cdslib\ 
+./INCA_libs/eh2_veer.lnx86.15.20.nc/cds.lib\ 
+-hdlvar\ 
+./INCA_libs/eh2_veer.lnx86.15.20.nc/hdl.var\ 
+-runmode\ 
+-propfile ./INCA_libs/eh2_veer.lnx86.15.20.nc/.cdssvbind/cds_tmp_svbind_single_00010dd7_007f0100_1.sva \ 
+/home/host/eh2-veri/dv/formal/ifv_bootstrap.sv \ 
+/home/host/Cores-VeeR-EH2/design/lib/beh_lib.sv \ 
+/home/host/Cores-VeeR-EH2/design/lib/mem_lib.sv \ 
+/home/host/Cores-VeeR-EH2/design/lsu/eh2_lsu_dccm_mem.sv \ 
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_ic_mem.sv \ 
+/home/host/Cores-VeeR-EH2/design/ifu/eh2_ifu_btb_mem.sv \ 
+/home/host/eh2-veri/dv/formal/eh2_veer_sva.sv \ 
+/home/host/Cores-VeeR-EH2/design/eh2_veer.sv \ 

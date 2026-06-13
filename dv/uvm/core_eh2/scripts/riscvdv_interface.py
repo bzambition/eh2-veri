@@ -114,7 +114,7 @@ def get_tool_cmds(yaml_path: str, variables: dict = None) -> dict:
     Returns:
         Dict with 'compile' and 'sim' command strings
     """
-    with open(yaml_path, "r") as f:
+    with open(yaml_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     if variables is None:

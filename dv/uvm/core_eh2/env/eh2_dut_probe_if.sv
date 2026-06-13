@@ -41,6 +41,7 @@ interface eh2_dut_probe_if(
   logic [31:0]      mtvec;
   logic [31:0]      mepc;
   logic [31:0]      mcause;
+  logic [31:0]      mtval;
 
   // Exception/trap signals at E4 stage (for directed tests and coverage)
   logic             mret_e4;
@@ -67,6 +68,11 @@ interface eh2_dut_probe_if(
   logic             take_soft_int;
   logic             take_nmi;
 
+  // Global writeback sequence counter (issue 66: strict wb_seq ordering)
+  // Incremented by probe_monitor for each non-suppressed wb event.
+  // Read by trace_monitor to tag trace items for async_wb matching.
+  logic [15:0]      wb_seq;
+
   // Monitor clocking block
   clocking monitor_cb @(posedge clk);
     input div_cancel;
@@ -87,6 +93,7 @@ interface eh2_dut_probe_if(
     input mtvec;
     input mepc;
     input mcause;
+    input mtval;
     input mret_e4;
     input illegal_e4;
     input ecall_e4;
@@ -104,6 +111,7 @@ interface eh2_dut_probe_if(
     input take_timer_int;
     input take_soft_int;
     input take_nmi;
+    output wb_seq;
   endclocking
 
 endinterface

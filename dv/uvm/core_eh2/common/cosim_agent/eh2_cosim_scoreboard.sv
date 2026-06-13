@@ -15,7 +15,7 @@
 //
 // Async writeback corner cases (NB-load, DIV-cancel) still arrive via the
 // dut probe monitor, but only as suppress hints—they override wb_valid for
-// the matching trace item by rd address within a small window.
+// the matching trace item by strict wb_tag association (issue 66).
 //
 // Spike notification ordering (matching Ibex):
 //   1. set_debug_req  (highest priority)
@@ -89,12 +89,13 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   pending_mem_access_t pending_mem_access_q[$];
 
   // Async writeback hints from the dut probe (NB-load wb / DIV cancel).
-  // Per-thread queues.
+  // Per-thread queues. wb_tag enables strict ordering match (issue 66).
   typedef struct {
     bit [4:0]  rd;
     bit [31:0] rd_data;
     bit        suppress;
     int        source;
+    int        wb_tag;       // global wb_seq from probe_monitor
   } async_wb_hint_t;
   async_wb_hint_t async_wb_q[2][$];
 
@@ -135,6 +136,11 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     if (cfg != null) begin
       if (cosim_config == "") cosim_config = cfg.isa_string;
       fatal_on_mismatch = cfg.relax_cosim_check ? 0 : 1;
+      // Memory region overrides (issue 65): plusargs override cfg defaults
+      void'($value$plusargs("MEM_BOOT_BASE=%h",     cfg.mem_boot.base));
+      void'($value$plusargs("MEM_ICCM_BASE=%h",     cfg.mem_iccm.base));
+      void'($value$plusargs("MEM_DCCM_BASE=%h",     cfg.mem_dccm.base));
+      void'($value$plusargs("MEM_MAILBOX_BASE=%h",  cfg.mem_mailbox.base));
     end
   endfunction
 
@@ -233,6 +239,7 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
       hint.rd_data  = probe_item.wb_data;
       hint.suppress = probe_item.wb_suppress;
       hint.source   = probe_item.wb_source;
+      hint.wb_tag   = probe_item.wb_tag;  // strict ordering tag (issue 66)
 
       begin
         int tid = int'(probe_item.thread_id);
@@ -274,7 +281,7 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     if (item.exception || item.interrupt) return 1'b0;
     if (!item.writes_rd()) return 1'b0;
     if (item.is_div()) return 1'b1;
-    if (is_load_instruction(item)) return 1'b1;
+    if (needs_nb_load_async_wb(item)) return 1'b1;
     return 1'b0;
   endfunction
 
@@ -320,13 +327,13 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
   endfunction
 
   function bit has_matching_async_wb(int tid, eh2_trace_seq_item item);
-    bit [4:0] expected_rd;
     if (!item.writes_rd()) return 1'b0;
-    expected_rd = item.get_write_rd();
 
     if (item.is_div()) begin
       foreach (async_wb_q[tid][i]) begin
-        if (async_wb_q[tid][i].source == EH2_WB_SRC_DIV) return 1'b1;
+        if (async_wb_q[tid][i].source == EH2_WB_SRC_DIV) begin
+          if (async_wb_q[tid][i].wb_tag == item.wb_tag) return 1'b1;
+        end
       end
       return 1'b0;
     end
@@ -334,7 +341,7 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     if (is_load_instruction(item)) begin
       foreach (async_wb_q[tid][i]) begin
         if (async_wb_q[tid][i].source != EH2_WB_SRC_NB_LOAD) continue;
-        if (async_wb_q[tid][i].rd == expected_rd) return 1'b1;
+        if (async_wb_q[tid][i].wb_tag > 0 && async_wb_q[tid][i].wb_tag == item.wb_tag) return 1'b1;
       end
     end
     return 1'b0;
@@ -349,12 +356,22 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
 
   function bit is_load_instruction(eh2_trace_seq_item item);
     return item.is_load() ||
+           is_lr_instruction(item) ||
            (item.is_compressed_load_store() && item.writes_rd());
   endfunction
 
   function bit is_store_or_amo_instruction(eh2_trace_seq_item item);
-    return item.is_store() || item.is_amo() ||
+    return item.is_store() ||
            (item.is_compressed_load_store() && !item.writes_rd());
+  endfunction
+
+  function bit is_lr_instruction(eh2_trace_seq_item item);
+    return item.is_amo() && item.insn[31:27] == 5'b00010;
+  endfunction
+
+  function bit needs_nb_load_async_wb(eh2_trace_seq_item item);
+    return item.is_load() ||
+           (item.is_compressed_load_store() && item.writes_rd());
   endfunction
 
   function bit must_wait_for_memory_access(eh2_trace_seq_item item);
@@ -371,36 +388,58 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
     endcase
   endfunction
 
-  // Try to consume an async writeback hint that matches this instruction's
-  // architectural rd. Returns 1 and fills `hint` if found.
+  // Try to consume an async writeback hint that matches this instruction.
+  // Strict wb_tag-only matching (issue 66). No rd-based fallback.
   function bit try_consume_async_wb(int tid, eh2_trace_seq_item item,
                                     output async_wb_hint_t hint);
     bit [4:0] expected_rd;
+    bit       found_wrong_tag;
+    int       wrong_tag_val;
     if (!item.writes_rd()) return 1'b0;
     expected_rd = item.get_write_rd();
 
     if (item.is_div()) begin
+      found_wrong_tag = 0;
       foreach (async_wb_q[tid][i]) begin
         if (async_wb_q[tid][i].source != EH2_WB_SRC_DIV) continue;
-        if (async_wb_q[tid][i].rd != expected_rd) begin
-          `uvm_warning("cosim", $sformatf(
-            "T%0d DIV hint rd mismatch: trace expects x%0d, hint head has x%0d",
-            tid, expected_rd, async_wb_q[tid][i].rd))
+        if (async_wb_q[tid][i].wb_tag == item.wb_tag) begin
+          hint = async_wb_q[tid][i];
+          async_wb_q[tid].delete(i);
+          return 1'b1;
         end
-        hint = async_wb_q[tid][i];
-        async_wb_q[tid].delete(i);
-        return 1'b1;
+        if (!found_wrong_tag) begin
+          found_wrong_tag = 1;
+          wrong_tag_val = async_wb_q[tid][i].wb_tag;
+        end
+      end
+      if (found_wrong_tag) begin
+        mismatch_count[tid]++;
+        `uvm_error("cosim", $sformatf(
+          "T%0d DIV wb_tag mismatch: item.wb_tag=%0d hint.wb_tag=%0d rd=x%0d — strict matching, no fallback",
+          tid, item.wb_tag, wrong_tag_val, expected_rd))
       end
       return 1'b0;
     end
 
     if (is_load_instruction(item)) begin
+      found_wrong_tag = 0;
       foreach (async_wb_q[tid][i]) begin
         if (async_wb_q[tid][i].source != EH2_WB_SRC_NB_LOAD) continue;
-        if (async_wb_q[tid][i].rd != expected_rd) continue;
-        hint = async_wb_q[tid][i];
-        async_wb_q[tid].delete(i);
-        return 1'b1;
+        if (async_wb_q[tid][i].wb_tag > 0 && async_wb_q[tid][i].wb_tag == item.wb_tag) begin
+          hint = async_wb_q[tid][i];
+          async_wb_q[tid].delete(i);
+          return 1'b1;
+        end
+        if (!found_wrong_tag) begin
+          found_wrong_tag = 1;
+          wrong_tag_val = async_wb_q[tid][i].wb_tag;
+        end
+      end
+      if (found_wrong_tag) begin
+        mismatch_count[tid]++;
+        `uvm_error("cosim", $sformatf(
+          "T%0d NB-LOAD wb_tag mismatch: item.wb_tag=%0d hint.wb_tag=%0d rd=x%0d — strict matching, no fallback",
+          tid, item.wb_tag, wrong_tag_val, expected_rd))
       end
     end
 
@@ -542,20 +581,28 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
       riscv_cosim_set_mcycle(cosim_handle, longint'(item.mcycle), tid);
       `uvm_info("cosim", $sformatf("T%0d IRQ-ONLY: PC=%08x", tid, item.pc), UVM_HIGH)
 
-      // RISK-9: Compare trap CSRs after Spike processes interrupt
+      // Compare trap CSRs on interrupt path — upgraded to mismatch (issue 51)
       begin
         int unsigned spike_mcause, spike_mepc;
         spike_mcause = riscv_cosim_get_mcause(cosim_handle, tid);
         spike_mepc   = riscv_cosim_get_mepc(cosim_handle, tid);
 
-        if (item.dut_mcause != 0 && spike_mcause != item.dut_mcause) begin
-          `uvm_info("cosim", $sformatf(
-            "T%0d IRQ mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x",
-            tid, item.dut_mcause, spike_mcause, item.pc), UVM_MEDIUM)
+        if (spike_mcause != item.dut_mcause) begin
+          mismatch_count[tid]++;
+          `uvm_error("cosim", $sformatf(
+            "T%0d IRQ mcause MISMATCH: DUT=%08x Spike=%08x PC=%08x",
+            tid, item.dut_mcause, spike_mcause, item.pc))
+        end
+
+        if (spike_mepc != item.dut_mepc) begin
+          mismatch_count[tid]++;
+          `uvm_error("cosim", $sformatf(
+            "T%0d IRQ mepc MISMATCH: DUT=%08x Spike=%08x PC=%08x",
+            tid, item.dut_mepc, spike_mepc, item.pc))
         end
 
         `uvm_info("cosim", $sformatf(
-          "T%0d IRQ-COMPARE: PC=%08x DUT_mcause=%08x Spike_mcause=%08x DUT_mepc=%08x Spike_mepc=%08x",
+          "T%0d IRQ-CSR-COMPARE: PC=%08x DUT_mcause=%08x Spike_mcause=%08x DUT_mepc=%08x Spike_mepc=%08x",
           tid, item.pc, item.dut_mcause, spike_mcause, item.dut_mepc, spike_mepc), UVM_HIGH)
       end
 
@@ -625,17 +672,31 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
         tid, item.pc, item.insn, write_reg, write_reg_data), UVM_HIGH)
     end
 
-    // RISK-9: Compare trap CSRs on exception path
+    // Compare trap CSRs on exception path — upgraded to mismatch (issue 51)
+    // mtval is now connected from RTL trace packet (issue 64); Spike-side
+    // get_mtval() API not yet added — deferred to future cosim API extension
     if (sync_trap && result != 0) begin
       int unsigned spike_mcause, spike_mepc;
       spike_mcause = riscv_cosim_get_mcause(cosim_handle, tid);
       spike_mepc   = riscv_cosim_get_mepc(cosim_handle, tid);
 
-      if (item.dut_mcause != 0 && spike_mcause != item.dut_mcause) begin
-        `uvm_info("cosim", $sformatf(
-          "T%0d EXC mcause DIVERGENCE: DUT=%08x Spike=%08x PC=%08x ecause=%0d",
-          tid, item.dut_mcause, spike_mcause, item.pc, item.ecause), UVM_MEDIUM)
+      if (spike_mcause != item.dut_mcause) begin
+        mismatch_count[tid]++;
+        `uvm_error("cosim", $sformatf(
+          "T%0d EXC mcause MISMATCH: DUT=%08x Spike=%08x PC=%08x ecause=%0d",
+          tid, item.dut_mcause, spike_mcause, item.pc, item.ecause))
       end
+
+      if (spike_mepc != item.dut_mepc) begin
+        mismatch_count[tid]++;
+        `uvm_error("cosim", $sformatf(
+          "T%0d EXC mepc MISMATCH: DUT=%08x Spike=%08x PC=%08x ecause=%0d",
+          tid, item.dut_mepc, spike_mepc, item.pc, item.ecause))
+      end
+
+      `uvm_info("cosim", $sformatf(
+        "T%0d EXC-CSR-COMPARE: PC=%08x DUT_mcause=%08x Spike_mcause=%08x DUT_mepc=%08x Spike_mepc=%08x",
+        tid, item.pc, item.dut_mcause, spike_mcause, item.dut_mepc, spike_mepc), UVM_HIGH)
     end
 
     step_count++;
@@ -665,16 +726,30 @@ class eh2_cosim_scoreboard extends uvm_scoreboard;
       end
       initialized = 1;
 
-      // Register all DUT-accessible memory regions with Spike.
-      riscv_cosim_add_memory(cosim_handle, 32'h8000_0000, 32'h0400_0000); // 64 MiB boot/main
-      riscv_cosim_add_memory(cosim_handle, 32'hA058_0000, 32'h0400_0000); // 64 MiB debug SB
-      riscv_cosim_add_memory(cosim_handle, 32'hB000_0000, 32'h0400_0000); // 64 MiB ext data 1
-      riscv_cosim_add_memory(cosim_handle, 32'hC058_0000, 32'h0400_0000); // 64 MiB ext data
-      riscv_cosim_add_memory(cosim_handle, 32'hEE00_0000, 32'h0001_0000); // 64 KiB ICCM
-      riscv_cosim_add_memory(cosim_handle, 32'hF004_0000, 32'h0001_0000); // 64 KiB DCCM
-      riscv_cosim_add_memory(cosim_handle, 32'hF00C_0000, 32'h0000_8000); // 32 KiB PIC
-      riscv_cosim_add_memory(cosim_handle, 32'hD058_0000, 32'h0000_1000); // 4 KiB mailbox
-      riscv_cosim_add_memory(cosim_handle, 32'h1111_0000, 32'h0000_1000); // 4 KiB NMI vec
+      // Register all DUT-accessible memory regions with Spike (from cfg — issue 65).
+      if (cfg != null) begin
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_boot.base,      cfg.mem_boot.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_debug_sb.base,  cfg.mem_debug_sb.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_ext_data1.base, cfg.mem_ext_data1.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_ext_data2.base, cfg.mem_ext_data2.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_iccm.base,      cfg.mem_iccm.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_dccm.base,      cfg.mem_dccm.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_pic.base,       cfg.mem_pic.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_mailbox.base,   cfg.mem_mailbox.size);
+        riscv_cosim_add_memory(cosim_handle, cfg.mem_nmi_vec.base,   cfg.mem_nmi_vec.size);
+      end else begin
+        riscv_cosim_add_memory(cosim_handle, 32'h8000_0000, 32'h0400_0000);
+        riscv_cosim_add_memory(cosim_handle, 32'hA058_0000, 32'h0400_0000);
+        riscv_cosim_add_memory(cosim_handle, 32'hB000_0000, 32'h0400_0000);
+        riscv_cosim_add_memory(cosim_handle, 32'hC058_0000, 32'h0400_0000);
+        riscv_cosim_add_memory(cosim_handle, 32'hF00C_0000, 32'h0000_8000);
+        riscv_cosim_add_memory(cosim_handle, 32'hD058_0000, 32'h0000_1000);
+        riscv_cosim_add_memory(cosim_handle, 32'h1111_0000, 32'h0000_1000);
+        // ICCM/DCCM memory regions are now injected from env via eh2_cosim_cfg
+        // (issue 65). Without cfg, these EH2-specific memory regions are not
+        // registered — the env guarantees cfg != null when cosim is enabled.
+        `uvm_warning("cosim", "No cosim_cfg provided — ICCM/DCCM memory regions not registered with Spike")
+      end
 
       // Pre-register EH2 vendor-specific CSRs in Spike (see header for list).
       `include "eh2_cosim_csr_preregister.svh"

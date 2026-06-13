@@ -1,6 +1,7 @@
 name: Verilog Lint
-# 对 DV SystemVerilog 源码执行 Verible lint 检查。
-# Non-blocking：仅生成报告，不阻断 CI。
+# Blocking CI gate: DV SystemVerilog lint must pass with zero errors.
+# Any ERROR/FATAL in lint output fails the job.
+# Waivers for non-critical style issues are in lint/verible/waivers.vbl.
 
 on: [push, pull_request]
 
@@ -23,8 +24,14 @@ jobs:
               --rules=-line-length,-no-trailing-spaces \
               --waiver_files=dv/uvm/core_eh2/fcov/cov_waivers/*.yaml \
               2>&1 | tee lint_report.txt
-          # Non-blocking: report but don't fail
-          echo "Lint completed. See lint_report.txt for details."
+      - name: Check lint errors
+        run: |
+          if grep -qE "^(E|FATAL)" lint_report.txt; then
+            echo "BLOCKING: lint errors found in lint_report.txt"
+            grep -E "^(E|FATAL)" lint_report.txt
+            exit 1
+          fi
+          echo "Lint passed with zero errors."
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4

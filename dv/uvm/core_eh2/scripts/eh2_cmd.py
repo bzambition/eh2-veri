@@ -13,7 +13,7 @@ import setup_imports
 def get_config(config_name: str) -> Dict:
     """Return one EH2 configuration from eh2_configs.yaml."""
     cfg_path = setup_imports._EH2_ROOT / "eh2_configs.yaml"
-    with open(cfg_path, "r") as f:
+    with open(cfg_path, "r", encoding="utf-8") as f:
         configs = yaml.safe_load(f) or {}
     if config_name not in configs:
         raise KeyError(

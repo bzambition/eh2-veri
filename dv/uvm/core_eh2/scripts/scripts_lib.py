@@ -110,7 +110,7 @@ def subst_dict(string: str, var_dict: Dict[str, Union[str, Path]]) -> str:
 
 def read_yaml(yaml_file: Path) -> dict:
     """Read YAML file to a dictionary."""
-    with open(yaml_file, 'r') as f:
+    with open(yaml_file, 'r', encoding='utf-8') as f:
         try:
             yaml_data = yaml.safe_load(f)
         except yaml.YAMLError as exc:

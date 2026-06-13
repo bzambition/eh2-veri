@@ -1,0 +1,33 @@
+# sby_dbg.sby — Symbiyosys config: Debug module formal verification
+#
+# Usage: sby -f scripts/sby_dbg.sby
+# Requires: Yosys, Symbiyosys, SMT solver (Z3/Boolector)
+
+[tasks]
+prove
+
+[options]
+prove: mode prove
+prove: depth 20
+
+[engines]
+prove: smtbmc z3
+
+[script]
+read -define FORMAL
+read -sv ../../rtl/snapshots/default/eh2_pdef.vh
+read -sv ../../rtl/design/include/eh2_def.sv
+read -sv ../../rtl/design/lib/beh_lib.sv
+read -sv ../../rtl/design/lib/eh2_lib.sv
+read -sv ../../rtl/design/dbg/eh2_dbg.sv
+read -sv ../properties/eh2_dbg_assert.sv
+prep -top eh2_dbg
+
+[files]
+../../rtl/snapshots/default/eh2_pdef.vh
+../../rtl/snapshots/default/common_defines.vh
+../../rtl/design/include/eh2_def.sv
+../../rtl/design/lib/beh_lib.sv
+../../rtl/design/lib/eh2_lib.sv
+../../rtl/design/dbg/eh2_dbg.sv
+../properties/eh2_dbg_assert.sv

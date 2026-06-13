@@ -1,0 +1,22 @@
+# EH2 Verible Waivers
+#
+# Waiver format: waiver --rule=<rule> --line=<line> [--regex] "reason"
+# Each waiver MUST have a reason explaining why the violation is acceptable.
+#
+# Waiver categories:
+#   STYLE    — line-length, no-trailing-spaces, parameter-name-style
+#   VENDOR   — third-party RTL not EH2's to fix (rvjtag_tap, AXI4_TO_AHB, etc.)
+#   QUALITY  — implicit truncation, unused signal — MUST NOT waive, fix the RTL
+#   DV-ONLY  — UVM/SV testbench constructs not applicable to synthesizable RTL
+
+# ─── Style waivers ───
+# STYLE: line-length violations in wide parameter lists — cosmetic only
+# waive --rule=line-length --line=1 "EH2 parameter lists exceed 100 chars per convention"
+
+# ─── Vendor RTL waivers (Cores-VeeR-EH2 origin files) ───
+# VENDOR: rvjtag_tap — imported JTAG TAP controller, not EH2-authored
+# waive --rule=module-filename --file="*/rvjtag_tap.sv" "VENDOR: rvjtag_tap from third-party"
+
+# ─── DV waivers ───
+# DV-ONLY: UVM macro expansions may trigger specific rules; document each
+# waive --rule=no-trailing-spaces --line=42 "DV-ONLY: UVM `uvm_info macro generated whitespace"

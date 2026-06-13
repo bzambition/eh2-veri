@@ -103,6 +103,9 @@ class eh2_trace_monitor extends uvm_monitor;
         // Sample interrupt/debug/NMI/mcycle state for Spike notification
         populate_cosim_state(txn);
 
+        // Capture current wb_seq for async-wb correlation (issue 66)
+        if (probe_vif != null) txn.wb_tag = probe_vif.wb_seq;
+
         commit_count++;
         if (txn.exception) exception_count++;
 
@@ -112,8 +115,10 @@ class eh2_trace_monitor extends uvm_monitor;
             txn.dut_mtvec  = probe_vif.mtvec;
             txn.dut_mepc   = probe_vif.mepc;
             txn.dut_mcause = probe_vif.mcause;
+            txn.dut_mtval  = probe_vif.mtval;  // from RTL TLU mtval register (issue 64)
+          end else begin
+            txn.dut_mtval  = txn.tval;  // fallback from RTL trace packet
           end
-          txn.dut_mtval  = 32'h0;  // EH2 has no mtval probe; placeholder
         end
 
         `uvm_info("trace_monitor", $sformatf("Commit: %s wb=%0b rd=x%0d wdata=%08x",
@@ -145,6 +150,9 @@ class eh2_trace_monitor extends uvm_monitor;
         // Sample interrupt/debug/NMI/mcycle state for Spike notification
         populate_cosim_state(txn);
 
+        // Capture current wb_seq for async-wb correlation (issue 66)
+        if (probe_vif != null) txn.wb_tag = probe_vif.wb_seq;
+
         commit_count++;
         if (txn.exception) exception_count++;
 
@@ -154,8 +162,10 @@ class eh2_trace_monitor extends uvm_monitor;
             txn.dut_mtvec  = probe_vif.mtvec;
             txn.dut_mepc   = probe_vif.mepc;
             txn.dut_mcause = probe_vif.mcause;
+            txn.dut_mtval  = probe_vif.mtval;  // from RTL TLU mtval register (issue 64)
+          end else begin
+            txn.dut_mtval  = txn.tval;  // fallback from RTL trace packet
           end
-          txn.dut_mtval  = 32'h0;  // EH2 has no mtval probe; placeholder
         end
 
         `uvm_info("trace_monitor", $sformatf("Commit: %s wb=%0b rd=x%0d wdata=%08x",

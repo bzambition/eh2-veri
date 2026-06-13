@@ -1,81 +1,90 @@
-# Formal Verification 骨架
+# Formal Verification for EH2 RISC-V Core
 
-> **状态：** 骨架已就位，SVA 属性内容待人工填充。
+> **Status:** Multi-module property set deployed (Issue 63). 25 assertions + 4 cover points across 4 property files.
 
-本目录是 EH2 验证平台的 formal verification 基础设施骨架，用于承载
-Symbiyosys (开源) 和 JasperGold (商业) 两条 formal 验证流程。
-
-## 目录结构
+## Directory Structure
 
 ```
 dv/formal/
-├── README.md                       # 本文件
-├── Makefile                        # formal 构建入口
+├── README.md                       # This file
+├── Makefile                        # Build and run entry point
 ├── properties/
-│   └── eh2_pmp_assert.sv           # MPU/PMP 占位 SVA（含 TODO）
-└── scripts/
-    └── sby_pmp.sby                  # Symbiyosys 配置文件
+│   ├── eh2_pmp_assert.sv           # PMP/LSU address check (8 properties)
+│   ├── eh2_dec_assert.sv           # Decoder pipeline/CSR (6 properties)
+│   ├── eh2_dbg_assert.sv           # Debug module FSM (6 properties)
+│   └── eh2_pic_assert.sv           # PIC interrupt controller (6 properties)
+├── scripts/
+│   ├── sby_pmp.sby                 # Symbiyosys config: eh2_lsu_addrcheck
+│   ├── sby_dec.sby                 # Symbiyosys config: eh2_dec
+│   ├── sby_dbg.sby                 # Symbiyosys config: eh2_dbg
+│   └── sby_pic.sby                 # Symbiyosys config: eh2_pic_ctrl
+└── spec/
+    ├── sail_bridge.sv              # EH2-to-Sail-RISCV formal bridge
+    ├── sail_trace_check.py         # Trace replay divergence checker
+    └── sail_setup.sh               # Sail-riscv bootstrap script
 ```
 
-## TODO 清单
+## Property Coverage
 
-以下工作需要由**验证工程师**后续完成：
+| Module | Domain | Assertions | Cover Points | SAIL-REF |
+|--------|--------|-----------|-------------|----------|
+| `eh2_lsu_addrcheck` | PMP/MPU mem map, sideeffects | 7 | 1 | 0 |
+| `eh2_dec` | Pipeline, CSR, MRET, hazards | 5 | 1 | 1 |
+| `eh2_dbg` | Halt/resume FSM, abstract cmd | 5 | 1 | 0 |
+| `eh2_pic_ctrl` | Priority tree, claim/complete | 5 | 1 | 0 |
+| `sail_bridge` | Arch invariants (x0, priv, cause) | 3 | 0 | 3 |
+| **Total** | | **25** | **4** | **4** |
 
-- [ ] 在 `properties/eh2_pmp_assert.sv` 中填写真正的 SVA 属性
-- [ ] 补充更多 property 文件（中断、CSR、流水线等）
-- [ ] 根据实际 RTL 信号路径调整 bind 语句
-- [ ] 添加 cover property 以确认可达性
-- [ ] 完善 `scripts/sby_pmp.sby` 中的引擎参数调优
-- [ ] 接入 CI（可选，当 SVA 稳定后）
+## Usage
 
-## 使用方式
-
-### Symbiyosys（开源流程）
+### Run all formal proofs
 
 ```bash
-# 在项目根目录执行
+cd dv/formal
 make formal
+```
 
-# 清理产物
+### Run individual module
+
+```bash
+make formal_pmp   # PMP/LSU only
+make formal_dec   # Decoder only
+make formal_dbg   # Debug module only
+make formal_pic   # PIC only
+```
+
+### Check property counts
+
+```bash
+make formal_count
+```
+
+### Clean artifacts
+
+```bash
 make formal_clean
 ```
 
-前置条件：
+## Prerequisites
 
-- [Symbiyosys](https://symbiyosys.readthedocs.io/) (`sby` 命令)
-- [Yosys](https://yosyshq.net/yosys/)（综合前端）
-- SMT solver（如 Z3、Boolector）
+- [Symbiyosys](https://symbiyosys.readthedocs.io/) (`sby` command)
+- [Yosys](https://yosyshq.net/yosys/) (synthesis frontend)
+- SMT solver: [Z3](https://github.com/Z3Prover/z3) or [Boolector](https://boolector.github.io/)
 
-### JasperGold（商业流程）
+### Sail-RISCV Integration (optional)
 
-```tcl
-# 在 JasperGold 中加载 property
-clear -all
-analyze -sv -f ../../dv/uvm/core_eh2/eh2_rtl.f
-analyze -sv dv/formal/properties/eh2_pmp_assert.sv
-elaborate -top eh2_lsu_addrcheck
+For SAIL-REF property validation and trace replay:
 
-# 设定 clock 和 reset
-clock clk
-reset rst_l -low
-
-# 运行证明
-prove -all
+```bash
+cd dv/formal/spec && bash sail_setup.sh
 ```
 
-> **注意：** JasperGold 的 TCL 脚本尚未模板化，上述为参考流程，需根据实际
-> 许可证和项目配置调整。
+This clones and builds [sail-riscv](https://github.com/riscv/sail-riscv) as the architectural golden model. If unavailable, SAIL-REF assertions in `sail_bridge.sv` remain valid and proveable.
 
-## 与 sign-off 的关系
+## Related Documents
 
-当前 formal 骨架**未接入** sign-off gate（`make signoff`），不会影响现有
-回归测试流程。待 SVA 属性稳定并通过评审后，再由团队决定是否纳入 sign-off。
-
-## 负责人
-
-| 事项 | 负责人 |
-|------|--------|
-| 骨架搭建 | Agent (issue #42) |
-| SVA 属性编写 | 验证工程师（待分配） |
-| JasperGold 集成 | 验证工程师（待分配） |
-| CI 接入 | DevOps（待分配） |
+- `docs/adr/0012-formal-strategy.md` — Formal verification strategy ADR
+- `rtl/design/lsu/eh2_lsu_addrcheck.sv` — PMP/MPU address checker RTL
+- `rtl/design/dec/eh2_dec.sv` — Decoder top-level RTL
+- `rtl/design/dbg/eh2_dbg.sv` — Debug module RTL
+- `rtl/design/eh2_pic_ctrl.sv` — PIC RTL

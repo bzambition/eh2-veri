@@ -47,3 +47,83 @@ vendor/google_riscv-dv
 
 # Phase snapshots (large tar.gz, kept locally)
 .scratch/snapshots/*.tar.gz
+
+# Synopsys DC artifacts
+*.mr
+*-verilog.pvl
+*-verilog.syn
+*.pvk
+*.svf
+*.svf.bak
+default.svf
+command.log
+.synopsys_dc.setup
+
+# Verdi artifacts
+verdiLog/
+novas.*
+nWaveLog/
+novas_*/
+
+# SpyGlass artifacts
+spyglass_reports/
+sg_work/
+sg_session.log
+
+# QuestaSim artifacts
+work/
+vsim.wlf
+transcript
+modelsim.ini
+
+# Root-only stale tool outputs. Keep these anchored so similarly named files
+# under real build/report directories remain visible to Git when needed.
+/*.mr
+/*-verilog.pvl
+/*-verilog.syn
+/alib-52/
+/formality_svf/
+/formality*_svf/
+/FM_WORK*/
+/default.svf
+/formality.log
+/formality*.log
+/fm_shell_command.log
+/fm_shell_command*.log
+/cm.log
+/command.log
+/top.vcd
+/tr_db.log
+/ucli.key
+/vc_hdrs.h
+/verdiLog/
+/novas.*
+/novas_*/
+/*.fsdb
+/inter.vpd
+/DVEfiles/
+/stack.info.*
+
+# R5 workspace hygiene: Formality lock files and session saves
+/*.lck
+/*.fss
+/syn/*.lck
+/syn/*.fss
+/syn/*.log
+/syn/FM_WORK*
+/syn/default.svf
+/syn/command.log
+
+# R5 workspace hygiene: DC/Formality root intermediates
+/eh2_pkg.pvk
+/*.mr
+/*-verilog.pvl
+/*-verilog.syn
+
+# R5 workspace hygiene: archived/backup build outputs
+build/archive_signoffs_*/
+build/cov.vdb.backup_*
+build/cov.vdb.pre_*
+.scratch/r5_build_archive_*/
+.scratch/
+.claude/

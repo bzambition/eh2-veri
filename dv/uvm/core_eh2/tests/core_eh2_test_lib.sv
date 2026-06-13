@@ -23,6 +23,17 @@ class core_eh2_directed_test extends core_eh2_base_test;
 
   `uvm_component_utils(core_eh2_directed_test)
 
+  // Debug entry cause codes and CSR addresses (RISC-V Debug Spec) are declared
+  // up-front so they are visible to all methods below. NC/ncvlog does not allow
+  // forward references to class-scope localparams the way VCS does.
+  localparam bit [2:0] DBG_CAUSE_EBREAK     = 3'd1;
+  localparam bit [2:0] DBG_CAUSE_TRIGGER    = 3'd2;
+  localparam bit [2:0] DBG_CAUSE_HALTREQ    = 3'd3;
+  localparam bit [2:0] DBG_CAUSE_STEP       = 3'd4;
+  localparam bit [2:0] DBG_CAUSE_RESETHALT  = 3'd5;
+  localparam bit [11:0] CSR_DCSR = 12'h7B0;
+  localparam bit [11:0] CSR_DPC  = 12'h7B1;
+
   function new(string name = "core_eh2_directed_test", uvm_component parent = null);
     super.new(name, parent);
   endfunction
@@ -241,17 +252,6 @@ class core_eh2_directed_test extends core_eh2_base_test;
   // Note: Some implementations use [1:0] for prv, others use [3:0].
   // The ibex implementation uses [1:0]. We follow the same convention.
   // =========================================================================
-
-  // Debug entry cause codes (RISC-V Debug Spec)
-  localparam bit [2:0] DBG_CAUSE_EBREAK   = 3'd1;
-  localparam bit [2:0] DBG_CAUSE_TRIGGER  = 3'd2;
-  localparam bit [2:0] DBG_CAUSE_HALTREQ  = 3'd3;
-  localparam bit [2:0] DBG_CAUSE_STEP     = 3'd4;
-  localparam bit [2:0] DBG_CAUSE_RESETHALT = 3'd5;
-
-  // CSR addresses for debug-mode CSRs
-  localparam bit [11:0] CSR_DCSR = 12'h7B0;
-  localparam bit [11:0] CSR_DPC  = 12'h7B1;
 
   // Check dcsr.ebreak against the privilege mode encoded in dcsr.prv.
   // Verifies that the ebreak bit for the current privilege mode is set.
@@ -1029,12 +1029,13 @@ class core_eh2_pic_test extends core_eh2_base_test;
     phase.raise_objection(this);
     `uvm_info(test_name, "PIC test started", UVM_LOW)
     load_binary_to_mem();
+    start_vseq();
     fork
       run_pic_stimulus();
-      start_vseq();
       wait_for_completion(phase);
     join_any
     disable fork;
+    if (vseq != null) vseq.stop();
     phase.drop_objection(this);
   endtask
 

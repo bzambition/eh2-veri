@@ -1,0 +1,27 @@
+// EH2 Verilator Lint Waiver File
+//
+// Based on lowRISC Ibex's lint/verilator/verilator_waiver.vlt.
+// Each waiver MUST have a comment explaining the reason.
+//
+// Categories:
+//   STYLE    — cosmetic issues (UNUSED on intentional placeholders)
+//   DV-ONLY  — UVM testbench constructs not synthesis-safe
+//   VENDOR   — third-party RTL not EH2's to fix
+
+`verilator_config
+
+// ─── RTL waivers ───
+// Add waivers as needed after initial lint run.
+// Example:
+//   lint_off -rule UNUSED -file "*/eh2_dec_tlu_ctl.sv" -match "Signal not used: *"
+//   STYLE: Signal retained for clarity in NUM_THREADS=1 configuration
+
+// ─── DV waivers ───
+// DV-ONLY: UVM testbench code intentionally uses constructs not synthesis-safe
+// lint_off -rule BLKSEQ -file "*/eh2_*_agent/*" -match "*"
+// Waive reason: UVM agents use blocking assignments in class methods
+
+// ─── Third-party waivers ───
+// VENDOR: Third-party code not EH2's responsibility to fix
+// lint_off -rule UNUSED -file "*/vendor/*" -match "*"
+// Waive reason: VENDOR third-party code

@@ -73,3 +73,6 @@ rtl/design/eh2_mem.sv
 rtl/design/eh2_pic_ctrl.sv
 rtl/design/eh2_veer.sv
 rtl/design/eh2_veer_wrapper.sv
+
+// RVFI (formal verification interface)
+rtl/eh2_veer_wrapper_rvfi.sv

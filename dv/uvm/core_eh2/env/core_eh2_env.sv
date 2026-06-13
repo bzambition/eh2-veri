@@ -104,6 +104,21 @@ class core_eh2_env extends uvm_env;
 
     // Co-simulation agent (only if enabled)
     if (cfg.enable_cosim) begin
+      // Create and inject cosim_cfg from config_db so the scoreboard receives
+      // memory region mappings (issue 65).  Plusargs MEM_ICCM_BASE,
+      // MEM_DCCM_BASE etc. override the defaults set in eh2_cosim_cfg.
+      begin
+        eh2_cosim_cfg cosim_cfg;
+        cosim_cfg = eh2_cosim_cfg::type_id::create("cosim_cfg");
+        // Read plusarg overrides for DCCM/ICCM base addresses
+        void'($value$plusargs("MEM_ICCM_BASE=%h", cosim_cfg.iccm_base));
+        void'($value$plusargs("MEM_ICCM_SIZE=%h", cosim_cfg.iccm_size));
+        void'($value$plusargs("MEM_DCCM_BASE=%h", cosim_cfg.dccm_base));
+        void'($value$plusargs("MEM_DCCM_SIZE=%h", cosim_cfg.dccm_size));
+        // Sync flat fields into struct fields so scoreboard mem_region_t paths work
+        cosim_cfg.sync_mem_regions();
+        uvm_config_db#(eh2_cosim_cfg)::set(this, "cosim_agt.scoreboard", "cosim_cfg", cosim_cfg);
+      end
       cosim_agt = eh2_cosim_agent::type_id::create("cosim_agt", this);
     end
 

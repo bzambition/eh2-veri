@@ -37,7 +37,7 @@ def build_sim_opts() -> str:
 
 def load_test_entry(testlist_path: str, test_name: str) -> dict:
     """Load one EH2 test entry for riscv-dv."""
-    with open(testlist_path, "r") as f:
+    with open(testlist_path, "r", encoding="utf-8") as f:
         entries = yaml.safe_load(f)
 
     for entry in entries:

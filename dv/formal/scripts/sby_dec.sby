@@ -1,0 +1,43 @@
+# sby_dec.sby — Symbiyosys config: Decoder pipeline formal verification
+#
+# Usage: sby -f scripts/sby_dec.sby
+# Requires: Yosys, Symbiyosys, SMT solver (Z3/Boolector)
+
+[tasks]
+prove
+
+[options]
+prove: mode prove
+prove: depth 20
+
+[engines]
+prove: smtbmc z3
+
+[script]
+read -define FORMAL
+read -sv ../../rtl/snapshots/default/eh2_pdef.vh
+read -sv ../../rtl/design/include/eh2_def.sv
+read -sv ../../rtl/design/lib/beh_lib.sv
+read -sv ../../rtl/design/lib/eh2_lib.sv
+read -sv ../../rtl/design/dec/eh2_dec_decode_ctl.sv
+read -sv ../../rtl/design/dec/eh2_dec_gpr_ctl.sv
+read -sv ../../rtl/design/dec/eh2_dec_ib_ctl.sv
+read -sv ../../rtl/design/dec/eh2_dec_tlu_ctl.sv
+read -sv ../../rtl/design/dec/eh2_dec_trigger.sv
+read -sv ../../rtl/design/dec/eh2_dec.sv
+read -sv ../properties/eh2_dec_assert.sv
+prep -top eh2_dec
+
+[files]
+../../rtl/snapshots/default/eh2_pdef.vh
+../../rtl/snapshots/default/common_defines.vh
+../../rtl/design/include/eh2_def.sv
+../../rtl/design/lib/beh_lib.sv
+../../rtl/design/lib/eh2_lib.sv
+../../rtl/design/dec/eh2_dec_decode_ctl.sv
+../../rtl/design/dec/eh2_dec_gpr_ctl.sv
+../../rtl/design/dec/eh2_dec_ib_ctl.sv
+../../rtl/design/dec/eh2_dec_tlu_ctl.sv
+../../rtl/design/dec/eh2_dec_trigger.sv
+../../rtl/design/dec/eh2_dec.sv
+../properties/eh2_dec_assert.sv

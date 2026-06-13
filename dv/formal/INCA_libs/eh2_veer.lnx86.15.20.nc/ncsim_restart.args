@@ -1,0 +1,45 @@
+//
+// File created by:  irun
+// Do not modify this file
+//
+-NOCOPYRIGHT
+-NOWARN
+DLDEFM
+-NOWARN
+BADPRF
+-NOWARN
+INVSUP
+-NOWARN
+SPDUSD
+-NOCOPYRIGHT
+-NCERROR
+CUVDSI
+-NCERROR
+CUVDSO
+-NCERROR
+CUVDSB
+-NCERROR
+CUVDSM
+-NCERROR
+CUVDSN
+-NCERROR
+CUVDSF
+-MESSAGES
++EMGRLOG
+.ifv/irun.log
+-XLSTIME
+1779189112
+-XLKEEP
+-XLMODE
+./INCA_libs/eh2_veer.lnx86.15.20.nc
+-RUNMODE
+-CDSLIB
+./INCA_libs/eh2_veer.lnx86.15.20.nc/cds.lib
+-HDLVAR
+./INCA_libs/eh2_veer.lnx86.15.20.nc/hdl.var
+-XLNAME
+irun
+-XLVERSION
+"TOOL:	irun	15.20-p001"
+-XLNAME
+./INCA_libs/eh2_veer.lnx86.15.20.nc/IC_EDA_116588

@@ -1,0 +1,30 @@
+# EH2 Verible Lint Rules
+#
+# Based on lowRISC Ibex's lint/verible/verible.rules, adapted for EH2.
+# See https://github.com/chipsalliance/verible for rule documentation.
+
+# ─── Style rules ───
+enable: forbid-line-continuations
+enable: forbid-defparam
+enable: forbid-consecutive-null-statements
+
+# ─── Naming ───
+# EH2 module naming convention: eh2_<block>_<unit>
+enable: module-filename
+enable: explicit-function-lifetime
+enable: explicit-task-lifetime
+
+# ─── Synthesis safety ───
+enable: always-comb
+enable: always-comb-blocking
+enable: always-ff-non-blocking
+enable: case-missing-default
+enable: no-trailing-spaces
+enable: no-tabs
+
+# ─── UVM/DV rules ───
+# DV code uses class-based SystemVerilog; relax some RTL rules for DV
+disable: forbid-consecutive-null-statements  # UVM macros produce empty statements
+
+# ─── Waived rules (tracked in waivers.vbl) ───
+# See waivers.vbl for per-file/per-line waivers with reasons

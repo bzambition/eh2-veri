@@ -26,14 +26,22 @@ UVM_SUMMARY_RE = re.compile(
 # Lines starting with the UVM Report Summary severity tag are never real
 # fatals/errors/warnings — those come from `uvm_report_*` and embed a path
 # like "UVM_FATAL <path>(<line>) @ <time>: ...". VCS interleaves its banner
-# over the summary in two known shapes:
+# over the summary in three known shapes:
 #   "UVM_FATAL :            V C S   S i m u l a t i o n   R e p o r t"
 #   "UVM_FATAL            V C S   S i m u l a t i o n   R e p o r t"
-# (the colon and count are both eaten.) Match both — colon optional, banner
-# keyword required — so we can safely skip them.
+#   "UVM_FATAL\n"   (count + banner overwrite the rest of the line; the
+#                    Coverage Metrics dashes land on the next line instead)
+# Match all three — colon, V C S keyword, or end-of-line — so we can safely
+# skip them.
 UVM_SUMMARY_LINE_RE = re.compile(
     r"^\s*(UVM_WARNING|UVM_ERROR|UVM_FATAL)"
-    r"(\s*:|\s+(?=V\s*C\s*S\b))")
+    r"(\s*:|\s+(?=V\s*C\s*S\b)|\s*$)")
+
+# NC's UVM Report Catcher emits informational lines like
+# "Number of demoted UVM_FATAL reports  :    0" and "Number of caught UVM_ERROR
+# reports   :    0" inside its summary block. They are not real failures.
+UVM_CATCHER_SUMMARY_RE = re.compile(
+    r"^\s*Number of (demoted|caught) UVM_(WARNING|ERROR|FATAL) reports")
 
 
 TOOL_WARNING_RE = re.compile(r"\bWarning-\[")
@@ -102,6 +110,10 @@ def check_uvm_log(log_path: str, fail_on_warnings: bool = False,
             if UVM_SUMMARY_LINE_RE.match(line):
                 continue
 
+            # Skip NC UVM Report Catcher informational lines.
+            if UVM_CATCHER_SUMMARY_RE.match(line):
+                continue
+
             if line.startswith("UVM_FATAL") or " UVM_FATAL " in line:
                 has_fatal = True
                 num_errors += 1
@@ -133,7 +145,11 @@ def check_uvm_log(log_path: str, fail_on_warnings: bool = False,
         return (False, "TEST_FAIL", num_errors, num_warnings)
     if num_errors > 0:
         return (False, "UVM_ERROR", num_errors, num_warnings)
-    if sim_returncode not in (None, 0):
+    # NC/irun frequently exits with code 1 even when the simulation
+    # printed "TEST PASSED" and the report summary shows zero errors —
+    # the exit code reflects parser/elab warnings, not run-time status.
+    # Trust the explicit pass marker over the return code in that case.
+    if sim_returncode not in (None, 0) and not has_test_pass:
         return (False, "SIM_ERROR", num_errors, num_warnings)
     if fail_on_warnings and num_warnings > 0:
         return (False, "TOOL_WARNING", num_errors, num_warnings)

@@ -53,7 +53,10 @@ interface eh2_pmp_fcov_if
   input logic debug_mode,
 
   // Data request
-  input logic data_req
+  input logic data_req,
+
+  // Load (1) vs Store (0) cycle indicator — from LSU request phase (issue 68)
+  input logic is_load
 );
 
   `include "uvm_macros.svh"
@@ -151,15 +154,16 @@ interface eh2_pmp_fcov_if
     end
   end
 
-  // Access type inference from available signals
-  // iside_err => exec access; dside_err with data_req => load/store
-  // (Without explicit load/store indicator, we track exec vs data)
+  // Access type inference — is_load signal added (issue 68)
+  // iside_err => exec access; dside_err + data_req + is_load => load; + !is_load => store
   pmp_access_type_e inferred_access_type;
   always_comb begin
     if (pmp_iside_err)
       inferred_access_type = ACCESS_EXEC;
-    else if (data_req)
-      inferred_access_type = ACCESS_LOAD;  // TODO: need probe signal to distinguish load/store
+    else if (data_req & is_load)
+      inferred_access_type = ACCESS_LOAD;
+    else if (data_req & ~is_load)
+      inferred_access_type = ACCESS_STORE;
     else
       inferred_access_type = ACCESS_NONE;
   end
@@ -565,8 +569,7 @@ interface eh2_pmp_fcov_if
       cp_access_type: coverpoint inferred_access_type {
         bins exec  = {ACCESS_EXEC};
         bins load  = {ACCESS_LOAD};
-        // TODO: need probe signal to distinguish store from load
-        // bins store = {ACCESS_STORE};
+        bins store = {ACCESS_STORE};  // enabled by is_load signal (issue 68)
         ignore_bins none = {ACCESS_NONE};
       }
 
